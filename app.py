@@ -8,7 +8,6 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from data_engine import (
     DB_DIR,
-    START_DATE_FIXED,
     update_stock_database,
     analyze_main_force,
     delete_stock_database,
@@ -38,9 +37,30 @@ st.markdown("""
     word-break: break-word;
 }
 .card-sub {
-    font-size: 0.8rem;
-    color: #34d399;
-    margin-top: 4px;
+    font-size: 0.82rem;
+    color: #94a3b8;
+    margin-top: 6px;
+    line-height: 1.45;
+}
+.rank-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+    background-color: #161922;
+    border-radius: 8px;
+    overflow: hidden;
+}
+.rank-table th {
+    background-color: #222736;
+    color: #cbd5e1;
+    text-align: left;
+    padding: 8px 12px;
+    font-weight: 600;
+}
+.rank-table td {
+    padding: 7px 12px;
+    border-top: 1px solid #262c3d;
+    color: #e2e8f0;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -52,6 +72,20 @@ def get_saved_stocks() -> list:
     return sorted({
         f.split("_")[0] for f in os.listdir(DB_DIR) if f.endswith("_price.csv")
     })
+
+
+def get_stock_display_label(stock_id: str) -> str:
+    """回傳 '6488 環球晶'（若舊資料尚未抓到中文名稱則顯示 '6488'）"""
+    meta_path = os.path.join(DB_DIR, f"{stock_id}_meta.json")
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                name = json.load(f).get("stock_name", "").strip()
+                if name:
+                    return f"{stock_id} {name}"
+        except Exception:
+            pass
+    return stock_id
 
 
 def parse_manual_date(text: str, fallback: str) -> str:
@@ -104,15 +138,16 @@ with st.sidebar:
     if saved_list:
         for sid in saved_list:
             col_s, col_del = st.columns([4, 1])
+            display_name = get_stock_display_label(sid)
             with col_s:
                 is_current = (sid == st.session_state.get("active_stock"))
-                btn_label = f"▶ {sid}" if is_current else sid
+                btn_label = f"▶ {display_name}" if is_current else display_name
                 if st.button(btn_label, key=f"sel_{sid}", use_container_width=True):
                     st.session_state["active_stock"] = sid
                     st.rerun()
             with col_del:
-                if st.button("✕", key=f"del_{sid}", help=f"刪除 {sid} 的所有歷史資料", use_container_width=True):
-                    with st.spinner(f"正在刪除 {sid}..."):
+                if st.button("✕", key=f"del_{sid}", help=f"刪除 {display_name} 的所有歷史資料", use_container_width=True):
+                    with st.spinner(f"正在刪除 {display_name}..."):
                         delete_stock_database(sid)
                         remaining = get_saved_stocks()
                         st.session_state["active_stock"] = remaining[0] if remaining else ""
@@ -142,6 +177,8 @@ if target_stock:
     df_chips_full = pd.read_csv(chips_path)
     with open(meta_path, "r", encoding="utf-8") as f:
         meta_saved = json.load(f)
+
+    stock_title = get_stock_display_label(target_stock)
 
     # 計算統計區間起訖日
     min_date = df_price_full["date"].min()
@@ -175,77 +212,122 @@ if target_stock:
         st.warning(f"在指定區間 `{start_filter} ~ {end_filter}` 內查無交易資料，請確認輸入的日期。")
         st.stop()
 
+    # 計算區間股價漲跌幅（優先對照區間前一日收盤價，若無則用區間首日收盤價）
+    latest_close = float(df_price.iloc[-1]["close"])
+    prior_rows = df_price_full[df_price_full["date"] < start_filter]
+    base_close = float(prior_rows.iloc[-1]["close"]) if not prior_rows.empty else float(df_price.iloc[0]["close"])
+    pct_change = ((latest_close - base_close) / base_close * 100) if base_close else 0.0
+    if pct_change > 0:
+        pct_html = f'<span style="color:#ef5350; font-weight:700;">▲ {pct_change:+.2f}%</span>'
+    elif pct_change < 0:
+        pct_html = f'<span style="color:#26a69a; font-weight:700;">▼ {pct_change:+.2f}%</span>'
+    else:
+        pct_html = '<span style="color:#cbd5e1; font-weight:700;">0.00%</span>'
+
     analysis = analyze_main_force(df_price, df_chips, period_label, df_chips_full=df_chips_full)
     broker_count = len([c for c in df_chips_full.columns if c not in ("date", "投信")])
 
     if broker_count == 0 and meta_saved.get("debug_notes"):
         st.warning(f"⚠️ 分點明細未取得（{'；'.join(meta_saved['debug_notes'])}）")
 
-    # --- 區塊一：主力診斷結論（錨定今年最大主力，動態計算選定區間吃貨／出貨） ---
-    st.markdown(f"#### 🎯 {target_stock} 主力診斷結論（{period_label}｜已追蹤 {broker_count} 個券商分點）")
+    # --- 區塊一：主力診斷結論 ---
+    st.markdown(f"#### 🎯 {stock_title} 主力診斷結論（{period_label}｜已追蹤 {broker_count} 個券商分點）")
     if meta_saved.get("github_sync"):
         st.caption(f"雲端資料庫狀態：{meta_saved['github_sync']}")
 
-    c1, c2, c3 = st.columns([2.5, 2, 1.1])
+    c1, c2, c3 = st.columns([2.4, 2, 1.2])
     with c1:
         sub_html = "".join([
-            f'<div style="font-size:0.83rem; color:#cbd5e1; margin-top:6px; line-height:1.45;">{line}</div>'
+            f'<div class="card-sub">{line}</div>'
             for line in analysis.get("main_force_sub_lines", [])
         ])
         st.markdown(f"""
         <div class="summary-card">
             <div class="card-label">今年以來最大主力</div>
-            <div class="card-value">{analysis.get("main_force", "N/A")}</div>
+            <div class="card-value">{analysis.get("main_force_html", "N/A")}</div>
             {sub_html}
         </div>
         """, unsafe_allow_html=True)
     with c2:
         status_sub_html = (
-            f'<div style="font-size:0.83rem; color:#94a3b8; margin-top:6px;">{analysis["status_sub"]}</div>'
+            f'<div class="card-sub">{analysis["status_sub"]}</div>'
             if analysis.get("status_sub") else ""
         )
         st.markdown(f"""
         <div class="summary-card">
             <div class="card-label">區間內三大主力狀態</div>
-            <div class="card-value">{analysis.get("status", "N/A")}</div>
+            <div class="card-value">{analysis.get("status_html", "N/A")}</div>
             {status_sub_html}
         </div>
         """, unsafe_allow_html=True)
     with c3:
         st.markdown(f"""
         <div class="summary-card">
-            <div class="card-label">區間最新收盤價</div>
-            <div class="card-value">{df_price.iloc[-1]['close']:.2f} 元</div>
-            <div class="card-sub">資料更新：{meta_saved.get('last_updated', '')[:10]}</div>
+            <div class="card-label">最新收盤價與區間漲跌</div>
+            <div class="card-value">{latest_close:.2f} 元</div>
+            <div class="card-sub">區間漲跌：{pct_html}<br>更新：{meta_saved.get('last_updated', '')[:10]}</div>
         </div>
         """, unsafe_allow_html=True)
 
     st.write("")
     st.markdown("\n".join(analysis.get("details", [])))
 
+    # --- 買超前 5 大 & 賣超前 5 大左右並排對照表 ---
     top_buyers = analysis.get("top_buyers", {})
     top_sellers = analysis.get("top_sellers", {})
-    if top_buyers:
-        st.caption("🟢 今年以來累計買超前 5 大（外資依個別券商統計）：" +
-                   " ｜ ".join([f"**{k}**: {v:+,} 張" for k, v in top_buyers.items()]))
-    if top_sellers:
-        st.caption("🔴 今年以來累計賣超前 5 大（外資依個別券商統計）：" +
-                   " ｜ ".join([f"**{k}**: {v:+,} 張" for k, v in top_sellers.items()]))
+    if top_buyers or top_sellers:
+        st.write("")
+        col_b, col_s = st.columns(2)
+        with col_b:
+            rows_b = "".join([
+                f'<tr><td>#{i+1}</td><td><b>{k}</b></td><td style="text-align:right; color:#ef5350; font-weight:700;">{v:+,} 張</td></tr>'
+                for i, (k, v) in enumerate(top_buyers.items())
+            ]) or '<tr><td colspan="3">無淨買超分點</td></tr>'
+            st.markdown(f"""
+            <table class="rank-table">
+                <thead><tr><th colspan="3">🟢 今年以來累計買超前 5 大（外資依個別券商統計）</th></tr></thead>
+                <tbody>{rows_b}</tbody>
+            </table>
+            """, unsafe_allow_html=True)
+        with col_s:
+            rows_s = "".join([
+                f'<tr><td>#{i+1}</td><td><b>{k}</b></td><td style="text-align:right; color:#26a69a; font-weight:700;">{v:+,} 張</td></tr>'
+                for i, (k, v) in enumerate(top_sellers.items())
+            ]) or '<tr><td colspan="3">無淨賣超分點</td></tr>'
+            st.markdown(f"""
+            <table class="rank-table">
+                <thead><tr><th colspan="3">🔴 今年以來累計賣超前 5 大（外資依個別券商統計）</th></tr></thead>
+                <tbody>{rows_s}</tbody>
+            </table>
+            """, unsafe_allow_html=True)
 
     st.divider()
 
     # --- 區塊二：完整年度股價 vs. 主力買賣超長條圖與總和統計張數折線（特定區間反灰） ---
     chart_title_suffix = f"（灰底反白區間：{period_label}）" if range_type != "全部" else f"（{period_label}）"
-    st.markdown(f"#### 📉 股價 vs. 主力買賣超長條圖與統計張數{chart_title_suffix}")
+    st.markdown(f"#### 📉 {stock_title} 股價 vs. 主力買賣超長條圖與統計張數{chart_title_suffix}")
 
     available_brokers = [c for c in df_chips_full.columns if c != "date"]
-    default_selected = [list(top_buyers.keys())[0]] if top_buyers else available_brokers[:1]
+    top3_names = analysis.get("top3_names", [])
+    default_selected = [top3_names[0]] if top3_names else available_brokers[:1]
 
-    selected_brokers = st.multiselect(
-        "選擇要觀察的券商分點或「投信」（可單選或多選，多選時自動加總顯示總和折線）：",
-        options=available_brokers,
-        default=default_selected
-    )
+    ms_key = f"ms_{target_stock}"
+    if ms_key not in st.session_state:
+        st.session_state[ms_key] = default_selected
+
+    col_sel, col_btn = st.columns([4.2, 1.1])
+    with col_btn:
+        st.write("")
+        st.write("")
+        if st.button("⚡ 帶入前三大主力", use_container_width=True, disabled=not bool(top3_names)):
+            st.session_state[ms_key] = [n for n in top3_names if n in available_brokers]
+            st.rerun()
+    with col_sel:
+        selected_brokers = st.multiselect(
+            "選擇要觀察的券商分點或「投信」（可單選或多選，多選時自動加總顯示總和折線）：",
+            options=available_brokers,
+            key=ms_key
+        )
 
     if not selected_brokers:
         st.warning("請至少選擇一個券商分點或「投信」來繪製圖表。")
