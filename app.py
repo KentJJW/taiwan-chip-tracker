@@ -154,7 +154,7 @@ if target_stock:
         st.warning(f"在指定區間 `{start_filter} ~ {end_filter}` 內查無交易資料，請確認輸入的日期。")
         st.stop()
 
-    analysis = analyze_main_force(df_price, df_chips, period_label, df_chips_ref=df_chips_ref)
+    analysis = analyze_main_force(df_price, df_chips, period_label, df_chips_full=df_chips_full)
     broker_count = len([c for c in df_chips.columns if c not in ("date", "投信")])
 
     if broker_count == 0 and meta_saved.get("debug_notes"):
@@ -169,7 +169,7 @@ if target_stock:
     with c1:
         st.markdown(f"""
         <div class="summary-card">
-            <div class="card-label">區間最大主力</div>
+            <div class="card-label">今年以來最大主力</div>
             <div class="card-value">{analysis.get("main_force", "N/A")}</div>
         </div>
         """, unsafe_allow_html=True)
