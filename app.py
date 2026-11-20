@@ -6,7 +6,13 @@ import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from data_engine import DB_DIR, START_DATE_FIXED, update_stock_database, analyze_main_force
+from data_engine import (
+    DB_DIR,
+    START_DATE_FIXED,
+    update_stock_database,
+    analyze_main_force,
+    delete_stock_database,
+)
 
 st.set_page_config(page_title="台股主力分點吃貨／出貨追蹤系統", layout="wide")
 
@@ -68,7 +74,11 @@ def parse_manual_date(text: str, fallback: str) -> str:
 
 st.markdown("### 📈 台股主力分點吃貨／出貨追蹤系統")
 
-# --- 側邊欄：查詢與統計區間設定 ---
+saved_list = get_saved_stocks()
+if "active_stock" not in st.session_state:
+    st.session_state["active_stock"] = saved_list[0] if saved_list else "6488"
+
+# --- 側邊欄：查詢、統計區間與 database 管理 ---
 with st.sidebar:
     st.header("🔍 查詢與建檔")
     input_stock = st.text_input("輸入台股代號（例如：6488、2330、3231）", value="6488").strip()
@@ -89,17 +99,31 @@ with st.sidebar:
         custom_start_str = st.text_input("起始日期", value="20260102")
         custom_end_str = st.text_input("結束日期", value=datetime.today().strftime("%Y%m%d"))
 
-    saved_list = get_saved_stocks()
     st.divider()
     st.subheader(f"📁 database 已存個股 ({len(saved_list)} 檔)")
     if saved_list:
-        default_idx = saved_list.index(input_stock) if input_stock in saved_list else 0
-        selected_from_db = st.selectbox("快速切換已存個股", saved_list, index=default_idx)
+        for sid in saved_list:
+            col_s, col_del = st.columns([4, 1])
+            with col_s:
+                is_current = (sid == st.session_state.get("active_stock"))
+                btn_label = f"▶ {sid}" if is_current else sid
+                if st.button(btn_label, key=f"sel_{sid}", use_container_width=True):
+                    st.session_state["active_stock"] = sid
+                    st.rerun()
+            with col_del:
+                if st.button("✕", key=f"del_{sid}", help=f"刪除 {sid} 的所有歷史資料", use_container_width=True):
+                    with st.spinner(f"正在刪除 {sid}..."):
+                        delete_stock_database(sid)
+                        remaining = get_saved_stocks()
+                        st.session_state["active_stock"] = remaining[0] if remaining else ""
+                    st.rerun()
     else:
-        selected_from_db = None
         st.caption("目前 database 尚無資料，請輸入代號查詢。")
 
-target_stock = input_stock if btn_query or (input_stock and input_stock not in saved_list) else (selected_from_db or input_stock)
+if btn_query and input_stock:
+    st.session_state["active_stock"] = input_stock
+
+target_stock = st.session_state.get("active_stock", "").strip()
 
 if target_stock:
     price_path = os.path.join(DB_DIR, f"{target_stock}_price.csv")
@@ -110,7 +134,7 @@ if target_stock:
         with st.spinner(f"正在從 2026/01/02 抓取 {target_stock} 股價、投信與前 25 大券商分點明細..."):
             ok = update_stock_database(target_stock)
             if not ok:
-                st.error(f"找不到股票代號 `{target_stock}`，請確認是否為正確的上市櫃代號。")
+                st.error(f"找不到股票代號 `{target_stock}`，請確認是否為正確的上市櫃代號（目前不支援興櫃）。")
                 st.stop()
             st.rerun()
 
@@ -157,7 +181,7 @@ if target_stock:
     if broker_count == 0 and meta_saved.get("debug_notes"):
         st.warning(f"⚠️ 分點明細未取得（{'；'.join(meta_saved['debug_notes'])}）")
 
-    # --- 區塊一：直接回答「主力是誰」與「吃貨還是出貨」 ---
+    # --- 區塊一：主力診斷結論（錨定今年最大主力，動態計算選定區間吃貨／出貨） ---
     st.markdown(f"#### 🎯 {target_stock} 主力診斷結論（{period_label}｜已追蹤 {broker_count} 個券商分點）")
     if meta_saved.get("github_sync"):
         st.caption(f"雲端資料庫狀態：{meta_saved['github_sync']}")
@@ -216,7 +240,6 @@ if target_stock:
     if not selected_brokers:
         st.warning("請至少選擇一個券商分點或「投信」來繪製圖表。")
     else:
-        # 圖表永遠顯示完整年度 (df_price_full + df_chips_full)
         df_plot = df_price_full[["date", "close"]].merge(df_chips_full, on="date", how="left").fillna(0)
 
         fig = make_subplots(
@@ -257,7 +280,7 @@ if target_stock:
             row=2, col=1, secondary_y=False
         )
 
-        # 下層副軸：統一顯示總和統計張數折線（累計買賣超）
+        # 下層副軸：統一顯示總和統計張數折線（累計買賣超，整數張數顯示）
         cum_total = daily_net.cumsum()
         line_label = f"{selected_brokers[0]} 統計張數" if len(selected_brokers) == 1 else f"所選({len(selected_brokers)}個)總和統計張數"
         fig.add_trace(
@@ -271,7 +294,7 @@ if target_stock:
             row=2, col=1, secondary_y=True
         )
 
-        # 若有選定特定統計區間（非「全部」），在上下兩張圖加上反灰背景區塊標示
+        # 選定特定統計區間時，在圖表中加上反灰區塊標示
         if range_type != "全部":
             fig.add_vrect(
                 x0=start_filter,
@@ -299,3 +322,5 @@ if target_stock:
         fig.update_yaxes(title_text="統計張數 (累計張)", row=2, col=1, secondary_y=True, showgrid=False, tickformat=",.0f")
 
         st.plotly_chart(fig, use_container_width=True)
+else:
+    st.info("👈 請在左側輸入上市或上櫃股票代號（例如 `6488`、`2330`）開始查詢。")
