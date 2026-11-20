@@ -6,11 +6,7 @@
   ],
   "status_html": "🟢 區間內三大主力吃貨中（<span style=\"color:#ef5350; font-weight:700;\">+2,097 張</span>）",
   "status_sub": "三大主力名單：投信, 台灣摩根士丹利, 新加坡商瑞銀",
-  "divergence_alert": {
-    "type": "bull",
-    "title": "🔴 底部承接背離警報（近 5 日價跌主力買）",
-    "desc": "近 5 日股價下跌 <b>-34.50%</b>，但今年前三大主力逆勢合計淨買超 <b style='color:#ef5350;'>+17 張</b>，留意低檔換手與止跌轉折訊號。"
-  },
+  "divergence_alert": null,
   "top3_names": [
     "投信",
     "台灣摩根士丹利",
@@ -62,12 +58,12 @@
     "永豐金-匯立": -446,
     "香港上海匯豐": -415,
     "美林": -342,
-    "國泰證券": -260
+    "國泰證券": -251
   },
   "stock_id": "5274",
   "stock_name": "信驊",
-  "broker_count": 25,
-  "last_updated": "2026-11-20 22:06:49",
+  "broker_count": 35,
+  "last_updated": "2026-11-20 22:08",
   "debug_notes": [],
-  "github_sync": "✅ 已同步至 GitHub database/"
+  "github_sync": "✅ GitHub Actions 自動增量同步（近 3 日）"
 }
