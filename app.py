@@ -186,19 +186,29 @@ if target_stock:
     if meta_saved.get("github_sync"):
         st.caption(f"雲端資料庫狀態：{meta_saved['github_sync']}")
 
-    c1, c2, c3 = st.columns([2.2, 2, 1.2])
+    c1, c2, c3 = st.columns([2.5, 2, 1.1])
     with c1:
+        sub_html = "".join([
+            f'<div style="font-size:0.83rem; color:#cbd5e1; margin-top:6px; line-height:1.45;">{line}</div>'
+            for line in analysis.get("main_force_sub_lines", [])
+        ])
         st.markdown(f"""
         <div class="summary-card">
             <div class="card-label">今年以來最大主力</div>
             <div class="card-value">{analysis.get("main_force", "N/A")}</div>
+            {sub_html}
         </div>
         """, unsafe_allow_html=True)
     with c2:
+        status_sub_html = (
+            f'<div style="font-size:0.83rem; color:#94a3b8; margin-top:6px;">{analysis["status_sub"]}</div>'
+            if analysis.get("status_sub") else ""
+        )
         st.markdown(f"""
         <div class="summary-card">
-            <div class="card-label">目前籌碼狀態</div>
+            <div class="card-label">區間內三大主力狀態</div>
             <div class="card-value">{analysis.get("status", "N/A")}</div>
+            {status_sub_html}
         </div>
         """, unsafe_allow_html=True)
     with c3:
