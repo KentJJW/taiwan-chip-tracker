@@ -114,6 +114,21 @@ def _fmt_md_num(val: int, suffix: str = " 張") -> str:
     return f"**0{suffix}**"
 
 
+def _calc_streak(series: pd.Series) -> int:
+    """計算最新連續買超天數(正數)或連續賣超天數(負數)，當日為0則回傳0"""
+    vals = series.tolist()
+    if not vals or vals[-1] == 0:
+        return 0
+    sign = 1 if vals[-1] > 0 else -1
+    streak = 0
+    for v in reversed(vals):
+        if (sign > 0 and v > 0) or (sign < 0 and v < 0):
+            streak += 1
+        else:
+            break
+    return streak * sign
+
+
 def calculate_main_force_cost(df_price: pd.DataFrame, daily_net: pd.Series) -> tuple[pd.Series, float, float]:
     """
     移動加權平均成本法（目前庫存均價）：
@@ -182,7 +197,6 @@ def fetch_stock_name(session: requests.Session = None, stock_id: str = "", mirro
 
     sess = session or _create_session()
 
-    # 來源 1：證交所／櫃買中心官方 MIS API（最穩定且精準）
     try:
         mis_url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_{stock_id}.tw|otc_{stock_id}.two&json=1&delay=0"
         resp = sess.get(mis_url, timeout=6, verify=False)
@@ -195,7 +209,6 @@ def fetch_stock_name(session: requests.Session = None, stock_id: str = "", mirro
     except Exception:
         pass
 
-    # 來源 2：MoneyDJ 網頁內建的 GenLink2stk('AS6488','環球晶') 或括號格式
     try:
         html, _, _ = _fetch_dj_html(sess, f"/z/zc/zco/zco.djhtm?a={stock_id}", mirror)
         if html:
@@ -333,7 +346,8 @@ def analyze_main_force(
     """
     1. 錨定 2026/01/02 至今全年度累計買超排行決定「波段大主力」。
     2. 計算最大主力的累計買超、累計賣超、淨總數與目前庫存均價（成本）。
-    3. 計算選定區間內「三大主力狀態」、「前三大各自進出明細」與「區間買賣超第一名」。
+    3. 計算前三大主力各分點的連買／連賣天數、區間控盤率 (%)。
+    4. 偵測近 5 日價量籌碼背離訊號（底部承接背離／高檔出貨背離）。
     """
     broker_cols = [c for c in df_chips.columns if c != "date"]
     if not broker_cols or df_price.empty:
@@ -342,10 +356,13 @@ def analyze_main_force(
             "main_force_sub_lines": [],
             "status_html": "⚪ 無法判定",
             "status_sub": "",
+            "divergence_alert": None,
             "top3_names": [],
+            "top3_header_md": "",
+            "top3_rows": [],
+            "remark_md": "",
             "top_buyers": {},
             "top_sellers": {},
-            "details": []
         }
 
     full_df = df_chips_full if df_chips_full is not None else df_chips
@@ -358,7 +375,9 @@ def analyze_main_force(
 
     # 2. 選定檢視區間與近期交易日統計
     period_sum = df_chips[broker_cols].sum()
+    period_vol = float(df_price["volume"].sum()) if "volume" in df_price.columns else 0.0
     recent_1 = full_df.tail(1)[broker_cols].sum()
+    recent_5 = full_df.tail(5)[broker_cols].sum()
     recent_10 = full_df.tail(10)[broker_cols].sum()
     recent_20 = full_df.tail(20)[broker_cols].sum()
 
@@ -368,10 +387,13 @@ def analyze_main_force(
             "main_force_sub_lines": ["今年以來主要分點與投信累計皆為淨賣超"],
             "status_html": "🔴 全年空方主導／出貨格局",
             "status_sub": "",
+            "divergence_alert": None,
             "top3_names": [],
+            "top3_header_md": "",
+            "top3_rows": [],
+            "remark_md": "",
             "top_buyers": {},
             "top_sellers": {k: int(v) for k, v in top_sellers_ytd.items()},
-            "details": ["- 今年以來主要分點與投信累計皆為淨賣超"]
         }
 
     # 鎖定年度最大主力
@@ -397,9 +419,10 @@ def analyze_main_force(
             f"目前庫存均價：<b style='color:#ffb74d;'>{primary_cost:,.2f} 元</b>（帳面損益 {_fmt_html_pct(pnl_pct)}）"
         )
 
-    # 卡片二：區間內三大主力狀態（單日區間放寬門檻為 50 張，多日區間維持 300 張）
+    # 卡片二：區間內三大主力狀態
     top3_names = list(top_buyers_ytd.head(3).index)
     top3_period_net = int(period_sum[top3_names].sum())
+    top3_5d = int(recent_5[top3_names].sum())
     top3_20d = int(recent_20[top3_names].sum())
     threshold = 50 if len(df_price) <= 1 else 300
 
@@ -414,36 +437,60 @@ def analyze_main_force(
 
     status_sub = f"三大主力名單：{', '.join(top3_names)}"
 
-    # 下方條列明細
-    details = [
-        f"- 今年前三大主力（**{', '.join(top3_names)}**）本區間合計：{_fmt_md_num(top3_period_net)}（近 20 日合計：{_fmt_md_num(top3_20d)}）"
-    ]
+    # 近 5 日價量籌碼背離警報（固定看近 5 個交易日）
+    divergence_alert = None
+    if len(full_price) >= 5:
+        close_now = float(full_price.iloc[-1]["close"])
+        close_5d_ago = float(full_price.iloc[-6]["close"]) if len(full_price) >= 6 else float(full_price.iloc[0]["close"])
+        price_5d_pct = ((close_now - close_5d_ago) / close_5d_ago * 100) if close_5d_ago > 0 else 0.0
 
+        if price_5d_pct <= -3.0 and top3_5d > 0:
+            divergence_alert = {
+                "type": "bull",
+                "title": "🔴 底部承接背離警報（近 5 日價跌主力買）",
+                "desc": f"近 5 日股價下跌 <b>{price_5d_pct:.2f}%</b>，但今年前三大主力逆勢合計淨買超 <b style='color:#ef5350;'>{top3_5d:+,} 張</b>，留意低檔換手與止跌轉折訊號。"
+            }
+        elif price_5d_pct >= 3.0 and top3_5d < 0:
+            divergence_alert = {
+                "type": "bear",
+                "title": "🟢 高檔出貨背離警報（近 5 日價漲主力賣）",
+                "desc": f"近 5 日股價上漲 <b>{price_5d_pct:+.2f}%</b>，但今年前三大主力合計逢高賣超 <b style='color:#26a69a;'>{top3_5d:+,} 張</b>，慎防假突破或拉高倒貨。"
+            }
+
+    # 前三大主力各分點明細（含連買／連賣天數、區間控盤率 %）
+    top3_rows = []
     for name in top3_names:
-        b_ytd = int(total_ytd.get(name, 0))
         b_period = int(period_sum.get(name, 0))
-        b_1d = int(recent_1.get(name, 0))
-        b_10d = int(recent_10.get(name, 0))
-        b_20d = int(recent_20.get(name, 0))
-        details.append(
-            f"  - **{name}**（今年累計 {_fmt_md_num(b_ytd)}）：本區間 {_fmt_md_num(b_period)} ｜ 今日 {_fmt_md_num(b_1d)} ｜ 近 10 日 {_fmt_md_num(b_10d)} ｜ 近 20 日 {_fmt_md_num(b_20d)}"
-        )
+        ctrl_pct = (b_period / period_vol * 100) if period_vol > 0 else 0.0
+        streak = _calc_streak(full_df[name])
+        top3_rows.append({
+            "name": name,
+            "ytd": int(total_ytd.get(name, 0)),
+            "period": b_period,
+            "d1": int(recent_1.get(name, 0)),
+            "d10": int(recent_10.get(name, 0)),
+            "d20": int(recent_20.get(name, 0)),
+            "streak": streak,
+            "ctrl_pct": round(ctrl_pct, 1),
+        })
 
     # 備註：同時顯示本檢視區間「買超第一名」與「賣超第一名」
     sorted_period = period_sum.sort_values(ascending=False)
     top_buy_text = f"**{sorted_period.index[0]}**（{_fmt_md_num(int(sorted_period.iloc[0]))}）" if sorted_period.iloc[0] > 0 else "無"
     top_sell_text = f"**{sorted_period.index[-1]}**（{_fmt_md_num(int(sorted_period.iloc[-1]))}）" if sorted_period.iloc[-1] < 0 else "無"
-    details.append(f"- 💡 備註：本檢視區間買超第一名為 {top_buy_text} ｜ 賣超第一名為 {top_sell_text}")
 
     return {
         "main_force_html": main_force_html,
         "main_force_sub_lines": main_force_sub_lines,
         "status_html": status_html,
         "status_sub": status_sub,
+        "divergence_alert": divergence_alert,
         "top3_names": top3_names,
+        "top3_header_md": f"- 今年前三大主力（**{', '.join(top3_names)}**）本區間合計：{_fmt_md_num(top3_period_net)}（近 20 日合計：{_fmt_md_num(top3_20d)}）",
+        "top3_rows": top3_rows,
+        "remark_md": f"- 💡 備註：本檢視區間買超第一名為 {top_buy_text} ｜ 賣超第一名為 {top_sell_text}",
         "top_buyers": {k: int(v) for k, v in top_buyers_ytd.items()},
         "top_sellers": {k: int(v) for k, v in top_sellers_ytd.items()},
-        "details": details
     }
 
 
