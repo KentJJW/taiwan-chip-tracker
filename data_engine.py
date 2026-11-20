@@ -14,7 +14,6 @@ from bs4 import BeautifulSoup
 DB_DIR = "database"
 os.makedirs(DB_DIR, exist_ok=True)
 
-# 多個券商 MoneyDJ 公開分點鏡像站（自動輪詢備援，避免單一站台阻擋雲端 IP）
 DJ_MIRRORS = [
     "https://fubon-ebrokerdj.fbs.com.tw",
     "https://djinfo.cathaysec.com.tw",
@@ -53,7 +52,6 @@ def _create_session() -> requests.Session:
 
 
 def _fetch_dj_html(session: requests.Session, path_with_query: str, preferred_mirror: str = None):
-    """輪詢券商鏡像站抓取 HTML，回傳 (html_text, 成功的mirror網址, 錯誤紀錄)"""
     mirrors = [preferred_mirror] + [m for m in DJ_MIRRORS if m != preferred_mirror] if preferred_mirror else DJ_MIRRORS
     errors = []
     for base_url in mirrors:
@@ -70,7 +68,6 @@ def _fetch_dj_html(session: requests.Session, path_with_query: str, preferred_mi
 
 
 def _roc_to_ad(roc_str: str) -> str:
-    """將民國年字串 (例如 115/11/20) 轉為西元 YYYY-MM-DD"""
     parts = roc_str.strip().split("/")
     if len(parts) != 3:
         return ""
@@ -79,7 +76,6 @@ def _roc_to_ad(roc_str: str) -> str:
 
 
 def _format_dj_date(ad_date: str) -> str:
-    """將 YYYY-MM-DD 轉為券商網址格式 YYYY-M-D"""
     dt = datetime.strptime(ad_date, "%Y-%m-%d")
     return f"{dt.year}-{dt.month}-{dt.day}"
 
@@ -103,7 +99,7 @@ def fetch_price_history(stock_id: str, start_date: str, end_date: str) -> pd.Dat
 
 
 def fetch_investment_trust_history(session: requests.Session, stock_id: str, start_date: str, end_date: str, mirror: str = None):
-    """直接從三大法人日報表抓取「投信」每日淨買賣超(張)"""
+    """抓取「投信」每日淨買賣超(張)"""
     s_fmt = _format_dj_date(start_date)
     e_fmt = _format_dj_date(end_date)
     html, ok_mirror, err = _fetch_dj_html(session, f"/z/zc/zcl/zcl.djhtm?a={stock_id}&c={s_fmt}&d={e_fmt}", mirror)
@@ -114,11 +110,11 @@ def fetch_investment_trust_history(session: requests.Session, stock_id: str, sta
     records = []
     for tr in soup.find_all("tr"):
         tds = [td.get_text(strip=True).replace(",", "") for td in tr.find_all("td")]
-        if len(tds) >= 4 and re.match(r"^\d{2,3}/\d{2}/\d{2}$", tds[0]):
+        if len(tds) >= 4 and re.match(r"^\d{2,3}/\d{1,2}/\d{1,2}$", tds[0]):
             ad_date = _roc_to_ad(tds[0])
-            if ad_date >= start_date:
+            if start_date <= ad_date <= end_date:
                 try:
-                    trust_lots = float(tds[2])  # 第3欄為投信買賣超(張)
+                    trust_lots = float(tds[2])
                     records.append({"date": ad_date, "投信": trust_lots})
                 except ValueError:
                     continue
@@ -130,72 +126,90 @@ def fetch_investment_trust_history(session: requests.Session, stock_id: str, sta
 
 
 def fetch_top_brokers(session: requests.Session, stock_id: str, start_date: str, end_date: str, mirror: str = None):
-    """抓取區間買超與賣超關鍵券商分點 (外資依個別券商名稱獨立統計)"""
+    """抓取區間買超前15大 & 賣超前15大券商分點 (外資依個別券商名稱獨立統計)"""
     s_fmt = _format_dj_date(start_date)
     e_fmt = _format_dj_date(end_date)
-    html, ok_mirror, err = _fetch_dj_html(session, f"/z/zc/zco/zco.djhtm?a={stock_id}&e={s_fmt}&f={e_fmt}", mirror)
+    html, ok_mirror, err = _fetch_dj_html(session, f"/z/zc/zco/zco.djhtm?a={stock_id}&c=E&e={s_fmt}&f={e_fmt}", mirror)
     if not html:
         return [], mirror, err
 
     soup = BeautifulSoup(html, "html.parser")
     brokers = {}
     for a_tag in soup.find_all("a", href=True):
-        href = a_tag["href"]
-        if "zco0" in href and "b=" in href:
-            match = re.search(r"[?&]b=([^&]+)", href)
+        href = a_tag["href"].strip()
+        if "zco0" in href.lower():
+            # 支援大小寫參數 (?A=...&B=... 或 ?a=...&b=...)
+            match = re.search(r"[?&](?:b|bhid)=([^&]+)", href, re.IGNORECASE)
             name = a_tag.get_text(strip=True)
             if match and name:
                 bhid = match.group(1)
                 if bhid not in brokers:
-                    brokers[bhid] = name
+                    # 標準化連結路徑，確保帶有自訂區間參數
+                    norm_href = href if href.startswith("/") else f"/z/zc/zco/{href.lstrip('./')}"
+                    brokers[bhid] = {"bhid": bhid, "name": name, "href": norm_href}
 
-    broker_list = [{"bhid": k, "name": v} for k, v in list(brokers.items())[:20]]
-    return broker_list, ok_mirror, ("" if broker_list else "分點連結解析為空")
+    broker_list = list(brokers.values())[:25]
+    return broker_list, ok_mirror, ("" if broker_list else "分點清單解析為空")
 
 
-def fetch_broker_daily_history(session: requests.Session, stock_id: str, bhid: str, broker_name: str, start_date: str, end_date: str, mirror: str) -> pd.DataFrame:
+def fetch_broker_daily_history(session: requests.Session, stock_id: str, broker_info: dict, start_date: str, end_date: str, mirror: str) -> pd.DataFrame:
     """抓取單一券商分點在指定區間的每日買賣超明細(張)"""
+    bhid = broker_info["bhid"]
+    broker_name = broker_info["name"]
     s_fmt = _format_dj_date(start_date)
     e_fmt = _format_dj_date(end_date)
-    path = f"/z/zc/zco/zco0/zco0.djhtm?a={stock_id}&b={bhid}&c=E&e={s_fmt}&f={e_fmt}"
-    html, _, _ = _fetch_dj_html(session, path, mirror)
-    if not html:
-        return pd.DataFrame(columns=["date", broker_name])
 
-    soup = BeautifulSoup(html, "html.parser")
-    records = []
-    for tr in soup.find_all("tr"):
-        tds = [td.get_text(strip=True).replace(",", "") for td in tr.find_all("td")]
-        if len(tds) >= 4 and re.match(r"^\d{2,3}/\d{2}/\d{2}$", tds[0]):
-            ad_date = _roc_to_ad(tds[0])
-            if ad_date >= start_date:
-                try:
-                    net_lots = float(tds[3])  # 第4欄為買賣超(張)
-                    records.append({"date": ad_date, broker_name: net_lots})
-                except ValueError:
-                    continue
+    # 優先使用明確帶入區間參數的標準路徑，若無資料則用頁面原始 href 備援
+    candidate_paths = [
+        f"/z/zc/zco/zco0/zco0.djhtm?a={stock_id}&b={bhid}&c=E&e={s_fmt}&f={e_fmt}",
+        broker_info.get("href", "")
+    ]
 
-    if not records:
-        return pd.DataFrame(columns=["date", broker_name])
-    return pd.DataFrame(records).groupby("date", as_index=False)[broker_name].sum()
+    for path in candidate_paths:
+        if not path:
+            continue
+        html, _, _ = _fetch_dj_html(session, path, mirror)
+        if not html:
+            continue
+
+        soup = BeautifulSoup(html, "html.parser")
+        records = []
+        for tr in soup.find_all("tr"):
+            tds = [td.get_text(strip=True).replace(",", "").replace("+", "") for td in tr.find_all("td")]
+            if len(tds) >= 4 and re.match(r"^\d{2,3}/\d{1,2}/\d{1,2}$", tds[0]):
+                ad_date = _roc_to_ad(tds[0])
+                if start_date <= ad_date <= end_date:
+                    try:
+                        net_lots = float(tds[3])  # 第4欄為每日買賣超(張)
+                        records.append({"date": ad_date, broker_name: net_lots})
+                    except ValueError:
+                        continue
+
+        if records:
+            return pd.DataFrame(records).groupby("date", as_index=False)[broker_name].sum()
+
+    return pd.DataFrame(columns=["date", broker_name])
 
 
 def analyze_main_force(df_price: pd.DataFrame, df_chips: pd.DataFrame, period_label: str) -> dict:
     """直接判定：1. 主力是誰  2. 目前在吃貨還是出貨"""
     broker_cols = [c for c in df_chips.columns if c != "date"]
     if not broker_cols or df_price.empty:
-        return {"main_force": "無分點資料", "status": "⚪ 無法判定", "top_buyers": {}, "details": []}
+        return {"main_force": "無分點資料", "status": "⚪ 無法判定", "top_buyers": {}, "top_sellers": {}, "details": []}
 
     total_period = df_chips[broker_cols].sum().sort_values(ascending=False)
     recent_20 = df_chips.tail(20)[broker_cols].sum()
     recent_5 = df_chips.tail(5)[broker_cols].sum()
 
     top_buyers = total_period[total_period > 0].head(5)
+    top_sellers = total_period[total_period < 0].tail(5).sort_values(ascending=True)
+
     if top_buyers.empty:
         return {
             "main_force": f"無波段買超主力（{period_label}偏空）",
             "status": "🔴 空方主導／出貨格局",
             "top_buyers": {},
+            "top_sellers": {k: int(v) for k, v in top_sellers.items()},
             "details": [f"{period_label}主要分點與投信累計皆為淨賣超"]
         }
 
@@ -218,15 +232,16 @@ def analyze_main_force(df_price: pd.DataFrame, df_chips: pd.DataFrame, period_la
         status = "🔵 主力吃貨鎖碼／觀望中"
 
     details = [
-        f"{period_label}最大主力：**{primary_player}**（累計淨買超 **{primary_net:+,}** 張）",
+        f"{period_label}最大買超主力：**{primary_player}**（累計淨買超 **{primary_net:+,}** 張）",
         f"最大主力近期動向：近 20 日 **{primary_20d:+,}** 張 ｜ 近 5 日 **{primary_5d:+,}** 張",
-        f"前三大主力（{', '.join(top3_names)}）近 20 日合計：**{top3_20d:+,}** 張"
+        f"前三大買超主力（{', '.join(top3_names)}）近 20 日合計：**{top3_20d:+,}** 張"
     ]
 
     return {
         "main_force": f"{primary_player}（{primary_net:+,} 張）",
         "status": status,
         "top_buyers": {k: int(v) for k, v in top_buyers.items()},
+        "top_sellers": {k: int(v) for k, v in top_sellers.items()},
         "details": details
     }
 
@@ -245,7 +260,6 @@ def _get_github_config():
 
 
 def _sync_file_to_github(local_path: str, repo_path: str) -> tuple[bool, str]:
-    """將檔案同步寫入 GitHub Repo，並回傳 (是否成功, 訊息)"""
     token, repo = _get_github_config()
     if not token or not repo:
         return False, "未讀取到 GITHUB_TOKEN 或 REPO_NAME（請確認 Streamlit Secrets）"
@@ -307,14 +321,14 @@ def update_stock_database(stock_id: str, mode: str = "YTD") -> bool:
         if trust_err:
             debug_notes.append(f"投信抓取異常: {trust_err}")
 
-    # 2. 抓前 20 大券商分點（外資依個別券商名稱獨立統計）
+    # 2. 抓前 25 大券商分點（外資依個別券商名稱獨立統計）
     brokers, active_mirror, broker_err = fetch_top_brokers(session, stock_id, start_date, end_date, active_mirror)
     if broker_err:
         debug_notes.append(f"分點清單異常: {broker_err}")
 
     fetched_count = 0
     for b in brokers:
-        df_b = fetch_broker_daily_history(session, stock_id, b["bhid"], b["name"], start_date, end_date, active_mirror)
+        df_b = fetch_broker_daily_history(session, stock_id, b, start_date, end_date, active_mirror)
         if not df_b.empty and b["name"] not in df_chips.columns:
             df_chips = df_chips.merge(df_b, on="date", how="left")
             fetched_count += 1
@@ -334,7 +348,7 @@ def update_stock_database(stock_id: str, mode: str = "YTD") -> bool:
     if ok1:
         ok2, sync_msg = _sync_file_to_github(os.path.join(DB_DIR, chips_file), f"database/{chips_file}")
 
-    # 4. 產出主力與吃貨/出貨分析摘要（含 GitHub 同步狀態）
+    # 4. 產出主力與吃貨/出貨分析摘要
     meta = analyze_main_force(df_price, df_chips, period_label)
     meta["stock_id"] = stock_id
     meta["period_label"] = period_label
