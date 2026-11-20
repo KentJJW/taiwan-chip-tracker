@@ -64,11 +64,11 @@ st.markdown("""
 }
 .mf-list {
     margin: 2px 0 8px 22px;
-    overflow-x: auto;
+    overflow: visible;
 }
 .mf-row {
     display: grid;
-    grid-template-columns: 145px 158px 138px 124px 140px 140px 92px 128px;
+    grid-template-columns: 145px 155px 135px 120px 135px 135px 90px 145px;
     align-items: center;
     padding: 4px 0;
     font-size: 0.92rem;
@@ -92,10 +92,59 @@ st.markdown("""
     color: #94a3b8;
     font-size: 0.84rem;
     margin-right: 6px;
+    display: inline-flex;
+    align-items: center;
+}
+.tip-wrap {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    cursor: help;
+    margin-left: 5px;
+    color: #94a3b8;
+    font-size: 0.85rem;
+    font-weight: 400;
+}
+.tip-wrap:hover {
+    color: #f8fafc;
+}
+.tip-box {
+    visibility: hidden;
+    opacity: 0;
+    position: absolute;
+    z-index: 9999;
+    width: 290px;
+    background-color: #0f172a;
+    color: #e2e8f0;
+    border: 1px solid #475569;
+    border-radius: 6px;
+    padding: 8px 11px;
+    font-size: 0.8rem;
+    font-weight: 400;
+    line-height: 1.5;
+    white-space: normal;
+    text-align: left;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6);
+    transition: opacity 0.15s ease;
+    pointer-events: none;
+}
+.tip-wrap:hover .tip-box {
+    visibility: visible;
+    opacity: 1;
+}
+.tip-right .tip-box {
+    left: 140%;
+    top: 50%;
+    transform: translateY(-50%);
+}
+.tip-left .tip-box {
+    right: 140%;
+    top: 50%;
+    transform: translateY(-50%);
 }
 .cost-banner {
     background-color: #1a2230;
-    border-left: 4px solid #ff9800;
+    border-left: 4px solid #ff9100;
     border-radius: 6px;
     padding: 9px 14px;
     margin: 6px 0 10px 0;
@@ -374,22 +423,37 @@ if target_stock:
         </div>
         """, unsafe_allow_html=True)
 
-    # --- 近 5 日價量籌碼背離警報（觸發才顯示） ---
+    # --- 近 5 日價量籌碼背離警報（含 ⓘ 指標說明） ---
     div_alert = analysis.get("divergence_alert")
     if div_alert:
         css_cls = "div-alert-bull" if div_alert["type"] == "bull" else "div-alert-bear"
+        div_tip_text = (
+            "觸發條件：近 5 個交易日股價下跌達 3% 以上，但今年前三大波段主力合計仍為淨買超。"
+            "代表主力趁急跌逢低承接，常為低檔換手或止跌轉折的前兆。"
+            if div_alert["type"] == "bull" else
+            "觸發條件：近 5 個交易日股價上漲達 3% 以上，但今年前三大波段主力合計卻為淨賣超。"
+            "代表主力趁反彈逢高出貨，需慎防假突破或拉高倒貨風險。"
+        )
         st.markdown(
-            f'<div class="{css_cls}"><b>{div_alert["title"]}</b><br>{div_alert["desc"]}</div>',
+            f'<div class="{css_cls}">'
+            f'  <b>{div_alert["title"]}</b>'
+            f'  <span class="tip-wrap tip-right">ⓘ<span class="tip-box">{div_tip_text}</span></span>'
+            f'  <br>{div_alert["desc"]}'
+            f'</div>',
             unsafe_allow_html=True,
         )
 
-    # --- 前三大主力明細（方案 A：CSS 隱形網格對齊，含連買賣與控盤率） ---
+    # --- 前三大主力明細（CSS 隱形網格對齊，含連買賣與控盤率 ⓘ 說明） ---
     st.write("")
     if analysis.get("top3_header_md"):
         st.markdown(analysis["top3_header_md"])
 
     top3_rows = analysis.get("top3_rows", [])
     if top3_rows:
+        ctrl_tip_text = (
+            "計算公式：該分點本區間淨買賣超張數 ÷ 本區間總成交量。"
+            "正值代表買盤主導、負值代表賣壓主導；絕對值超過 10% 通常代表該主力對這段走勢具備高度控盤影響力。"
+        )
         rows_html = []
         for r in top3_rows:
             rows_html.append(
@@ -401,7 +465,10 @@ if target_stock:
                 f'  <div class="mf-cell"><span class="mf-lbl">近 10 日</span>{_span_num(r["d10"])}</div>'
                 f'  <div class="mf-cell"><span class="mf-lbl">近 20 日</span>{_span_num(r["d20"])}</div>'
                 f'  <div class="mf-cell" style="justify-content:center;">{_span_streak(r["streak"])}</div>'
-                f'  <div class="mf-cell"><span class="mf-lbl">控盤率</span>{_span_ctrl(r["ctrl_pct"])}</div>'
+                f'  <div class="mf-cell">'
+                f'    <span class="mf-lbl">控盤率<span class="tip-wrap tip-left">ⓘ<span class="tip-box">{ctrl_tip_text}</span></span></span>'
+                f'    {_span_ctrl(r["ctrl_pct"])}'
+                f'  </div>'
                 f'</div>'
             )
         st.markdown(f'<div class="mf-list">{"".join(rows_html)}</div>', unsafe_allow_html=True)
@@ -452,13 +519,17 @@ if target_stock:
     if ms_key not in st.session_state:
         st.session_state[ms_key] = default_selected
 
-    col_sel, col_btn = st.columns([4.2, 1.1])
+    col_sel, col_btn, col_ma = st.columns([3.8, 1.1, 1.0])
     with col_btn:
         st.write("")
         st.write("")
         if st.button("⚡ 帶入前三大主力", use_container_width=True, disabled=not bool(top3_names)):
             st.session_state[ms_key] = [n for n in top3_names if n in available_brokers]
             st.rerun()
+    with col_ma:
+        st.write("")
+        st.write("")
+        show_ma = st.checkbox("顯示 10/20MA", value=True)
     with col_sel:
         selected_brokers = st.multiselect(
             "選擇要觀察的券商分點或「投信」（可單選或多選，多選時自動加總計算合力成本與總和折線）：",
@@ -507,53 +578,54 @@ if target_stock:
             specs=[[{"secondary_y": False}], [{"secondary_y": True}]]
         )
 
-        # 上層：股價折線
-        fig.add_trace(
-            go.Scatter(
-                x=df_plot["date"],
-                y=df_plot["close"],
-                name="收盤價 (元)",
-                line=dict(color="#FFD700", width=2.2),
-                hovertemplate="%{y:,.2f} 元<extra>收盤價</extra>"
-            ),
-            row=1, col=1, secondary_y=False
-        )
+        # 上層：10MA 與 20MA 均線（先畫在底層，避免蓋住純白股價線）
+        if show_ma:
+            fig.add_trace(
+                go.Scatter(
+                    x=df_plot["date"],
+                    y=df_plot["ma10"],
+                    name="10MA",
+                    line=dict(color="rgba(56, 189, 248, 0.78)", width=1.3),
+                    hovertemplate="%{y:,.2f} 元<extra>10MA</extra>"
+                ),
+                row=1, col=1, secondary_y=False
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=df_plot["date"],
+                    y=df_plot["ma20"],
+                    name="20MA",
+                    line=dict(color="rgba(192, 132, 252, 0.78)", width=1.3),
+                    hovertemplate="%{y:,.2f} 元<extra>20MA</extra>"
+                ),
+                row=1, col=1, secondary_y=False
+            )
 
-        # 上層：10MA 與 20MA 均線
-        fig.add_trace(
-            go.Scatter(
-                x=df_plot["date"],
-                y=df_plot["ma10"],
-                name="10MA",
-                line=dict(color="#42A5F5", width=1.4),
-                hovertemplate="%{y:,.2f} 元<extra>10MA</extra>"
-            ),
-            row=1, col=1, secondary_y=False
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=df_plot["date"],
-                y=df_plot["ma20"],
-                name="20MA",
-                line=dict(color="#EC407A", width=1.4),
-                hovertemplate="%{y:,.2f} 元<extra>20MA</extra>"
-            ),
-            row=1, col=1, secondary_y=False
-        )
-
-        # 上層：主力成本線（目前庫存均價，橘色虛線）
+        # 上層：主力成本線（亮橘虛線，高對比）
         if cost_series.notna().any():
             fig.add_trace(
                 go.Scatter(
                     x=df_plot["date"],
                     y=cost_series,
                     name=f"{target_label} 成本線",
-                    line=dict(color="#FF9800", width=2.0, dash="dash"),
+                    line=dict(color="#FF9100", width=2.2, dash="dash"),
                     connectgaps=False,
                     hovertemplate="%{y:,.2f} 元<extra>主力成本均價</extra>"
                 ),
                 row=1, col=1, secondary_y=False
             )
+
+        # 上層：收盤價折線（純白粗線置頂，視覺最清晰）
+        fig.add_trace(
+            go.Scatter(
+                x=df_plot["date"],
+                y=df_plot["close"],
+                name="收盤價 (元)",
+                line=dict(color="#FFFFFF", width=2.6),
+                hovertemplate="%{y:,.2f} 元<extra>收盤價</extra>"
+            ),
+            row=1, col=1, secondary_y=False
+        )
 
         # 下層主軸：每日買賣超長條圖（紅買超往上、綠賣超往下）
         bar_colors = ["#ef5350" if v >= 0 else "#26a69a" for v in daily_net]
