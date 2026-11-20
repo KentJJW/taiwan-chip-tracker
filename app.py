@@ -10,6 +10,8 @@ st.set_page_config(page_title="台股主力分點吃貨／出貨追蹤系統", l
 
 # 自訂精簡卡片樣式（字體大小適中且自動換行，不會出現 ... 截斷）
 st.markdown("""
+if meta.get("github_sync"):
+        st.caption(f"雲端資料庫狀態：{meta['github_sync']}")
 <style>
 .summary-card {
     background-color: #1c202a;
