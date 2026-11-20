@@ -232,24 +232,29 @@ def analyze_main_force(df_price: pd.DataFrame, df_chips: pd.DataFrame, period_la
 
 
 def _get_github_config():
-    token = os.environ.get("GITHUB_TOKEN", "")
-    repo = os.environ.get("REPO_NAME", "")
+    token = os.environ.get("GITHUB_TOKEN", "").strip()
+    repo = os.environ.get("REPO_NAME", "").strip()
     if not token or not repo:
         try:
             import streamlit as st
-            token = st.secrets.get("GITHUB_TOKEN", "")
-            repo = st.secrets.get("REPO_NAME", "")
+            token = str(st.secrets.get("GITHUB_TOKEN", "")).strip()
+            repo = str(st.secrets.get("REPO_NAME", "")).strip()
         except Exception:
             pass
     return token, repo
 
 
-def _sync_file_to_github(local_path: str, repo_path: str):
+def _sync_file_to_github(local_path: str, repo_path: str) -> tuple[bool, str]:
+    """將檔案同步寫入 GitHub Repo，並回傳 (是否成功, 訊息)"""
     token, repo = _get_github_config()
     if not token or not repo:
-        return
+        return False, "未讀取到 GITHUB_TOKEN 或 REPO_NAME（請確認 Streamlit Secrets）"
+
     api_url = f"https://api.github.com/repos/{repo}/contents/{repo_path}"
-    headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github.v3+json"
+    }
     with open(local_path, "rb") as f:
         content_b64 = base64.b64encode(f.read()).decode("utf-8")
 
@@ -261,7 +266,15 @@ def _sync_file_to_github(local_path: str, repo_path: str):
     payload = {"message": f"Sync {repo_path}", "content": content_b64}
     if sha:
         payload["sha"] = sha
-    requests.put(api_url, headers=headers, json=payload, timeout=15)
+
+    put_resp = requests.put(api_url, headers=headers, json=payload, timeout=15)
+    if put_resp.status_code in (200, 201):
+        return True, "已同步至 GitHub database/"
+    try:
+        err_msg = put_resp.json().get("message", "")
+    except Exception:
+        err_msg = put_resp.text[:80]
+    return False, f"GitHub 寫入失敗 (HTTP {put_resp.status_code}: {err_msg})"
 
 
 def update_stock_database(stock_id: str, mode: str = "YTD") -> bool:
@@ -309,26 +322,32 @@ def update_stock_database(stock_id: str, mode: str = "YTD") -> bool:
 
     df_chips = df_chips.fillna(0.0)
 
-    # 3. 產出主力與吃貨/出貨分析摘要
-    meta = analyze_main_force(df_price, df_chips, period_label)
-    meta["stock_id"] = stock_id
-    meta["period_label"] = period_label
-    meta["broker_count"] = fetched_count
-    meta["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    meta["debug_notes"] = debug_notes
-
-    # 4. 寫入 database/ 並同步回 GitHub
+    # 3. 寫入本地 CSV 並同步至 GitHub
     price_file = f"{stock_id}_price.csv"
     chips_file = f"{stock_id}_chips.csv"
     meta_file = f"{stock_id}_meta.json"
 
     df_price.to_csv(os.path.join(DB_DIR, price_file), index=False, encoding="utf-8-sig")
     df_chips.to_csv(os.path.join(DB_DIR, chips_file), index=False, encoding="utf-8-sig")
+
+    ok1, sync_msg = _sync_file_to_github(os.path.join(DB_DIR, price_file), f"database/{price_file}")
+    if ok1:
+        ok2, sync_msg = _sync_file_to_github(os.path.join(DB_DIR, chips_file), f"database/{chips_file}")
+
+    # 4. 產出主力與吃貨/出貨分析摘要（含 GitHub 同步狀態）
+    meta = analyze_main_force(df_price, df_chips, period_label)
+    meta["stock_id"] = stock_id
+    meta["period_label"] = period_label
+    meta["broker_count"] = fetched_count
+    meta["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    meta["debug_notes"] = debug_notes
+    meta["github_sync"] = f"✅ {sync_msg}" if ok1 else f"⚠️ {sync_msg}"
+
     with open(os.path.join(DB_DIR, meta_file), "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
 
-    for fname in [price_file, chips_file, meta_file]:
-        _sync_file_to_github(os.path.join(DB_DIR, fname), f"database/{fname}")
+    if ok1:
+        _sync_file_to_github(os.path.join(DB_DIR, meta_file), f"database/{meta_file}")
 
     return True
 
