@@ -225,8 +225,10 @@ def analyze_main_force(df_price: pd.DataFrame, df_chips: pd.DataFrame, period_la
         return {"main_force": "無分點資料", "status": "⚪ 無法判定", "top_buyers": {}, "top_sellers": {}, "details": []}
 
     total_period = df_chips[broker_cols].sum().sort_values(ascending=False)
-    recent_20 = df_chips.tail(20)[broker_cols].sum()
+    recent_1 = df_chips.tail(1)[broker_cols].sum()
     recent_5 = df_chips.tail(5)[broker_cols].sum()
+    recent_10 = df_chips.tail(10)[broker_cols].sum()
+    recent_20 = df_chips.tail(20)[broker_cols].sum()
 
     top_buyers = total_period[total_period > 0].head(5)
     top_sellers = total_period[total_period < 0].tail(5).sort_values(ascending=True)
@@ -237,13 +239,14 @@ def analyze_main_force(df_price: pd.DataFrame, df_chips: pd.DataFrame, period_la
             "status": "🔴 空方主導／出貨格局",
             "top_buyers": {},
             "top_sellers": {k: int(v) for k, v in top_sellers.items()},
-            "details": [f"{period_label}內主要分點與投信累計皆為淨賣超"]
+            "details": [f"- {period_label}內主要分點與投信累計皆為淨賣超"]
         }
 
     primary_player = top_buyers.index[0]
     primary_net = int(top_buyers.iloc[0])
+    primary_1d = int(recent_1.get(primary_player, 0))
+    primary_10d = int(recent_10.get(primary_player, 0))
     primary_20d = int(recent_20.get(primary_player, 0))
-    primary_5d = int(recent_5.get(primary_player, 0))
 
     top3_names = list(top_buyers.head(3).index)
     top3_20d = int(recent_20[top3_names].sum())
@@ -259,10 +262,17 @@ def analyze_main_force(df_price: pd.DataFrame, df_chips: pd.DataFrame, period_la
         status = "🔵 主力吃貨鎖碼／觀望中"
 
     details = [
-        f"區間最大買超主力：**{primary_player}**（區間累計淨買超 **{primary_net:+,}** 張）",
-        f"最大主力近期動向（區間尾端）：近 20 日 **{primary_20d:+,}** 張 ｜ 近 5 日 **{primary_5d:+,}** 張",
-        f"前三大買超主力（{', '.join(top3_names)}）近 20 日合計：**{top3_20d:+,}** 張"
+        f"- **主力買賣超（{primary_player}）**：今日 **{primary_1d:+,}** 張 ｜ 近 10 日 **{primary_10d:+,}** 張 ｜ 近 20 日 **{primary_20d:+,}** 張",
+        f"- 區間最大買超主力：**{primary_player}**（區間累計淨買超 **{primary_net:+,}** 張）",
+        f"- 前三大買超主力（{', '.join(top3_names)}）近 20 日合計：**{top3_20d:+,}** 張"
     ]
+
+    # 前三大買超主力各分點單獨條列
+    for name in top3_names:
+        b_1d = int(recent_1.get(name, 0))
+        b_10d = int(recent_10.get(name, 0))
+        b_20d = int(recent_20.get(name, 0))
+        details.append(f"  - **{name}**：今日 **{b_1d:+,}** 張 ｜ 近 10 日 **{b_10d:+,}** 張 ｜ 近 20 日 **{b_20d:+,}** 張")
 
     return {
         "main_force": f"{primary_player}（{primary_net:+,} 張）",
