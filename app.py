@@ -621,7 +621,7 @@ if target_stock:
                 x=df_plot["date"],
                 y=df_plot["close"],
                 name="收盤價 (元)",
-                line=dict(color="#FFFFFF", width=2.6),
+                line=dict(color="#FFD700", width=2.6),
                 hovertemplate="%{y:,.2f} 元<extra>收盤價</extra>"
             ),
             row=1, col=1, secondary_y=False
