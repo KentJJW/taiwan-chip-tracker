@@ -384,8 +384,18 @@ if target_stock:
     if broker_count == 0 and meta_saved.get("debug_notes"):
         st.warning(f"⚠️ 分點明細未取得（{'；'.join(meta_saved['debug_notes'])}）")
 
-    # --- 區塊一：主力診斷結論 ---
-    st.markdown(f"#### 🎯 {stock_title} 主力診斷結論（{period_label}｜已追蹤 {broker_count} 個券商分點）")
+    # --- 區塊一：主力診斷結論（標題旁顯示最新更新時間與交易日） ---
+    updated_str = meta_saved.get("last_updated", "")
+    latest_trade_date = df_price_full["date"].max()
+    time_badge = f"🕒 更新時間：{updated_str}（最新交易日：{latest_trade_date}）" if updated_str else f"🕒 最新交易日：{latest_trade_date}"
+
+    st.markdown(
+        f'<div style="display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; gap:8px;">'
+        f'  <h4 style="margin:0;">🎯 {stock_title} 主力診斷結論（{period_label}｜已追蹤 {broker_count} 個券商分點）</h4>'
+        f'  <span style="font-size:0.85rem; color:#94a3b8;">{time_badge}</span>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
     if meta_saved.get("github_sync"):
         st.caption(f"雲端資料庫狀態：{meta_saved['github_sync']}")
 
@@ -419,7 +429,7 @@ if target_stock:
         <div class="summary-card">
             <div class="card-label">最新收盤價與區間漲跌</div>
             <div class="card-value">{latest_close:.2f} 元</div>
-            <div class="card-sub">區間漲跌：{pct_html}<br>更新：{meta_saved.get('last_updated', '')[:10]}</div>
+            <div class="card-sub">區間漲跌：{pct_html}<br>更新：{updated_str[:16] if updated_str else latest_trade_date}</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -428,11 +438,11 @@ if target_stock:
     if div_alert:
         css_cls = "div-alert-bull" if div_alert["type"] == "bull" else "div-alert-bear"
         div_tip_text = (
-            "觸發條件：近 5 個交易日股價下跌達 3% 以上，但今年前三大波段主力合計仍為淨買超。"
-            "代表主力趁急跌逢低承接，常為低檔換手或止跌轉折的前兆。"
+            "觸發條件：近 5 日股價跌幅 ≥ 3%，且今年前三大主力近 5 日合計淨買超控盤率 ≥ +2.0%。"
+            "代表大資金趁急跌有效承接，常為低檔換手或止跌轉折的前兆。"
             if div_alert["type"] == "bull" else
-            "觸發條件：近 5 個交易日股價上漲達 3% 以上，但今年前三大波段主力合計卻為淨賣超。"
-            "代表主力趁反彈逢高出貨，需慎防假突破或拉高倒貨風險。"
+            "觸發條件：近 5 日股價漲幅 ≥ 3%，且今年前三大主力近 5 日合計淨賣超控盤率 ≤ -2.0%。"
+            "代表大資金趁反彈有效出貨，需慎防假突破或拉高倒貨風險。"
         )
         st.markdown(
             f'<div class="{css_cls}">'
@@ -578,7 +588,7 @@ if target_stock:
             specs=[[{"secondary_y": False}], [{"secondary_y": True}]]
         )
 
-        # 上層：10MA 與 20MA 均線（先畫在底層，避免蓋住純白股價線）
+        # 上層：10MA 與 20MA 均線
         if show_ma:
             fig.add_trace(
                 go.Scatter(
@@ -601,7 +611,7 @@ if target_stock:
                 row=1, col=1, secondary_y=False
             )
 
-        # 上層：主力成本線（亮橘虛線，高對比）
+        # 上層：主力成本線（亮橘虛線）
         if cost_series.notna().any():
             fig.add_trace(
                 go.Scatter(
@@ -615,7 +625,7 @@ if target_stock:
                 row=1, col=1, secondary_y=False
             )
 
-        # 上層：收盤價折線（純白粗線置頂，視覺最清晰）
+        # 上層：收盤價折線（金黃色粗線置頂）
         fig.add_trace(
             go.Scatter(
                 x=df_plot["date"],
