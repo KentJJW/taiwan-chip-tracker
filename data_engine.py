@@ -96,6 +96,15 @@ def _fmt_html_num(val: int, suffix: str = " 張") -> str:
     return f'<span style="color:#cbd5e1; font-weight:700;">0{suffix}</span>'
 
 
+def _fmt_html_pct(val: float) -> str:
+    """HTML 卡片專用：損益百分比紅綠配色"""
+    if val > 0:
+        return f'<span style="color:#ef5350; font-weight:700;">{val:+.2f}%</span>'
+    elif val < 0:
+        return f'<span style="color:#26a69a; font-weight:700;">{val:+.2f}%</span>'
+    return '<span style="color:#cbd5e1; font-weight:700;">0.00%</span>'
+
+
 def _fmt_md_num(val: int, suffix: str = " 張") -> str:
     """Markdown 條列專用：紅買綠賣配色"""
     if val > 0:
@@ -103,6 +112,48 @@ def _fmt_md_num(val: int, suffix: str = " 張") -> str:
     elif val < 0:
         return f":green[**{val:+,}{suffix}**]"
     return f"**0{suffix}**"
+
+
+def calculate_main_force_cost(df_price: pd.DataFrame, daily_net: pd.Series) -> tuple[pd.Series, float, float]:
+    """
+    移動加權平均成本法（目前庫存均價）：
+    - 每日均價 = (open + high + low + close) / 4（若缺值則以 close 遞補）
+    - 買超日 (net > 0)：併入庫存重新計算加權平均成本
+    - 賣超日 (net < 0)：扣減庫存但維持原持有均價；若庫存歸零則重置
+    回傳：(每日成本序列, 最新庫存均價, 最新剩餘庫存張數)
+    """
+    price_cols = [c for c in ["open", "high", "low", "close"] if c in df_price.columns]
+    if price_cols:
+        avg_prices = df_price[price_cols].mean(axis=1).fillna(df_price["close"])
+    else:
+        avg_prices = df_price["close"]
+
+    inv = 0.0
+    avg_cost = 0.0
+    cost_list = []
+
+    for p, net in zip(avg_prices, daily_net):
+        if pd.isna(p) or pd.isna(net):
+            cost_list.append(round(avg_cost, 2) if inv > 0 and avg_cost > 0 else None)
+            continue
+
+        if net > 0:
+            if inv <= 0:
+                inv = float(net)
+                avg_cost = float(p)
+            else:
+                avg_cost = (inv * avg_cost + float(net) * float(p)) / (inv + float(net))
+                inv += float(net)
+        elif net < 0:
+            inv += float(net)
+            if inv <= 0:
+                inv = 0.0
+                avg_cost = 0.0
+
+        cost_list.append(round(avg_cost, 2) if inv > 0 and avg_cost > 0 else None)
+
+    latest_cost = round(avg_cost, 2) if inv > 0 and avg_cost > 0 else 0.0
+    return pd.Series(cost_list, index=df_price.index), latest_cost, inv
 
 
 def fetch_price_history(stock_id: str, start_date: str, end_date: str) -> pd.DataFrame:
@@ -123,17 +174,41 @@ def fetch_price_history(stock_id: str, start_date: str, end_date: str) -> pd.Dat
     return pd.DataFrame()
 
 
-def fetch_stock_name(session: requests.Session, stock_id: str, mirror: str = None) -> str:
-    """從券商個股頁面自動擷取中文股票名稱（例如：環球晶）"""
-    html, _, _ = _fetch_dj_html(session, f"/z/zc/zco/zco.djhtm?a={stock_id}", mirror)
-    if not html:
+def fetch_stock_name(session: requests.Session = None, stock_id: str = "", mirror: str = None) -> str:
+    """多來源擷取台股中文名稱：1. TWSE/TPEx MIS API -> 2. MoneyDJ GenLink2stk"""
+    stock_id = stock_id.strip()
+    if not stock_id:
         return ""
-    pattern = re.compile(rf"([^\s<>()（）\"'=\-]+)\s*[\(（]{re.escape(stock_id)}[\)）]")
-    m = pattern.search(html)
-    if m:
-        name = m.group(1).strip()
-        if 1 <= len(name) <= 10:
-            return name
+
+    sess = session or _create_session()
+
+    # 來源 1：證交所／櫃買中心官方 MIS API（最穩定且精準）
+    try:
+        mis_url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_{stock_id}.tw|otc_{stock_id}.two&json=1&delay=0"
+        resp = sess.get(mis_url, timeout=6, verify=False)
+        if resp.status_code == 200:
+            data = resp.json()
+            for item in data.get("msgArray", []):
+                name = str(item.get("n", "")).strip()
+                if name:
+                    return name
+    except Exception:
+        pass
+
+    # 來源 2：MoneyDJ 網頁內建的 GenLink2stk('AS6488','環球晶') 或括號格式
+    try:
+        html, _, _ = _fetch_dj_html(sess, f"/z/zc/zco/zco.djhtm?a={stock_id}", mirror)
+        if html:
+            m_js = re.search(rf"GenLink2stk\([^,]*{re.escape(stock_id)}[^,]*,\s*['\"]([^'\"]+)['\"]\)", html)
+            if m_js:
+                return m_js.group(1).strip()
+
+            m_paren = re.search(rf"([\u4e00-\u9fffA-Za-z0-9\-]{{2,10}})\s*[\(（]{re.escape(stock_id)}[\)）]", html)
+            if m_paren:
+                return m_paren.group(1).strip()
+    except Exception:
+        pass
+
     return ""
 
 
@@ -248,10 +323,16 @@ def fetch_broker_daily_history(session: requests.Session, stock_id: str, broker_
     return pd.DataFrame(columns=["date", broker_name])
 
 
-def analyze_main_force(df_price: pd.DataFrame, df_chips: pd.DataFrame, period_label: str, df_chips_full: pd.DataFrame = None) -> dict:
+def analyze_main_force(
+    df_price: pd.DataFrame,
+    df_chips: pd.DataFrame,
+    period_label: str,
+    df_chips_full: pd.DataFrame = None,
+    df_price_full: pd.DataFrame = None,
+) -> dict:
     """
     1. 錨定 2026/01/02 至今全年度累計買超排行決定「波段大主力」。
-    2. 計算最大主力的累計買超、累計賣超與淨總數。
+    2. 計算最大主力的累計買超、累計賣超、淨總數與目前庫存均價（成本）。
     3. 計算選定區間內「三大主力狀態」、「前三大各自進出明細」與「區間買賣超第一名」。
     """
     broker_cols = [c for c in df_chips.columns if c != "date"]
@@ -268,6 +349,7 @@ def analyze_main_force(df_price: pd.DataFrame, df_chips: pd.DataFrame, period_la
         }
 
     full_df = df_chips_full if df_chips_full is not None else df_chips
+    full_price = df_price_full if df_price_full is not None else df_price
 
     # 1. 全年度（2026/01/02 至今）累計排行 -> 決定波段大主力
     total_ytd = full_df[broker_cols].sum().sort_values(ascending=False)
@@ -296,33 +378,43 @@ def analyze_main_force(df_price: pd.DataFrame, df_chips: pd.DataFrame, period_la
     primary_player = top_buyers_ytd.index[0]
     primary_ytd_net = int(top_buyers_ytd.iloc[0])
 
-    # 計算最大主力今年以來的「累計買超張數」與「累計賣超張數」
+    # 計算最大主力今年以來的累計買超、賣超與目前庫存均價（主力成本）
     primary_series_ytd = full_df[primary_player]
     primary_buy_total = int(primary_series_ytd[primary_series_ytd > 0].sum())
     primary_sell_total = int(primary_series_ytd[primary_series_ytd < 0].sum())
+
+    merged_for_cost = full_price.merge(full_df[["date", primary_player]], on="date", how="left").fillna({primary_player: 0.0})
+    _, primary_cost, primary_inv = calculate_main_force_cost(merged_for_cost, merged_for_cost[primary_player])
+    latest_close_full = float(full_price.iloc[-1]["close"])
 
     main_force_html = f"{primary_player}（今年 {_fmt_html_num(primary_ytd_net)}）"
     main_force_sub_lines = [
         f"今年累計買超 {_fmt_html_num(primary_buy_total)} ／ 賣超 {_fmt_html_num(primary_sell_total)}（淨額 {_fmt_html_num(primary_ytd_net)}）"
     ]
+    if primary_cost > 0 and primary_inv > 0:
+        pnl_pct = (latest_close_full - primary_cost) / primary_cost * 100
+        main_force_sub_lines.append(
+            f"目前庫存均價：<b style='color:#ffb74d;'>{primary_cost:,.2f} 元</b>（帳面損益 {_fmt_html_pct(pnl_pct)}）"
+        )
 
-    # 卡片二：區間內三大主力狀態
+    # 卡片二：區間內三大主力狀態（單日區間放寬門檻為 50 張，多日區間維持 300 張）
     top3_names = list(top_buyers_ytd.head(3).index)
     top3_period_net = int(period_sum[top3_names].sum())
     top3_20d = int(recent_20[top3_names].sum())
+    threshold = 50 if len(df_price) <= 1 else 300
 
     if primary_player in DAY_TRADE_BROKERS and abs(primary_ytd_net) < 500:
         status_html = "🟡 隔日沖短線客主導（慎防倒貨）"
-    elif top3_period_net > 300:
+    elif top3_period_net > threshold:
         status_html = f"🟢 區間內三大主力吃貨中（{_fmt_html_num(top3_period_net)}）"
-    elif top3_period_net < -300:
+    elif top3_period_net < -threshold:
         status_html = f"🔴 區間內三大主力出貨中（{_fmt_html_num(top3_period_net)}）"
     else:
         status_html = f"🔵 區間內三大主力鎖碼觀望（{_fmt_html_num(top3_period_net)}）"
 
     status_sub = f"三大主力名單：{', '.join(top3_names)}"
 
-    # 下方條列明細（消除重複行，直接從前三大主力展開，並套用紅買綠賣配色）
+    # 下方條列明細
     details = [
         f"- 今年前三大主力（**{', '.join(top3_names)}**）本區間合計：{_fmt_md_num(top3_period_net)}（近 20 日合計：{_fmt_md_num(top3_20d)}）"
     ]
@@ -504,7 +596,7 @@ def update_stock_database(stock_id: str) -> bool:
         ok2, sync_msg = _sync_file_to_github(os.path.join(DB_DIR, chips_file), f"database/{chips_file}")
 
     # 5. 產出基礎摘要存檔
-    meta = analyze_main_force(df_price, df_chips, f"{start_date} 至今", df_chips_full=df_chips)
+    meta = analyze_main_force(df_price, df_chips, f"{start_date} 至今", df_chips_full=df_chips, df_price_full=df_price)
     meta["stock_id"] = stock_id
     meta["stock_name"] = stock_name
     meta["broker_count"] = fetched_count
