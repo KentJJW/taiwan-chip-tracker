@@ -218,17 +218,19 @@ def fetch_broker_daily_history(session: requests.Session, stock_id: str, broker_
     return pd.DataFrame(columns=["date", broker_name])
 
 
-def analyze_main_force(df_price: pd.DataFrame, df_chips: pd.DataFrame, period_label: str) -> dict:
+def analyze_main_force(df_price: pd.DataFrame, df_chips: pd.DataFrame, period_label: str, df_chips_ref: pd.DataFrame = None) -> dict:
     """直接判定指定區間內：1. 主力是誰  2. 目前在吃貨還是出貨"""
     broker_cols = [c for c in df_chips.columns if c != "date"]
     if not broker_cols or df_price.empty:
         return {"main_force": "無分點資料", "status": "⚪ 無法判定", "top_buyers": {}, "top_sellers": {}, "details": []}
 
+    ref_df = df_chips_ref if df_chips_ref is not None else df_chips
+
     total_period = df_chips[broker_cols].sum().sort_values(ascending=False)
-    recent_1 = df_chips.tail(1)[broker_cols].sum()
-    recent_5 = df_chips.tail(5)[broker_cols].sum()
-    recent_10 = df_chips.tail(10)[broker_cols].sum()
-    recent_20 = df_chips.tail(20)[broker_cols].sum()
+    recent_1 = ref_df.tail(1)[broker_cols].sum()
+    recent_5 = ref_df.tail(5)[broker_cols].sum()
+    recent_10 = ref_df.tail(10)[broker_cols].sum()
+    recent_20 = ref_df.tail(20)[broker_cols].sum()
 
     top_buyers = total_period[total_period > 0].head(5)
     top_sellers = total_period[total_period < 0].tail(5).sort_values(ascending=True)
@@ -262,12 +264,11 @@ def analyze_main_force(df_price: pd.DataFrame, df_chips: pd.DataFrame, period_la
         status = "🔵 主力吃貨鎖碼／觀望中"
 
     details = [
-        f"- **主力買賣超（{primary_player}）**：今日 **{primary_1d:+,}** 張 ｜ 近 10 日 **{primary_10d:+,}** 張 ｜ 近 20 日 **{primary_20d:+,}** 張",
         f"- 區間最大買超主力：**{primary_player}**（區間累計淨買超 **{primary_net:+,}** 張）",
+        f"- **主力買賣超（{primary_player}）**：今日 **{primary_1d:+,}** 張 ｜ 近 10 日 **{primary_10d:+,}** 張 ｜ 近 20 日 **{primary_20d:+,}** 張",
         f"- 前三大買超主力（{', '.join(top3_names)}）近 20 日合計：**{top3_20d:+,}** 張"
     ]
 
-    # 前三大買超主力各分點單獨條列
     for name in top3_names:
         b_1d = int(recent_1.get(name, 0))
         b_10d = int(recent_10.get(name, 0))
