@@ -8,10 +8,7 @@ from data_engine import DB_DIR, update_stock_database
 
 st.set_page_config(page_title="台股主力分點吃貨／出貨追蹤系統", layout="wide")
 
-# 自訂精簡卡片樣式（字體大小適中且自動換行，不會出現 ... 截斷）
 st.markdown("""
-if meta.get("github_sync"):
-        st.caption(f"雲端資料庫狀態：{meta['github_sync']}")
 <style>
 .summary-card {
     background-color: #1c202a;
@@ -55,7 +52,12 @@ st.markdown("### 📈 台股主力分點吃貨／出貨追蹤系統")
 with st.sidebar:
     st.header("🔍 查詢與建檔")
     input_stock = st.text_input("輸入台股代號（例如：6488、2330、3231）", value="6488").strip()
-    range_mode = st.radio("統計區間", options=["YTD", "1Y"], format_func=lambda x: "今年以來 (2026 YTD)" if x == "YTD" else "近一年 (365天)", horizontal=True)
+    range_mode = st.radio(
+        "統計區間",
+        options=["YTD", "1Y"],
+        format_func=lambda x: "今年以來 (2026 YTD)" if x == "YTD" else "近一年 (365天)",
+        horizontal=True
+    )
     btn_query = st.button("抓取／更新籌碼資料", type="primary", use_container_width=True)
 
     saved_list = get_saved_stocks()
@@ -81,7 +83,7 @@ if target_stock:
             if not ok:
                 st.error(f"找不到股票代號 `{target_stock}`，請確認是否為正確的上市櫃代號。")
                 st.stop()
-            st.rerun()  # 重新整理讓側邊欄清單同步顯示最新個股
+            st.rerun()
 
     df_price = pd.read_csv(price_path)
     df_chips = pd.read_csv(chips_path)
@@ -91,12 +93,13 @@ if target_stock:
     period_label = meta.get("period_label", "今年以來")
     broker_count = meta.get("broker_count", 0)
 
-    # 若分點數量為 0，顯示明確原因提示
     if broker_count == 0 and meta.get("debug_notes"):
         st.warning(f"⚠️ 分點明細未完整取得（{ '；'.join(meta['debug_notes']) }），請點擊左側「抓取／更新籌碼資料」重試。")
 
-    # --- 區塊一：直接回答「主力是誰」與「吃貨還是出貨」（不會截斷的精簡卡片） ---
+    # --- 區塊一：直接回答「主力是誰」與「吃貨還是出貨」 ---
     st.markdown(f"#### 🎯 {target_stock} 主力診斷結論（{period_label}｜已追蹤 {broker_count} 個關鍵分點）")
+    if meta.get("github_sync"):
+        st.caption(f"雲端資料庫狀態：{meta['github_sync']}")
 
     c1, c2, c3 = st.columns([2.2, 2, 1.2])
     with c1:
@@ -127,85 +130,114 @@ if target_stock:
         st.markdown(f"- {line}")
 
     top_buyers = meta.get("top_buyers", {})
+    top_sellers = meta.get("top_sellers", {})
     if top_buyers:
-        st.caption(f"📊 {period_label}累計淨買超前 5 大主力（外資依個別券商計算，投信為統稱）：" +
+        st.caption(f"🟢 {period_label}累計買超前 5 大（外資依個別券商統計）：" +
                    " ｜ ".join([f"**{k}**: {v:+,} 張" for k, v in top_buyers.items()]))
+    if top_sellers:
+        st.caption(f"🔴 {period_label}累計賣超前 5 大（外資依個別券商統計）：" +
+                   " ｜ ".join([f"**{k}**: {v:+,} 張" for k, v in top_sellers.items()]))
 
     st.divider()
 
-    # --- 區塊二：股價 vs. 主力籌碼（單一或多分點）折線圖 ---
-    st.markdown(f"#### 📉 {period_label}股價 vs. 主力分點累計買賣超折線圖")
+    # --- 區塊二：上方股價折線 ＋ 下方主力買賣超長條圖(紅買綠賣)與統計張數折線 ---
+    st.markdown(f"#### 📉 {period_label}股價 vs. 主力買賣超長條圖與統計張數")
 
     available_brokers = [c for c in df_chips.columns if c != "date"]
-    default_selected = list(top_buyers.keys())[:3] if top_buyers else available_brokers[:3]
+    default_selected = [list(top_buyers.keys())[0]] if top_buyers else available_brokers[:1]
 
-    col_ctrl1, col_ctrl2 = st.columns([3, 1])
+    col_ctrl1, col_ctrl2 = st.columns([3, 1.2])
     with col_ctrl1:
         selected_brokers = st.multiselect(
-            "選擇要比較的券商分點或「投信」（可單選或多選）：",
+            "選擇要觀察的券商分點或「投信」（可單選或多選）：",
             options=available_brokers,
             default=default_selected
         )
     with col_ctrl2:
         chart_mode = st.radio(
-            "顯示模式",
-            options=["各分點獨立折線", "所選分點加總合力"],
+            "多分點顯示方式",
+            options=["所選分點加總合力", "各分點獨立統計折線"],
             horizontal=False
         )
 
     if not selected_brokers:
-        st.warning("請至少選擇一個券商分點或「投信」來繪製折線圖。")
+        st.warning("請至少選擇一個券商分點或「投信」來繪製圖表。")
     else:
         df_plot = df_price[["date", "close"]].merge(df_chips, on="date", how="left").fillna(0)
 
-        fig = make_subplots(specs=[[{"secondary_y": True}]])
+        # 建立上下兩層子圖：上層股價、下層主力買賣超長條圖(主軸) + 統計張數折線(副軸)
+        fig = make_subplots(
+            rows=2,
+            cols=1,
+            shared_xaxes=True,
+            vertical_spacing=0.06,
+            row_heights=[0.52, 0.48],
+            specs=[[{"secondary_y": False}], [{"secondary_y": True}]]
+        )
 
-        # 左軸：股價折線
+        # 1. 上方子圖：收盤價折線
         fig.add_trace(
             go.Scatter(
                 x=df_plot["date"],
                 y=df_plot["close"],
                 name="收盤價 (元)",
-                line=dict(color="#FFD700", width=2.5)
+                line=dict(color="#FFD700", width=2.2)
             ),
-            secondary_y=False
+            row=1, col=1, secondary_y=False
         )
 
-        # 右軸：主力籌碼累計買賣超折線 (張)
-        if chart_mode == "所選分點加總合力":
-            combined_cum = df_plot[selected_brokers].sum(axis=1).cumsum()
+        # 2. 下方子圖：每日買賣超長條圖（紅色買超往上、綠色賣超往下）
+        daily_net = df_plot[selected_brokers].sum(axis=1)
+        bar_colors = ["#ef5350" if v >= 0 else "#26a69a" for v in daily_net]
+        bar_label = f"{selected_brokers[0]} 每日買賣超" if len(selected_brokers) == 1 else f"所選({len(selected_brokers)}個)合計每日買賣超"
+
+        fig.add_trace(
+            go.Bar(
+                x=df_plot["date"],
+                y=daily_net,
+                name=f"{bar_label} (張)",
+                marker_color=bar_colors,
+                opacity=0.85
+            ),
+            row=2, col=1, secondary_y=False
+        )
+
+        # 3. 下方子圖疊加：統計張數（累計淨買賣超折線）
+        if chart_mode == "所選分點加總合力" or len(selected_brokers) == 1:
+            cum_total = daily_net.cumsum()
+            line_label = f"{selected_brokers[0]} 統計張數" if len(selected_brokers) == 1 else "所選合力統計張數"
             fig.add_trace(
                 go.Scatter(
                     x=df_plot["date"],
-                    y=combined_cum,
-                    name=f"合力累計買賣超 ({len(selected_brokers)}個來源)",
-                    line=dict(color="#00E5FF", width=2.5),
-                    fill="tozeroy",
-                    fillcolor="rgba(0, 229, 255, 0.12)"
+                    y=cum_total,
+                    name=f"{line_label} (累計張)",
+                    line=dict(color="#00E5FF", width=2.5)
                 ),
-                secondary_y=True
+                row=2, col=1, secondary_y=True
             )
         else:
             for b_name in selected_brokers:
-                cum_series = df_plot[b_name].cumsum()
                 fig.add_trace(
                     go.Scatter(
                         x=df_plot["date"],
-                        y=cum_series,
-                        name=f"{b_name} (累計張數)",
+                        y=df_plot[b_name].cumsum(),
+                        name=f"{b_name} 統計張數",
                         line=dict(width=2)
                     ),
-                    secondary_y=True
+                    row=2, col=1, secondary_y=True
                 )
 
+        fig.add_hline(y=0, line_width=1, line_color="rgba(255, 255, 255, 0.25)", row=2, col=1)
+
         fig.update_layout(
-            height=520,
+            height=640,
             template="plotly_dark",
             hovermode="x unified",
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
             margin=dict(l=20, r=20, t=40, b=20)
         )
-        fig.update_yaxes(title_text="收盤價 (元)", secondary_y=False, showgrid=True)
-        fig.update_yaxes(title_text="累計淨買賣超 (張)", secondary_y=True, showgrid=False)
+        fig.update_yaxes(title_text="收盤價 (元)", row=1, col=1, showgrid=True)
+        fig.update_yaxes(title_text="每日買賣超 (張)", row=2, col=1, secondary_y=False, showgrid=True, zeroline=True)
+        fig.update_yaxes(title_text="統計張數 (累計張)", row=2, col=1, secondary_y=True, showgrid=False)
 
         st.plotly_chart(fig, use_container_width=True)
