@@ -76,7 +76,11 @@ with st.sidebar:
 
     st.divider()
     st.subheader("📅 統計區間")
-    range_type = st.radio("選擇檢視範圍", options=["全部", "指定日期"], horizontal=True)
+    range_type = st.radio(
+        "選擇檢視範圍",
+        options=["全部", "5日", "10日", "20日", "60日", "指定日期"],
+        horizontal=True
+    )
 
     custom_start_str = "20260102"
     custom_end_str = datetime.today().strftime("%Y%m%d")
@@ -115,30 +119,42 @@ if target_stock:
     with open(meta_path, "r", encoding="utf-8") as f:
         meta_saved = json.load(f)
 
-    # 依「全部」或「指定日期」篩選資料區間
+    # 依「全部 / 5日 / 10日 / 20日 / 60日 / 指定日期」篩選資料區間
     min_date = df_price_full["date"].min()
     max_date = df_price_full["date"].max()
+    days_map = {"5日": 5, "10日": 10, "20日": 20, "60日": 60}
 
-    if range_type == "指定日期":
+    if range_type in days_map:
+        n_days = days_map[range_type]
+        df_price = df_price_full.tail(n_days).copy()
+        start_filter = df_price["date"].min()
+        end_filter = df_price["date"].max()
+        df_chips = df_chips_full[(df_chips_full["date"] >= start_filter) & (df_chips_full["date"] <= end_filter)].copy()
+        df_chips_ref = df_chips_full[df_chips_full["date"] <= end_filter].copy()
+        period_label = f"近 {n_days} 日（{start_filter} ~ {end_filter}）"
+    elif range_type == "指定日期":
         start_filter = parse_manual_date(custom_start_str, min_date)
         end_filter = parse_manual_date(custom_end_str, max_date)
         if start_filter > end_filter:
             st.error("起始日期不可晚於結束日期，請重新輸入。")
             st.stop()
+        df_price = df_price_full[(df_price_full["date"] >= start_filter) & (df_price_full["date"] <= end_filter)].copy()
+        df_chips = df_chips_full[(df_chips_full["date"] >= start_filter) & (df_chips_full["date"] <= end_filter)].copy()
+        df_chips_ref = df_chips_full[df_chips_full["date"] <= end_filter].copy()
         period_label = f"{start_filter} ~ {end_filter}"
     else:
         start_filter = START_DATE_FIXED
         end_filter = max_date
+        df_price = df_price_full[(df_price_full["date"] >= start_filter) & (df_price_full["date"] <= end_filter)].copy()
+        df_chips = df_chips_full[(df_chips_full["date"] >= start_filter) & (df_chips_full["date"] <= end_filter)].copy()
+        df_chips_ref = df_chips_full.copy()
         period_label = f"{min_date} ~ {max_date}（全部）"
-
-    df_price = df_price_full[(df_price_full["date"] >= start_filter) & (df_price_full["date"] <= end_filter)].copy()
-    df_chips = df_chips_full[(df_chips_full["date"] >= start_filter) & (df_chips_full["date"] <= end_filter)].copy()
 
     if df_price.empty:
         st.warning(f"在指定區間 `{start_filter} ~ {end_filter}` 內查無交易資料，請確認輸入的日期。")
         st.stop()
 
-    analysis = analyze_main_force(df_price, df_chips, period_label)
+    analysis = analyze_main_force(df_price, df_chips, period_label, df_chips_ref=df_chips_ref)
     broker_count = len([c for c in df_chips.columns if c not in ("date", "投信")])
 
     if broker_count == 0 and meta_saved.get("debug_notes"):
@@ -279,12 +295,13 @@ if target_stock:
 
         fig.add_hline(y=0, line_width=1, line_color="rgba(255, 255, 255, 0.25)", row=2, col=1)
 
+        # 圖例移至左上角並加大上方留白，徹底避開右上角工具列重疊
         fig.update_layout(
             height=640,
             template="plotly_dark",
             hovermode="x unified",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            margin=dict(l=20, r=20, t=40, b=20)
+            legend=dict(orientation="h", yanchor="bottom", y=1.06, xanchor="left", x=0),
+            margin=dict(l=20, r=20, t=65, b=20)
         )
         fig.update_yaxes(title_text="收盤價 (元)", row=1, col=1, showgrid=True)
         fig.update_yaxes(title_text="每日買賣超 (張)", row=2, col=1, secondary_y=False, showgrid=True, zeroline=True, tickformat=",.0f")
