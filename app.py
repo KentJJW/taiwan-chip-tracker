@@ -11,6 +11,8 @@ from data_engine import (
     update_stock_database,
     analyze_main_force,
     delete_stock_database,
+    calculate_main_force_cost,
+    fetch_stock_name,
 )
 
 st.set_page_config(page_title="台股主力分點吃貨／出貨追蹤系統", layout="wide")
@@ -41,6 +43,15 @@ st.markdown("""
     color: #94a3b8;
     margin-top: 6px;
     line-height: 1.45;
+}
+.cost-banner {
+    background-color: #1a2230;
+    border-left: 4px solid #ff9800;
+    border-radius: 6px;
+    padding: 9px 14px;
+    margin: 6px 0 10px 0;
+    font-size: 0.9rem;
+    color: #e2e8f0;
 }
 .rank-table {
     width: 100%;
@@ -74,17 +85,36 @@ def get_saved_stocks() -> list:
     })
 
 
+@st.cache_data(ttl=86400, show_spinner=False)
+def _cached_fetch_stock_name(stock_id: str) -> str:
+    return fetch_stock_name(stock_id=stock_id)
+
+
 def get_stock_display_label(stock_id: str) -> str:
-    """回傳 '6488 環球晶'（若舊資料尚未抓到中文名稱則顯示 '6488'）"""
+    """回傳 '6488 環球晶'；若舊資料尚未存有中文名稱，自動即時補抓並寫入本地 _meta.json"""
     meta_path = os.path.join(DB_DIR, f"{stock_id}_meta.json")
+    meta_data = {}
     if os.path.exists(meta_path):
         try:
             with open(meta_path, "r", encoding="utf-8") as f:
-                name = json.load(f).get("stock_name", "").strip()
-                if name:
-                    return f"{stock_id} {name}"
+                meta_data = json.load(f)
+            name = str(meta_data.get("stock_name", "")).strip()
+            if name:
+                return f"{stock_id} {name}"
         except Exception:
             pass
+
+    fetched_name = _cached_fetch_stock_name(stock_id)
+    if fetched_name:
+        if os.path.exists(meta_path) and isinstance(meta_data, dict):
+            try:
+                meta_data["stock_name"] = fetched_name
+                with open(meta_path, "w", encoding="utf-8") as f:
+                    json.dump(meta_data, f, ensure_ascii=False, indent=2)
+            except Exception:
+                pass
+        return f"{stock_id} {fetched_name}"
+
     return stock_id
 
 
@@ -122,7 +152,8 @@ with st.sidebar:
     st.subheader("📅 統計區間")
     range_type = st.radio(
         "選擇檢視範圍",
-        options=["全部", "5日", "10日", "20日", "60日", "指定日期"],
+        options=["今日", "5日", "10日", "20日", "60日", "全部", "指定日期"],
+        index=0,
         horizontal=True
     )
 
@@ -183,7 +214,7 @@ if target_stock:
     # 計算統計區間起訖日
     min_date = df_price_full["date"].min()
     max_date = df_price_full["date"].max()
-    days_map = {"5日": 5, "10日": 10, "20日": 20, "60日": 60}
+    days_map = {"今日": 1, "5日": 5, "10日": 10, "20日": 20, "60日": 60}
 
     if range_type in days_map:
         n_days = days_map[range_type]
@@ -191,7 +222,7 @@ if target_stock:
         start_filter = df_price["date"].min()
         end_filter = df_price["date"].max()
         df_chips = df_chips_full[(df_chips_full["date"] >= start_filter) & (df_chips_full["date"] <= end_filter)].copy()
-        period_label = f"近 {n_days} 日（{start_filter} ~ {end_filter}）"
+        period_label = f"今日（{end_filter}）" if n_days == 1 else f"近 {n_days} 日（{start_filter} ~ {end_filter}）"
     elif range_type == "指定日期":
         start_filter = parse_manual_date(custom_start_str, min_date)
         end_filter = parse_manual_date(custom_end_str, max_date)
@@ -224,7 +255,13 @@ if target_stock:
     else:
         pct_html = '<span style="color:#cbd5e1; font-weight:700;">0.00%</span>'
 
-    analysis = analyze_main_force(df_price, df_chips, period_label, df_chips_full=df_chips_full)
+    analysis = analyze_main_force(
+        df_price,
+        df_chips,
+        period_label,
+        df_chips_full=df_chips_full,
+        df_price_full=df_price_full,
+    )
     broker_count = len([c for c in df_chips_full.columns if c not in ("date", "投信")])
 
     if broker_count == 0 and meta_saved.get("debug_notes"):
@@ -303,9 +340,9 @@ if target_stock:
 
     st.divider()
 
-    # --- 區塊二：完整年度股價 vs. 主力買賣超長條圖與總和統計張數折線（特定區間反灰） ---
-    chart_title_suffix = f"（灰底反白區間：{period_label}）" if range_type != "全部" else f"（{period_label}）"
-    st.markdown(f"#### 📉 {stock_title} 股價 vs. 主力買賣超長條圖與統計張數{chart_title_suffix}")
+    # --- 區塊二：完整年度股價、主力成本線 vs. 買賣超長條圖與總和統計張數折線 ---
+    chart_title_suffix = f"（標示區間：{period_label}）" if range_type != "全部" else f"（{period_label}）"
+    st.markdown(f"#### 📉 {stock_title} 股價與主力成本線 vs. 買賣超統計{chart_title_suffix}")
 
     available_brokers = [c for c in df_chips_full.columns if c != "date"]
     top3_names = analysis.get("top3_names", [])
@@ -324,7 +361,7 @@ if target_stock:
             st.rerun()
     with col_sel:
         selected_brokers = st.multiselect(
-            "選擇要觀察的券商分點或「投信」（可單選或多選，多選時自動加總顯示總和折線）：",
+            "選擇要觀察的券商分點或「投信」（可單選或多選，多選時自動加總計算合力成本與總和折線）：",
             options=available_brokers,
             key=ms_key
         )
@@ -332,7 +369,32 @@ if target_stock:
     if not selected_brokers:
         st.warning("請至少選擇一個券商分點或「投信」來繪製圖表。")
     else:
-        df_plot = df_price_full[["date", "close"]].merge(df_chips_full, on="date", how="left").fillna(0)
+        price_cols = [c for c in ["date", "open", "high", "low", "close"] if c in df_price_full.columns]
+        df_plot = df_price_full[price_cols].merge(df_chips_full, on="date", how="left").fillna(0)
+
+        daily_net = df_plot[selected_brokers].sum(axis=1)
+        cum_total = daily_net.cumsum()
+        cost_series, latest_cost, latest_inv = calculate_main_force_cost(df_plot, daily_net)
+
+        # 顯示所選主力的目前庫存均價與帳面損益摘要條
+        target_label = selected_brokers[0] if len(selected_brokers) == 1 else f"所選 {len(selected_brokers)} 個分點合力"
+        latest_full_close = float(df_plot.iloc[-1]["close"])
+        if latest_cost > 0 and latest_inv > 0:
+            sel_pnl = (latest_full_close - latest_cost) / latest_cost * 100
+            pnl_color = "#ef5350" if sel_pnl > 0 else ("#26a69a" if sel_pnl < 0 else "#cbd5e1")
+            st.markdown(
+                f'<div class="cost-banner">💰 <b>{target_label}</b> 目前庫存均價（主力成本）：'
+                f'<b style="color:#ffb74d;">{latest_cost:,.2f} 元</b> ｜ '
+                f'今年剩餘庫存：<b>{int(round(latest_inv)):,} 張</b> ｜ '
+                f'對照最新收盤價 ({latest_full_close:.2f} 元) 帳面損益：'
+                f'<b style="color:{pnl_color};">{sel_pnl:+.2f}%</b></div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                f'<div class="cost-banner">💰 <b>{target_label}</b> 目前剩餘庫存已歸零（無持有庫存，暫無主力成本均價）</div>',
+                unsafe_allow_html=True,
+            )
 
         fig = make_subplots(
             rows=2,
@@ -355,8 +417,21 @@ if target_stock:
             row=1, col=1, secondary_y=False
         )
 
+        # 上層：主力成本線（目前庫存均價，橘色虛線）
+        if cost_series.notna().any():
+            fig.add_trace(
+                go.Scatter(
+                    x=df_plot["date"],
+                    y=cost_series,
+                    name=f"{target_label} 成本線 (均價)",
+                    line=dict(color="#FF9800", width=2.0, dash="dash"),
+                    connectgaps=False,
+                    hovertemplate="%{y:,.2f} 元<extra>主力成本均價</extra>"
+                ),
+                row=1, col=1, secondary_y=False
+            )
+
         # 下層主軸：每日買賣超長條圖（紅買超往上、綠賣超往下）
-        daily_net = df_plot[selected_brokers].sum(axis=1)
         bar_colors = ["#ef5350" if v >= 0 else "#26a69a" for v in daily_net]
         bar_label = f"{selected_brokers[0]} 每日買賣超" if len(selected_brokers) == 1 else f"所選({len(selected_brokers)}個)總和每日買賣超"
 
@@ -373,7 +448,6 @@ if target_stock:
         )
 
         # 下層副軸：統一顯示總和統計張數折線（累計買賣超，整數張數顯示）
-        cum_total = daily_net.cumsum()
         line_label = f"{selected_brokers[0]} 統計張數" if len(selected_brokers) == 1 else f"所選({len(selected_brokers)}個)總和統計張數"
         fig.add_trace(
             go.Scatter(
@@ -386,19 +460,30 @@ if target_stock:
             row=2, col=1, secondary_y=True
         )
 
-        # 選定特定統計區間時，在圖表中加上反灰區塊標示
+        # 選定特定統計區間時，在圖表中標示（單日用垂直虛線，多日用反灰區塊）
         if range_type != "全部":
-            fig.add_vrect(
-                x0=start_filter,
-                x1=end_filter,
-                fillcolor="rgba(255, 255, 255, 0.14)",
-                line_width=1,
-                line_dash="dash",
-                line_color="rgba(255, 255, 255, 0.45)",
-                annotation_text=f"統計區間 ({range_type})",
-                annotation_position="top left",
-                annotation_font_color="#e5e7eb"
-            )
+            if start_filter == end_filter:
+                fig.add_vline(
+                    x=end_filter,
+                    line_width=2,
+                    line_dash="dash",
+                    line_color="rgba(255, 255, 255, 0.6)",
+                    annotation_text=f"統計區間 ({range_type})",
+                    annotation_position="top left",
+                    annotation_font_color="#e5e7eb"
+                )
+            else:
+                fig.add_vrect(
+                    x0=start_filter,
+                    x1=end_filter,
+                    fillcolor="rgba(255, 255, 255, 0.14)",
+                    line_width=1,
+                    line_dash="dash",
+                    line_color="rgba(255, 255, 255, 0.45)",
+                    annotation_text=f"統計區間 ({range_type})",
+                    annotation_position="top left",
+                    annotation_font_color="#e5e7eb"
+                )
 
         fig.add_hline(y=0, line_width=1, line_color="rgba(255, 255, 255, 0.25)", row=2, col=1)
 
@@ -409,7 +494,7 @@ if target_stock:
             legend=dict(orientation="h", yanchor="bottom", y=1.06, xanchor="left", x=0),
             margin=dict(l=20, r=20, t=65, b=20)
         )
-        fig.update_yaxes(title_text="收盤價 (元)", row=1, col=1, showgrid=True)
+        fig.update_yaxes(title_text="收盤價／主力成本 (元)", row=1, col=1, showgrid=True)
         fig.update_yaxes(title_text="每日買賣超 (張)", row=2, col=1, secondary_y=False, showgrid=True, zeroline=True, tickformat=",.0f")
         fig.update_yaxes(title_text="統計張數 (累計張)", row=2, col=1, secondary_y=True, showgrid=False, tickformat=",.0f")
 
