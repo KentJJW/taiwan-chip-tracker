@@ -61,7 +61,7 @@ def _fetch_dj_html(session: requests.Session, path_with_query: str, preferred_mi
         url = f"{base_url}{path_with_query}"
         try:
             resp = session.get(url, headers={"Referer": f"{base_url}/"}, timeout=12, verify=False)
-            if resp.status_code == 200 and len(resp.text) > 500:
+            if resp.status_code == 200 and len(resp.content) > 500:
                 resp.encoding = "cp950"
                 return resp.text, base_url, ""
             errors.append(f"{base_url}: HTTP {resp.status_code}")
@@ -131,17 +131,11 @@ def fetch_investment_trust_history(session: requests.Session, stock_id: str, sta
     return df, ok_mirror, ""
 
 
-def fetch_top_brokers(session: requests.Session, stock_id: str, start_date: str, end_date: str, mirror: str = None):
-    """抓取區間買超前15大 & 賣超前15大券商分點 (完整保留 BHID 與 b 參數)"""
-    s_fmt = _format_dj_date(start_date)
-    e_fmt = _format_dj_date(end_date)
-    # 注意：zco.djhtm 不要帶 c=E，直接帶 a, e, f
-    html, ok_mirror, err = _fetch_dj_html(session, f"/z/zc/zco/zco.djhtm?a={stock_id}&e={s_fmt}&f={e_fmt}", mirror)
-    if not html:
-        return [], mirror, err
-
+def _extract_brokers_from_html(html: str) -> list:
+    """從 zco.djhtm 解析所有買賣超分點連結 (同時相容不同大小寫與相對路徑)"""
     soup = BeautifulSoup(html, "html.parser")
     brokers = {}
+
     for a_tag in soup.find_all("a", href=True):
         href = a_tag["href"].strip()
         if "zco0" in href.lower():
@@ -154,45 +148,74 @@ def fetch_top_brokers(session: requests.Session, stock_id: str, start_date: str,
             if name and (bhid or b_hex) and key not in brokers:
                 brokers[key] = {"bhid": bhid, "b": b_hex, "name": name}
 
-    broker_list = list(brokers.values())[:25]
-    return broker_list, ok_mirror, ("" if broker_list else "分點連結解析為空")
+    return list(brokers.values())
+
+
+def fetch_top_brokers(session: requests.Session, stock_id: str, start_date: str, end_date: str, mirror: str = None):
+    """抓取區間買超與賣超關鍵券商分點，若區間頁無結果自動退回預設頁"""
+    s_fmt = _format_dj_date(start_date)
+    e_fmt = _format_dj_date(end_date)
+
+    candidate_paths = [
+        f"/z/zc/zco/zco.djhtm?a={stock_id}&e={s_fmt}&f={e_fmt}",
+        f"/z/zc/zco/zco.djhtm?a={stock_id}&d=240",
+        f"/z/zc/zco/zco.djhtm?a={stock_id}",
+    ]
+
+    last_err = ""
+    for path in candidate_paths:
+        html, ok_mirror, err = _fetch_dj_html(session, path, mirror)
+        if not html:
+            last_err = err
+            continue
+        broker_list = _extract_brokers_from_html(html)
+        if broker_list:
+            return broker_list[:25], ok_mirror, ""
+        last_err = f"頁面 {path} 無法解析分點連結 (HTML長度:{len(html)})"
+
+    return [], mirror, last_err
 
 
 def fetch_broker_daily_history(session: requests.Session, stock_id: str, broker_info: dict, start_date: str, end_date: str, mirror: str) -> pd.DataFrame:
-    """抓取單一券商分點每日買賣超明細(張)，使用正確的 A, BHID, b, C=1, D, E 參數"""
+    """抓取單一券商分點每日買賣超明細(張)，多路徑備援並讀取最後一欄(買賣超)"""
     bhid = broker_info["bhid"]
     b_hex = broker_info["b"]
     broker_name = broker_info["name"]
     s_fmt = _format_dj_date(start_date)
     e_fmt = _format_dj_date(end_date)
 
-    params = [f"A={stock_id}"]
-    if bhid:
-        params.append(f"BHID={bhid}")
+    # 依序嘗試：1. 指定區間(C=1&D=&E=)  2. 預設完整歷史(a, b, BHID)  3. 精簡版(a, b)
+    candidate_paths = []
+    if bhid and b_hex:
+        candidate_paths.append(f"/z/zc/zco/zco0/zco0.djhtm?A={stock_id}&BHID={bhid}&b={b_hex}&C=1&D={s_fmt}&E={e_fmt}")
+        candidate_paths.append(f"/z/zc/zco/zco0/zco0.djhtm?a={stock_id}&b={b_hex}&BHID={bhid}")
     if b_hex:
-        params.append(f"b={b_hex}")
-    params.extend(["C=1", f"D={s_fmt}", f"E={e_fmt}"])
-    path = f"/z/zc/zco/zco0/zco0.djhtm?{'&'.join(params)}"
+        candidate_paths.append(f"/z/zc/zco/zco0/zco0.djhtm?a={stock_id}&b={b_hex}")
+    if bhid and not b_hex:
+        candidate_paths.append(f"/z/zc/zco/zco0/zco0.djhtm?a={stock_id}&BHID={bhid}&b={bhid}")
 
-    html, _, _ = _fetch_dj_html(session, path, mirror)
-    if not html:
-        return pd.DataFrame(columns=["date", broker_name])
+    for path in candidate_paths:
+        html, _, _ = _fetch_dj_html(session, path, mirror)
+        if not html:
+            continue
 
-    soup = BeautifulSoup(html, "html.parser")
-    records = []
-    for tr in soup.find_all("tr"):
-        tds = [td.get_text(strip=True).replace(",", "").replace("+", "") for td in tr.find_all("td")]
-        if len(tds) >= 4:
-            ad_date = _parse_dj_date(tds[0])
-            if ad_date and start_date <= ad_date <= end_date:
-                try:
-                    records.append({"date": ad_date, broker_name: float(tds[3])})
-                except ValueError:
-                    continue
+        soup = BeautifulSoup(html, "html.parser")
+        records = []
+        for tr in soup.find_all("tr"):
+            tds = [td.get_text(strip=True).replace(",", "").replace("+", "") for td in tr.find_all("td")]
+            # zco0 表格欄位：日期, 買進(張), 賣出(張), 買賣總額(張), 買賣超(張) -> 最後一欄才是買賣超
+            if len(tds) >= 5:
+                ad_date = _parse_dj_date(tds[0])
+                if ad_date and start_date <= ad_date <= end_date:
+                    try:
+                        records.append({"date": ad_date, broker_name: float(tds[-1])})
+                    except ValueError:
+                        continue
 
-    if not records:
-        return pd.DataFrame(columns=["date", broker_name])
-    return pd.DataFrame(records).groupby("date", as_index=False)[broker_name].sum()
+        if records:
+            return pd.DataFrame(records).groupby("date", as_index=False)[broker_name].sum()
+
+    return pd.DataFrame(columns=["date", broker_name])
 
 
 def analyze_main_force(df_price: pd.DataFrame, df_chips: pd.DataFrame, period_label: str) -> dict:
