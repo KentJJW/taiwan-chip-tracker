@@ -1,10 +1,12 @@
 import os
+import re
 import json
+from datetime import datetime
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from data_engine import DB_DIR, update_stock_database
+from data_engine import DB_DIR, START_DATE_FIXED, update_stock_database, analyze_main_force
 
 st.set_page_config(page_title="台股主力分點吃貨／出貨追蹤系統", layout="wide")
 
@@ -46,19 +48,42 @@ def get_saved_stocks() -> list:
     })
 
 
+def parse_manual_date(text: str, fallback: str) -> str:
+    """支援手動輸入 20260501、2026/5/1、2026-05-01 等格式"""
+    raw = text.strip()
+    digits = re.sub(r"\D", "", raw)
+    if len(digits) == 8:
+        try:
+            return datetime.strptime(digits, "%Y%m%d").strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+    m = re.match(r"^(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})$", raw)
+    if m:
+        try:
+            return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3))).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+    return fallback
+
+
 st.markdown("### 📈 台股主力分點吃貨／出貨追蹤系統")
 
-# --- 側邊欄：查詢與 database 管理 ---
+# --- 側邊欄：查詢與統計區間設定 ---
 with st.sidebar:
     st.header("🔍 查詢與建檔")
     input_stock = st.text_input("輸入台股代號（例如：6488、2330、3231）", value="6488").strip()
-    range_mode = st.radio(
-        "統計區間",
-        options=["YTD", "1Y"],
-        format_func=lambda x: "今年以來 (2026 YTD)" if x == "YTD" else "近一年 (365天)",
-        horizontal=True
-    )
-    btn_query = st.button("抓取／更新籌碼資料", type="primary", use_container_width=True)
+    btn_query = st.button("抓取／更新資料 (2026/01/02起)", type="primary", use_container_width=True)
+
+    st.divider()
+    st.subheader("📅 統計區間")
+    range_type = st.radio("選擇檢視範圍", options=["全部", "指定日期"], horizontal=True)
+
+    custom_start_str = "20260102"
+    custom_end_str = datetime.today().strftime("%Y%m%d")
+    if range_type == "指定日期":
+        st.caption("請直接輸入 8 碼數字（例：20260501）")
+        custom_start_str = st.text_input("起始日期", value="20260102")
+        custom_end_str = st.text_input("結束日期", value=datetime.today().strftime("%Y%m%d"))
 
     saved_list = get_saved_stocks()
     st.divider()
@@ -78,70 +103,94 @@ if target_stock:
     meta_path = os.path.join(DB_DIR, f"{target_stock}_meta.json")
 
     if btn_query or not os.path.exists(price_path):
-        with st.spinner(f"正在抓取 {target_stock} 今年以來股價、投信與各券商分點明細，並寫入 database/ ..."):
-            ok = update_stock_database(target_stock, mode=range_mode)
+        with st.spinner(f"正在從 2026/01/02 抓取 {target_stock} 股價、投信與前 25 大券商分點明細..."):
+            ok = update_stock_database(target_stock)
             if not ok:
                 st.error(f"找不到股票代號 `{target_stock}`，請確認是否為正確的上市櫃代號。")
                 st.stop()
             st.rerun()
 
-    df_price = pd.read_csv(price_path)
-    df_chips = pd.read_csv(chips_path)
+    df_price_full = pd.read_csv(price_path)
+    df_chips_full = pd.read_csv(chips_path)
     with open(meta_path, "r", encoding="utf-8") as f:
-        meta = json.load(f)
+        meta_saved = json.load(f)
 
-    period_label = meta.get("period_label", "今年以來")
-    broker_count = meta.get("broker_count", 0)
+    # 依「全部」或「指定日期」篩選資料區間
+    min_date = df_price_full["date"].min()
+    max_date = df_price_full["date"].max()
 
-    if broker_count == 0 and meta.get("debug_notes"):
-        st.warning(f"⚠️ 分點明細未完整取得（{ '；'.join(meta['debug_notes']) }），請點擊左側「抓取／更新籌碼資料」重試。")
+    if range_type == "指定日期":
+        start_filter = parse_manual_date(custom_start_str, min_date)
+        end_filter = parse_manual_date(custom_end_str, max_date)
+        if start_filter > end_filter:
+            st.error("起始日期不可晚於結束日期，請重新輸入。")
+            st.stop()
+        period_label = f"{start_filter} ~ {end_filter}"
+    else:
+        start_filter = START_DATE_FIXED
+        end_filter = max_date
+        period_label = f"{min_date} ~ {max_date}（全部）"
+
+    df_price = df_price_full[(df_price_full["date"] >= start_filter) & (df_price_full["date"] <= end_filter)].copy()
+    df_chips = df_chips_full[(df_chips_full["date"] >= start_filter) & (df_chips_full["date"] <= end_filter)].copy()
+
+    if df_price.empty:
+        st.warning(f"在指定區間 `{start_filter} ~ {end_filter}` 內查無交易資料，請確認輸入的日期。")
+        st.stop()
+
+    # 依目前選定的區間即時重算主力是誰、吃貨還是出貨
+    analysis = analyze_main_force(df_price, df_chips, period_label)
+    broker_count = len([c for c in df_chips.columns if c not in ("date", "投信")])
+
+    if broker_count == 0 and meta_saved.get("debug_notes"):
+        st.warning(f"⚠️ 分點明細未取得（{'；'.join(meta_saved['debug_notes'])}），請點左側按鈕重試。")
 
     # --- 區塊一：直接回答「主力是誰」與「吃貨還是出貨」 ---
-    st.markdown(f"#### 🎯 {target_stock} 主力診斷結論（{period_label}｜已追蹤 {broker_count} 個關鍵分點）")
-    if meta.get("github_sync"):
-        st.caption(f"雲端資料庫狀態：{meta['github_sync']}")
+    st.markdown(f"#### 🎯 {target_stock} 主力診斷結論（{period_label}｜已追蹤 {broker_count} 個券商分點）")
+    if meta_saved.get("github_sync"):
+        st.caption(f"雲端資料庫狀態：{meta_saved['github_sync']}")
 
     c1, c2, c3 = st.columns([2.2, 2, 1.2])
     with c1:
         st.markdown(f"""
         <div class="summary-card">
-            <div class="card-label">{period_label}最大主力</div>
-            <div class="card-value">{meta.get("main_force", "N/A")}</div>
+            <div class="card-label">區間最大主力</div>
+            <div class="card-value">{analysis.get("main_force", "N/A")}</div>
         </div>
         """, unsafe_allow_html=True)
     with c2:
         st.markdown(f"""
         <div class="summary-card">
             <div class="card-label">目前籌碼狀態</div>
-            <div class="card-value">{meta.get("status", "N/A")}</div>
+            <div class="card-value">{analysis.get("status", "N/A")}</div>
         </div>
         """, unsafe_allow_html=True)
     with c3:
         st.markdown(f"""
         <div class="summary-card">
-            <div class="card-label">最新收盤價</div>
+            <div class="card-label">區間最新收盤價</div>
             <div class="card-value">{df_price.iloc[-1]['close']:.2f} 元</div>
-            <div class="card-sub">更新：{meta.get('last_updated', '')[:10]}</div>
+            <div class="card-sub">資料更新：{meta_saved.get('last_updated', '')[:10]}</div>
         </div>
         """, unsafe_allow_html=True)
 
     st.write("")
-    for line in meta.get("details", []):
+    for line in analysis.get("details", []):
         st.markdown(f"- {line}")
 
-    top_buyers = meta.get("top_buyers", {})
-    top_sellers = meta.get("top_sellers", {})
+    top_buyers = analysis.get("top_buyers", {})
+    top_sellers = analysis.get("top_sellers", {})
     if top_buyers:
-        st.caption(f"🟢 {period_label}累計買超前 5 大（外資依個別券商統計）：" +
+        st.caption("🟢 區間累計買超前 5 大（外資依個別券商統計）：" +
                    " ｜ ".join([f"**{k}**: {v:+,} 張" for k, v in top_buyers.items()]))
     if top_sellers:
-        st.caption(f"🔴 {period_label}累計賣超前 5 大（外資依個別券商統計）：" +
+        st.caption("🔴 區間累計賣超前 5 大（外資依個別券商統計）：" +
                    " ｜ ".join([f"**{k}**: {v:+,} 張" for k, v in top_sellers.items()]))
 
     st.divider()
 
     # --- 區塊二：上方股價折線 ＋ 下方主力買賣超長條圖(紅買綠賣)與統計張數折線 ---
-    st.markdown(f"#### 📉 {period_label}股價 vs. 主力買賣超長條圖與統計張數")
+    st.markdown(f"#### 📉 股價 vs. 主力買賣超長條圖與統計張數（{period_label}）")
 
     available_brokers = [c for c in df_chips.columns if c != "date"]
     default_selected = [list(top_buyers.keys())[0]] if top_buyers else available_brokers[:1]
@@ -165,7 +214,6 @@ if target_stock:
     else:
         df_plot = df_price[["date", "close"]].merge(df_chips, on="date", how="left").fillna(0)
 
-        # 建立上下兩層子圖：上層股價、下層主力買賣超長條圖(主軸) + 統計張數折線(副軸)
         fig = make_subplots(
             rows=2,
             cols=1,
@@ -175,7 +223,7 @@ if target_stock:
             specs=[[{"secondary_y": False}], [{"secondary_y": True}]]
         )
 
-        # 1. 上方子圖：收盤價折線
+        # 上層：股價折線
         fig.add_trace(
             go.Scatter(
                 x=df_plot["date"],
@@ -186,7 +234,7 @@ if target_stock:
             row=1, col=1, secondary_y=False
         )
 
-        # 2. 下方子圖：每日買賣超長條圖（紅色買超往上、綠色賣超往下）
+        # 下層主軸：每日買賣超長條圖（紅買超往上、綠賣超往下）
         daily_net = df_plot[selected_brokers].sum(axis=1)
         bar_colors = ["#ef5350" if v >= 0 else "#26a69a" for v in daily_net]
         bar_label = f"{selected_brokers[0]} 每日買賣超" if len(selected_brokers) == 1 else f"所選({len(selected_brokers)}個)合計每日買賣超"
@@ -202,7 +250,7 @@ if target_stock:
             row=2, col=1, secondary_y=False
         )
 
-        # 3. 下方子圖疊加：統計張數（累計淨買賣超折線）
+        # 下層副軸：統計張數折線（累計買賣超）
         if chart_mode == "所選分點加總合力" or len(selected_brokers) == 1:
             cum_total = daily_net.cumsum()
             line_label = f"{selected_brokers[0]} 統計張數" if len(selected_brokers) == 1 else "所選合力統計張數"
