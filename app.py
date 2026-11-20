@@ -263,7 +263,7 @@ if "active_stock" not in st.session_state:
 with st.sidebar:
     st.header("🔍 查詢與建檔")
     input_stock = st.text_input("輸入台股代號（例如：6488、2330、3231）", value="6488").strip()
-    btn_query = st.button("抓取／更新資料 (2026/01/02起)", type="primary", use_container_width=True)
+    btn_query = st.button("抓取／更新資料 (2026/01/02起)", type="primary", width="stretch")
 
     st.divider()
     st.subheader("📅 統計區間")
@@ -290,11 +290,11 @@ with st.sidebar:
             with col_s:
                 is_current = (sid == st.session_state.get("active_stock"))
                 btn_label = f"▶ {display_name}" if is_current else display_name
-                if st.button(btn_label, key=f"sel_{sid}", use_container_width=True):
+                if st.button(btn_label, key=f"sel_{sid}", width="stretch"):
                     st.session_state["active_stock"] = sid
                     st.rerun()
             with col_del:
-                if st.button("✕", key=f"del_{sid}", help=f"刪除 {display_name} 的所有歷史資料", use_container_width=True):
+                if st.button("✕", key=f"del_{sid}", help=f"刪除 {display_name} 的所有歷史資料", width="stretch"):
                     with st.spinner(f"正在刪除 {display_name}..."):
                         delete_stock_database(sid)
                         remaining = get_saved_stocks()
@@ -314,7 +314,7 @@ if target_stock:
     meta_path = os.path.join(DB_DIR, f"{target_stock}_meta.json")
 
     if btn_query or not os.path.exists(price_path):
-        with st.spinner(f"正在從 2026/01/02 抓取 {target_stock} 股價、投信與前 25 大券商分點明細..."):
+        with st.spinner(f"正在從 2026/01/02 抓取 {target_stock} 股價、投信與前 30 大券商分點明細..."):
             ok = update_stock_database(target_stock)
             if not ok:
                 st.error(f"找不到股票代號 `{target_stock}`，請確認是否為正確的上市櫃代號（目前不支援興櫃）。")
@@ -533,7 +533,7 @@ if target_stock:
     with col_btn:
         st.write("")
         st.write("")
-        if st.button("⚡ 帶入前三大主力", use_container_width=True, disabled=not bool(top3_names)):
+        if st.button("⚡ 帶入前三大主力", width="stretch", disabled=not bool(top3_names)):
             st.session_state[ms_key] = [n for n in top3_names if n in available_brokers]
             st.rerun()
     with col_ma:
@@ -704,6 +704,6 @@ if target_stock:
         fig.update_yaxes(title_text="每日買賣超 (張)", row=2, col=1, secondary_y=False, showgrid=True, zeroline=True, tickformat=",.0f")
         fig.update_yaxes(title_text="統計張數 (累計張)", row=2, col=1, secondary_y=True, showgrid=False, tickformat=",.0f")
 
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 else:
     st.info("👈 請在左側輸入上市或上櫃股票代號（例如 `6488`、`2330`）開始查詢。")
