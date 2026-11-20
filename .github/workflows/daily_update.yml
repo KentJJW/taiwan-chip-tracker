@@ -2,7 +2,7 @@ name: Daily Stock Chip Update
 
 on:
   schedule:
-    # 台灣時間每日 19:00（UTC 11:00）；週一至週五執行（UTC 11:00 對應台北時間週一至週五 19:00）
+    # 台灣時間每日 19:00（UTC 11:00）；週一至週五執行
     - cron: "0 11 * * 1-5"
   workflow_dispatch:
 
@@ -27,7 +27,7 @@ jobs:
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           else
-            pip install requests pandas yfinance beautifulsoup4
+            pip install requests pandas yfinance beautifulsoup4 urllib3
           fi
 
       - name: Run data_engine.py to update all saved stocks
@@ -47,5 +47,6 @@ jobs:
             echo "No database changes to commit."
           else
             git commit -m "chore: daily stock chip update ($(TZ=Asia/Taipei date '+%Y-%m-%d %H:%M'))"
-            git push
+            git pull --rebase origin main
+            git push origin main
           fi
