@@ -174,8 +174,7 @@ if target_stock:
         """, unsafe_allow_html=True)
 
     st.write("")
-    for line in analysis.get("details", []):
-        st.markdown(f"- {line}")
+    st.markdown("\n".join(analysis.get("details", [])))
 
     top_buyers = analysis.get("top_buyers", {})
     top_sellers = analysis.get("top_sellers", {})
