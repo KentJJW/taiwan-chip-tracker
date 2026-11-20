@@ -138,12 +138,11 @@ if target_stock:
         st.warning(f"在指定區間 `{start_filter} ~ {end_filter}` 內查無交易資料，請確認輸入的日期。")
         st.stop()
 
-    # 依目前選定的區間即時重算主力是誰、吃貨還是出貨
     analysis = analyze_main_force(df_price, df_chips, period_label)
     broker_count = len([c for c in df_chips.columns if c not in ("date", "投信")])
 
     if broker_count == 0 and meta_saved.get("debug_notes"):
-        st.warning(f"⚠️ 分點明細未取得（{'；'.join(meta_saved['debug_notes'])}），請點左側按鈕重試。")
+        st.warning(f"⚠️ 分點明細未取得（{'；'.join(meta_saved['debug_notes'])}）")
 
     # --- 區塊一：直接回答「主力是誰」與「吃貨還是出貨」 ---
     st.markdown(f"#### 🎯 {target_stock} 主力診斷結論（{period_label}｜已追蹤 {broker_count} 個券商分點）")
@@ -229,7 +228,8 @@ if target_stock:
                 x=df_plot["date"],
                 y=df_plot["close"],
                 name="收盤價 (元)",
-                line=dict(color="#FFD700", width=2.2)
+                line=dict(color="#FFD700", width=2.2),
+                hovertemplate="%{y:,.2f} 元<extra>收盤價</extra>"
             ),
             row=1, col=1, secondary_y=False
         )
@@ -245,12 +245,13 @@ if target_stock:
                 y=daily_net,
                 name=f"{bar_label} (張)",
                 marker_color=bar_colors,
-                opacity=0.85
+                opacity=0.85,
+                hovertemplate="%{y:+,.0f} 張<extra>" + bar_label + "</extra>"
             ),
             row=2, col=1, secondary_y=False
         )
 
-        # 下層副軸：統計張數折線（累計買賣超）
+        # 下層副軸：統計張數折線（累計買賣超，完整整數張數不顯示 K）
         if chart_mode == "所選分點加總合力" or len(selected_brokers) == 1:
             cum_total = daily_net.cumsum()
             line_label = f"{selected_brokers[0]} 統計張數" if len(selected_brokers) == 1 else "所選合力統計張數"
@@ -259,7 +260,8 @@ if target_stock:
                     x=df_plot["date"],
                     y=cum_total,
                     name=f"{line_label} (累計張)",
-                    line=dict(color="#00E5FF", width=2.5)
+                    line=dict(color="#00E5FF", width=2.5),
+                    hovertemplate="%{y:+,.0f} 張<extra>" + line_label + "</extra>"
                 ),
                 row=2, col=1, secondary_y=True
             )
@@ -270,7 +272,8 @@ if target_stock:
                         x=df_plot["date"],
                         y=df_plot[b_name].cumsum(),
                         name=f"{b_name} 統計張數",
-                        line=dict(width=2)
+                        line=dict(width=2),
+                        hovertemplate="%{y:+,.0f} 張<extra>" + b_name + "</extra>"
                     ),
                     row=2, col=1, secondary_y=True
                 )
@@ -285,7 +288,7 @@ if target_stock:
             margin=dict(l=20, r=20, t=40, b=20)
         )
         fig.update_yaxes(title_text="收盤價 (元)", row=1, col=1, showgrid=True)
-        fig.update_yaxes(title_text="每日買賣超 (張)", row=2, col=1, secondary_y=False, showgrid=True, zeroline=True)
-        fig.update_yaxes(title_text="統計張數 (累計張)", row=2, col=1, secondary_y=True, showgrid=False)
+        fig.update_yaxes(title_text="每日買賣超 (張)", row=2, col=1, secondary_y=False, showgrid=True, zeroline=True, tickformat=",.0f")
+        fig.update_yaxes(title_text="統計張數 (累計張)", row=2, col=1, secondary_y=True, showgrid=False, tickformat=",.0f")
 
         st.plotly_chart(fig, use_container_width=True)
