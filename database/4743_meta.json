@@ -1,0 +1,69 @@
+{
+  "main_force_html": "美林（今年 <span style=\"color:#ef5350; font-weight:700;\">+3,894 張</span>）",
+  "main_force_sub_lines": [
+    "今年累計買超 <span style=\"color:#ef5350; font-weight:700;\">+10,395 張</span> ／ 賣超 <span style=\"color:#26a69a; font-weight:700;\">-6,501 張</span>（淨額 <span style=\"color:#ef5350; font-weight:700;\">+3,894 張</span>）",
+    "目前庫存均價：<b style='color:#ffb74d;'>51.03 元</b>（帳面損益 <span style=\"color:#26a69a; font-weight:700;\">-30.34%</span>）"
+  ],
+  "status_html": "🟢 區間內三大主力吃貨中（<span style=\"color:#ef5350; font-weight:700;\">+7,794 張</span>）",
+  "status_sub": "三大主力名單：美林, 元大-永和, 統一-屏東",
+  "divergence_alert": null,
+  "top3_names": [
+    "美林",
+    "元大-永和",
+    "統一-屏東"
+  ],
+  "top3_header_md": "- 今年前三大主力（**美林, 元大-永和, 統一-屏東**）本區間合計：:red[**+7,794 張**]（近 20 日合計：:green[**-171 張**]）",
+  "top3_rows": [
+    {
+      "name": "美林",
+      "ytd": 3894,
+      "period": 3894,
+      "d1": 27,
+      "d10": 2,
+      "d20": 29,
+      "streak": 2,
+      "ctrl_pct": 0.7
+    },
+    {
+      "name": "元大-永和",
+      "ytd": 2137,
+      "period": 2137,
+      "d1": 3,
+      "d10": 6,
+      "d20": -1,
+      "streak": 3,
+      "ctrl_pct": 0.4
+    },
+    {
+      "name": "統一-屏東",
+      "ytd": 1763,
+      "period": 1763,
+      "d1": 9,
+      "d10": -58,
+      "d20": -199,
+      "streak": 1,
+      "ctrl_pct": 0.3
+    }
+  ],
+  "remark_md": "- 💡 備註：本檢視區間買超第一名為 **美林**（:red[**+3,894 張**]） ｜ 賣超第一名為 **摩根大通**（:green[**-3,425 張**]）",
+  "top_buyers": {
+    "美林": 3894,
+    "元大-永和": 2137,
+    "統一-屏東": 1763,
+    "港商野村": 1600,
+    "華南永昌": 1073
+  },
+  "top_sellers": {
+    "摩根大通": -3425,
+    "美商高盛": -2010,
+    "台灣摩根士丹利": -1222,
+    "群益金鼎-新竹": -847,
+    "凱基-東港": -698
+  },
+  "stock_id": "4743",
+  "stock_name": "合一",
+  "broker_count": 42,
+  "last_updated": "2026-11-20 22:34",
+  "debug_notes": [],
+  "github_sync": "✅ 已同步至 GitHub database/"
+}
