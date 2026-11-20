@@ -58,12 +58,12 @@
     "永豐金-匯立": -446,
     "香港上海匯豐": -415,
     "美林": -342,
-    "國泰證券": -251
+    "國泰證券": -260
   },
   "stock_id": "5274",
   "stock_name": "信驊",
-  "broker_count": 35,
-  "last_updated": "2026-11-20 22:08",
+  "broker_count": 36,
+  "last_updated": "2026-11-20 22:32",
   "debug_notes": [],
-  "github_sync": "✅ GitHub Actions 自動增量同步（近 3 日）"
+  "github_sync": "✅ 已同步至 GitHub database/"
 }
