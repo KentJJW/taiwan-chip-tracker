@@ -347,6 +347,53 @@ def _sync_file_to_github(local_path: str, repo_path: str) -> tuple[bool, str]:
     return False, f"GitHub 寫入失敗 (HTTP {put_resp.status_code}: {err_msg})"
 
 
+def _delete_file_from_github(repo_path: str) -> tuple[bool, str]:
+    """透過 GitHub REST API 刪除儲存庫內的單一檔案"""
+    token, repo = _get_github_config()
+    if not token or not repo:
+        return False, "未設定 GITHUB_TOKEN 或 REPO_NAME"
+
+    api_url = f"https://api.github.com/repos/{repo}/contents/{repo_path}"
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+
+    get_resp = requests.get(api_url, headers=headers, timeout=10)
+    if get_resp.status_code == 404:
+        return True, "檔案已不存在"
+    if get_resp.status_code != 200:
+        return False, f"查詢失敗 (HTTP {get_resp.status_code})"
+
+    sha = get_resp.json().get("sha")
+    payload = {
+        "message": f"Delete {repo_path} from Streamlit",
+        "sha": sha
+    }
+    del_resp = requests.delete(api_url, headers=headers, json=payload, timeout=15)
+    if del_resp.status_code in (200, 204):
+        return True, "已從 GitHub 刪除"
+    return False, f"GitHub 刪除失敗 (HTTP {del_resp.status_code})"
+
+
+def delete_stock_database(stock_id: str) -> tuple[bool, str]:
+    """同時刪除本地 database/ 與 GitHub 上的該個股所有資料檔"""
+    stock_id = stock_id.strip()
+    target_files = [
+        f"{stock_id}_price.csv",
+        f"{stock_id}_chips.csv",
+        f"{stock_id}_meta.json"
+    ]
+
+    for fname in target_files:
+        local_path = os.path.join(DB_DIR, fname)
+        if os.path.exists(local_path):
+            os.remove(local_path)
+        _delete_file_from_github(f"database/{fname}")
+
+    return True, f"已刪除 {stock_id}"
+
+
 def update_stock_database(stock_id: str) -> bool:
     """固定從 2026-01-02 開始抓取指定個股股價、投信與前 25 大券商分點，存檔至 database/"""
     stock_id = stock_id.strip()
