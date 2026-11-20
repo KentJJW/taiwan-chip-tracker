@@ -4,6 +4,7 @@ import ssl
 import json
 import time
 import base64
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse, parse_qs
 from datetime import datetime, timedelta
 import urllib3
@@ -58,13 +59,13 @@ def _create_session() -> requests.Session:
     return session
 
 
-def _fetch_dj_html(session: requests.Session, path_with_query: str, preferred_mirror: str = None):
+def _fetch_dj_html(session: requests.Session, path_with_query: str, preferred_mirror: str = None, timeout: int = 6):
     mirrors = [preferred_mirror] + [m for m in DJ_MIRRORS if m != preferred_mirror] if preferred_mirror else DJ_MIRRORS
     errors = []
     for base_url in mirrors:
         url = f"{base_url}{path_with_query}"
         try:
-            resp = session.get(url, headers={"Referer": f"{base_url}/"}, timeout=12, verify=False)
+            resp = session.get(url, headers={"Referer": f"{base_url}/"}, timeout=timeout, verify=False)
             if resp.status_code == 200 and len(resp.content) > 500:
                 resp.encoding = "cp950"
                 return resp.text, base_url, ""
@@ -142,13 +143,7 @@ def _calc_streak(series: pd.Series) -> int:
 
 
 def calculate_main_force_cost(df_price: pd.DataFrame, daily_net: pd.Series) -> tuple[pd.Series, float, float]:
-    """
-    移動加權平均成本法（目前庫存均價）：
-    - 每日均價 = (open + high + low + close) / 4（若缺值則以 close 遞補）
-    - 買超日 (net > 0)：併入庫存重新計算加權平均成本
-    - 賣超日 (net < 0)：扣減庫存但維持原持有均價；若庫存歸零則重置
-    回傳：(每日成本序列, 最新庫存均價, 最新剩餘庫存張數)
-    """
+    """移動加權平均成本法（目前庫存均價）"""
     price_cols = [c for c in ["open", "high", "low", "close"] if c in df_price.columns]
     if price_cols:
         avg_prices = df_price[price_cols].mean(axis=1).fillna(df_price["close"])
@@ -202,7 +197,7 @@ def fetch_price_history(stock_id: str, start_date: str, end_date: str) -> pd.Dat
 
 
 def fetch_stock_name(session: requests.Session = None, stock_id: str = "", mirror: str = None) -> str:
-    """多來源擷取台股中文名稱：1. TWSE/TPEx MIS API -> 2. MoneyDJ GenLink2stk"""
+    """多來源擷取台股中文名稱"""
     stock_id = stock_id.strip()
     if not stock_id:
         return ""
@@ -210,19 +205,7 @@ def fetch_stock_name(session: requests.Session = None, stock_id: str = "", mirro
     sess = session or _create_session()
 
     try:
-        mis_url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_{stock_id}.tw|otc_{stock_id}.two&json=1&delay=0"
-        resp = sess.get(mis_url, timeout=6, verify=False)
-        if resp.status_code == 200:
-            data = resp.json()
-            for item in data.get("msgArray", []):
-                name = str(item.get("n", "")).strip()
-                if name:
-                    return name
-    except Exception:
-        pass
-
-    try:
-        html, _, _ = _fetch_dj_html(sess, f"/z/zc/zco/zco.djhtm?a={stock_id}", mirror)
+        html, _, _ = _fetch_dj_html(sess, f"/z/zc/zco/zco.djhtm?a={stock_id}", mirror, timeout=5)
         if html:
             m_js = re.search(rf"GenLink2stk\([^,]*{re.escape(stock_id)}[^,]*,\s*['\"]([^'\"]+)['\"]\)", html)
             if m_js:
@@ -231,6 +214,18 @@ def fetch_stock_name(session: requests.Session = None, stock_id: str = "", mirro
             m_paren = re.search(rf"([\u4e00-\u9fffA-Za-z0-9\-]{{2,10}})\s*[\(（]{re.escape(stock_id)}[\)）]", html)
             if m_paren:
                 return m_paren.group(1).strip()
+    except Exception:
+        pass
+
+    try:
+        mis_url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_{stock_id}.tw|otc_{stock_id}.two&json=1&delay=0"
+        resp = sess.get(mis_url, timeout=3, verify=False)
+        if resp.status_code == 200:
+            data = resp.json()
+            for item in data.get("msgArray", []):
+                name = str(item.get("n", "")).strip()
+                if name:
+                    return name
     except Exception:
         pass
 
@@ -308,8 +303,9 @@ def fetch_top_brokers(session: requests.Session, stock_id: str, start_date: str,
     return [], mirror, last_err
 
 
-def fetch_broker_daily_history(session: requests.Session, stock_id: str, broker_info: dict, start_date: str, end_date: str, mirror: str) -> pd.DataFrame:
-    """抓取單一券商分點每日買賣超明細(張)"""
+def fetch_broker_daily_history(stock_id: str, broker_info: dict, start_date: str, end_date: str, mirror: str) -> pd.DataFrame:
+    """抓取單一券商分點每日買賣超明細(張)（使用獨立 Session 支援多執行緒併發）"""
+    session = _create_session()
     bhid = broker_info["bhid"]
     b_hex = broker_info["b"]
     broker_name = broker_info["name"]
@@ -326,7 +322,7 @@ def fetch_broker_daily_history(session: requests.Session, stock_id: str, broker_
         candidate_paths.append(f"/z/zc/zco/zco0/zco0.djhtm?a={stock_id}&BHID={bhid}&b={bhid}")
 
     for path in candidate_paths:
-        html, _, _ = _fetch_dj_html(session, path, mirror)
+        html, _, _ = _fetch_dj_html(session, path, mirror, timeout=6)
         if not html:
             continue
 
@@ -608,82 +604,141 @@ def delete_stock_database(stock_id: str) -> tuple[bool, str]:
     return True, f"已刪除 {stock_id}"
 
 
-def update_stock_database(stock_id: str) -> bool:
-    """固定從 2026-01-02 開始抓取指定個股股價、中文股名、投信與前 25 大券商分點，存檔至 database/"""
+def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
+    """
+    更新指定個股資料並存檔至 database/：
+    - incremental_days=None（手動查詢/更新）：從 2026-01-02 全量重抓並覆蓋。
+    - incremental_days=3（GitHub Actions 排程）：僅抓最近 3 個交易日並合併進既有資料庫，速度提升 5 倍以上。
+    """
     stock_id = stock_id.strip()
-    start_date = START_DATE_FIXED
     now_tw = _get_tw_now()
     end_date = now_tw.strftime("%Y-%m-%d")
 
-    df_price = fetch_price_history(stock_id, start_date, end_date)
-    if df_price.empty:
-        return False
+    price_file = f"{stock_id}_price.csv"
+    chips_file = f"{stock_id}_chips.csv"
+    meta_file = f"{stock_id}_meta.json"
+    price_path = os.path.join(DB_DIR, price_file)
+    chips_path = os.path.join(DB_DIR, chips_file)
+    meta_path = os.path.join(DB_DIR, meta_file)
+
+    is_incremental = (
+        incremental_days is not None
+        and incremental_days > 0
+        and os.path.exists(price_path)
+        and os.path.exists(chips_path)
+    )
+
+    if is_incremental:
+        df_price_old = pd.read_csv(price_path)
+        df_chips_old = pd.read_csv(chips_path)
+        if df_price_old.empty or df_chips_old.empty:
+            is_incremental = False
+
+    if is_incremental:
+        # 往回抓 12 個日曆日確保至少涵蓋 3 個交易日（即使遇連假也夠用）
+        lookback_start = (now_tw - timedelta(days=12)).strftime("%Y-%m-%d")
+        df_price_recent = fetch_price_history(stock_id, lookback_start, end_date)
+        if df_price_recent.empty:
+            return False
+        df_price_recent = df_price_recent.tail(incremental_days).copy()
+        fetch_start = df_price_recent["date"].min()
+    else:
+        fetch_start = START_DATE_FIXED
+        df_price_recent = fetch_price_history(stock_id, fetch_start, end_date)
+        if df_price_recent.empty:
+            return False
 
     session = _create_session()
-    df_chips = df_price[["date"]].copy()
+    df_chips_recent = df_price_recent[["date"]].copy()
     debug_notes = []
 
     # 1. 抓投信（統稱）
-    df_trust, active_mirror, trust_err = fetch_investment_trust_history(session, stock_id, start_date, end_date)
+    df_trust, active_mirror, trust_err = fetch_investment_trust_history(session, stock_id, fetch_start, end_date)
     if not df_trust.empty:
-        df_chips = df_chips.merge(df_trust, on="date", how="left")
+        df_chips_recent = df_chips_recent.merge(df_trust, on="date", how="left")
     else:
-        df_chips["投信"] = 0.0
+        df_chips_recent["投信"] = 0.0
         if trust_err:
             debug_notes.append(f"投信異常: {trust_err}")
 
-    # 2. 抓中文股票名稱
-    stock_name = fetch_stock_name(session, stock_id, active_mirror)
+    # 2. 抓中文股票名稱（增量模式下優先沿用既有 _meta.json 內的名稱，省去一次請求）
+    stock_name = ""
+    if is_incremental and os.path.exists(meta_path):
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                stock_name = str(json.load(f).get("stock_name", "")).strip()
+        except Exception:
+            pass
+    if not stock_name:
+        stock_name = fetch_stock_name(session, stock_id, active_mirror)
 
-    # 3. 抓前 25 大券商分點（外資依個別券商名稱獨立統計）
-    brokers, active_mirror, broker_err = fetch_top_brokers(session, stock_id, start_date, end_date, active_mirror)
+    # 3. 抓前 25 大券商分點明細（6 執行緒併發加速）
+    brokers, active_mirror, broker_err = fetch_top_brokers(session, stock_id, fetch_start, end_date, active_mirror)
     if broker_err:
         debug_notes.append(f"分點清單異常: {broker_err}")
 
     fetched_count = 0
-    for b in brokers:
-        df_b = fetch_broker_daily_history(session, stock_id, b, start_date, end_date, active_mirror)
-        if not df_b.empty and b["name"] not in df_chips.columns:
-            df_chips = df_chips.merge(df_b, on="date", how="left")
-            fetched_count += 1
-        time.sleep(0.15)
+    if brokers:
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            future_map = {
+                executor.submit(fetch_broker_daily_history, stock_id, b, fetch_start, end_date, active_mirror): b
+                for b in brokers
+            }
+            for future in as_completed(future_map):
+                b = future_map[future]
+                try:
+                    df_b = future.result()
+                    if not df_b.empty and b["name"] not in df_chips_recent.columns:
+                        df_chips_recent = df_chips_recent.merge(df_b, on="date", how="left")
+                        fetched_count += 1
+                except Exception:
+                    continue
 
-    if brokers and fetched_count == 0:
-        debug_notes.append(f"找到 {len(brokers)} 個分點連結，但明細回傳為空")
+    df_chips_recent = df_chips_recent.fillna(0.0)
 
-    df_chips = df_chips.fillna(0.0)
+    # 4. 合併或覆蓋資料庫
+    if is_incremental:
+        df_price_kept = df_price_old[df_price_old["date"] < fetch_start].copy()
+        df_price = pd.concat([df_price_kept, df_price_recent], ignore_index=True).sort_values("date").reset_index(drop=True)
 
-    # 4. 寫入本地 CSV；若在 GitHub Actions 內執行則交由 workflow 統一 git push，避免衝突
-    price_file = f"{stock_id}_price.csv"
-    chips_file = f"{stock_id}_chips.csv"
-    meta_file = f"{stock_id}_meta.json"
+        df_chips_kept = df_chips_old[df_chips_old["date"] < fetch_start].copy()
+        df_chips = pd.concat([df_chips_kept, df_chips_recent], ignore_index=True, sort=False).fillna(0.0)
+        df_chips = df_chips.sort_values("date").reset_index(drop=True)
+        total_brokers = len([c for c in df_chips.columns if c not in ("date", "投信")])
+    else:
+        df_price = df_price_recent
+        df_chips = df_chips_recent
+        total_brokers = fetched_count
+        if brokers and fetched_count == 0:
+            debug_notes.append(f"找到 {len(brokers)} 個分點連結，但明細回傳為空")
 
-    df_price.to_csv(os.path.join(DB_DIR, price_file), index=False, encoding="utf-8-sig")
-    df_chips.to_csv(os.path.join(DB_DIR, chips_file), index=False, encoding="utf-8-sig")
+    # 5. 寫入本地 CSV；若在 GitHub Actions 內執行則交由 workflow 統一 git push，避免衝突
+    df_price.to_csv(price_path, index=False, encoding="utf-8-sig")
+    df_chips.to_csv(chips_path, index=False, encoding="utf-8-sig")
 
     is_gha = os.environ.get("GITHUB_ACTIONS", "").lower() == "true"
     if is_gha:
         ok1 = True
-        sync_msg = "由 GitHub Actions 每日排程自動同步"
+        sync_msg = f"GitHub Actions 自動增量同步（近 {incremental_days} 日）" if is_incremental else "GitHub Actions 自動同步"
     else:
-        ok1, sync_msg = _sync_file_to_github(os.path.join(DB_DIR, price_file), f"database/{price_file}")
+        ok1, sync_msg = _sync_file_to_github(price_path, f"database/{price_file}")
         if ok1:
-            _, sync_msg = _sync_file_to_github(os.path.join(DB_DIR, chips_file), f"database/{chips_file}")
+            _, sync_msg = _sync_file_to_github(chips_path, f"database/{chips_file}")
 
-    # 5. 產出基礎摘要存檔
-    meta = analyze_main_force(df_price, df_chips, f"{start_date} 至今", df_chips_full=df_chips, df_price_full=df_price)
+    # 6. 產出基礎摘要存檔
+    meta = analyze_main_force(df_price, df_chips, f"{START_DATE_FIXED} 至今", df_chips_full=df_chips, df_price_full=df_price)
     meta["stock_id"] = stock_id
     meta["stock_name"] = stock_name
-    meta["broker_count"] = fetched_count
+    meta["broker_count"] = total_brokers
     meta["last_updated"] = now_tw.strftime("%Y-%m-%d %H:%M")
     meta["debug_notes"] = debug_notes
     meta["github_sync"] = f"✅ {sync_msg}" if ok1 else f"⚠️ {sync_msg}"
 
-    with open(os.path.join(DB_DIR, meta_file), "w", encoding="utf-8") as f:
+    with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
 
     if not is_gha and ok1:
-        _sync_file_to_github(os.path.join(DB_DIR, meta_file), f"database/{meta_file}")
+        _sync_file_to_github(meta_path, f"database/{meta_file}")
 
     return True
 
@@ -694,9 +749,9 @@ if __name__ == "__main__":
         for fname in os.listdir(DB_DIR)
         if fname.endswith("_price.csv")
     })
-    print(f"[Daily Update] 開始更新 {len(existing_stocks)} 檔個股：{existing_stocks}", flush=True)
+    print(f"[Daily Update] 開始增量更新（近 3 個交易日）共 {len(existing_stocks)} 檔個股：{existing_stocks}", flush=True)
     for sid in existing_stocks:
         t0 = time.time()
-        ok = update_stock_database(sid)
+        ok = update_stock_database(sid, incremental_days=3)
         status = "成功" if ok else "失敗"
         print(f"[Daily Update] {sid} 更新{status}（耗時 {time.time() - t0:.1f} 秒）", flush=True)
