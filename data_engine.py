@@ -259,7 +259,7 @@ def fetch_investment_trust_history(session: requests.Session, stock_id: str, sta
 
 
 def _extract_brokers_from_html(html: str) -> list:
-    """從 zco.djhtm 解析所有買賣超分點連結"""
+    """從 zco.djhtm 解析所有買賣超分點連結（交錯擷取買超與賣超排行，避免截斷時漏掉賣方）"""
     soup = BeautifulSoup(html, "html.parser")
     brokers = {}
 
@@ -278,8 +278,8 @@ def _extract_brokers_from_html(html: str) -> list:
     return list(brokers.values())
 
 
-def fetch_top_brokers(session: requests.Session, stock_id: str, start_date: str, end_date: str, mirror: str = None):
-    """抓取區間買超前 15 大與賣超前 15 大關鍵券商分點（共 30 個）"""
+def fetch_top_brokers(session: requests.Session, stock_id: str, start_date: str, end_date: str, mirror: str = None, limit: int = 30):
+    """抓取區間買超與賣超關鍵券商分點"""
     s_fmt = _format_dj_date(start_date)
     e_fmt = _format_dj_date(end_date)
 
@@ -297,7 +297,7 @@ def fetch_top_brokers(session: requests.Session, stock_id: str, start_date: str,
             continue
         broker_list = _extract_brokers_from_html(html)
         if broker_list:
-            return broker_list[:30], ok_mirror, ""
+            return broker_list[:limit], ok_mirror, ""
         last_err = f"頁面 {path} 無法解析分點連結 (HTML長度:{len(html)})"
 
     return [], mirror, last_err
@@ -607,7 +607,7 @@ def delete_stock_database(stock_id: str) -> tuple[bool, str]:
 def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
     """
     更新指定個股資料並存檔至 database/：
-    - incremental_days=None（手動查詢/更新）：從 2026-01-02 全量重抓並覆蓋。
+    - incremental_days=None（手動查詢/更新）：聯集「全年度前 30 大波段主力」與「近 3 個交易日前 20 大活躍分點」，回溯全年明細。
     - incremental_days=3（GitHub Actions 排程）：僅抓最近 3 個交易日並合併進既有資料庫。
     """
     stock_id = stock_id.strip()
@@ -671,11 +671,23 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
     if not stock_name:
         stock_name = fetch_stock_name(session, stock_id, active_mirror)
 
-    # 3. 抓買超前 15 大與賣超前 15 大券商分點明細（共 30 個，6 執行緒併發加速）
-    brokers, active_mirror, broker_err = fetch_top_brokers(session, stock_id, fetch_start, end_date, active_mirror)
+    # 3. 取得關鍵券商分點名單
+    brokers, active_mirror, broker_err = fetch_top_brokers(session, stock_id, fetch_start, end_date, active_mirror, limit=30)
     if broker_err:
         debug_notes.append(f"分點清單異常: {broker_err}")
 
+    # 全量模式額外聯集「近 3 個交易日前 20 大活躍分點」，確保突然建倉或突發倒貨的分點完整納入
+    if not is_incremental and len(df_price_recent) >= 3:
+        recent_3d_start = df_price_recent.tail(3)["date"].min()
+        recent_brokers, _, _ = fetch_top_brokers(session, stock_id, recent_3d_start, end_date, active_mirror, limit=20)
+        if recent_brokers:
+            existing_names = {b["name"] for b in brokers}
+            for rb in recent_brokers:
+                if rb["name"] not in existing_names:
+                    brokers.append(rb)
+                    existing_names.add(rb["name"])
+
+    # 4. 6 執行緒併發抓取分點每日買賣超明細
     fetched_count = 0
     if brokers:
         with ThreadPoolExecutor(max_workers=6) as executor:
@@ -695,7 +707,7 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
 
     df_chips_recent = df_chips_recent.fillna(0.0)
 
-    # 4. 合併或覆蓋資料庫
+    # 5. 合併或覆蓋資料庫
     if is_incremental:
         df_price_kept = df_price_old[df_price_old["date"] < fetch_start].copy()
         df_price = pd.concat([df_price_kept, df_price_recent], ignore_index=True).sort_values("date").reset_index(drop=True)
@@ -711,7 +723,7 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
         if brokers and fetched_count == 0:
             debug_notes.append(f"找到 {len(brokers)} 個分點連結，但明細回傳為空")
 
-    # 5. 寫入本地 CSV；若在 GitHub Actions 內執行則交由 workflow 統一 git push，避免衝突
+    # 6. 寫入本地 CSV；若在 GitHub Actions 內執行則交由 workflow 統一 git push，避免衝突
     df_price.to_csv(price_path, index=False, encoding="utf-8-sig")
     df_chips.to_csv(chips_path, index=False, encoding="utf-8-sig")
 
@@ -724,7 +736,7 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
         if ok1:
             _, sync_msg = _sync_file_to_github(chips_path, f"database/{chips_file}")
 
-    # 6. 產出基礎摘要存檔
+    # 7. 產出基礎摘要存檔
     meta = analyze_main_force(df_price, df_chips, f"{START_DATE_FIXED} 至今", df_chips_full=df_chips, df_price_full=df_price)
     meta["stock_id"] = stock_id
     meta["stock_name"] = stock_name
