@@ -184,7 +184,6 @@ def fetch_broker_daily_history(session: requests.Session, stock_id: str, broker_
     s_fmt = _format_dj_date(start_date)
     e_fmt = _format_dj_date(end_date)
 
-    # 依序嘗試：1. 指定區間(C=1&D=&E=)  2. 預設完整歷史(a, b, BHID)  3. 精簡版(a, b)
     candidate_paths = []
     if bhid and b_hex:
         candidate_paths.append(f"/z/zc/zco/zco0/zco0.djhtm?A={stock_id}&BHID={bhid}&b={b_hex}&C=1&D={s_fmt}&E={e_fmt}")
@@ -203,7 +202,6 @@ def fetch_broker_daily_history(session: requests.Session, stock_id: str, broker_
         records = []
         for tr in soup.find_all("tr"):
             tds = [td.get_text(strip=True).replace(",", "").replace("+", "") for td in tr.find_all("td")]
-            # zco0 表格欄位：日期, 買進(張), 賣出(張), 買賣總額(張), 買賣超(張) -> 最後一欄才是買賣超
             if len(tds) >= 5:
                 ad_date = _parse_dj_date(tds[0])
                 if ad_date and start_date <= ad_date <= end_date:
@@ -220,22 +218,30 @@ def fetch_broker_daily_history(session: requests.Session, stock_id: str, broker_
 
 def analyze_main_force(df_price: pd.DataFrame, df_chips: pd.DataFrame, period_label: str, df_chips_full: pd.DataFrame = None) -> dict:
     """
-    錨定邏輯：
-    1. 「主力是誰」永遠以 2026/01/02 至今全年度累計買超排行決定（不隨檢視區間換人）。
-    2. 「吃貨／出貨狀態」與明細，則動態計算這批年度主力在「選定檢視區間」內的實際買賣超。
+    1. 錨定 2026/01/02 至今全年度累計買超排行決定「波段大主力」。
+    2. 計算最大主力的累計買超、累計賣超、淨總數，以及今日／近10日／近20日進出。
+    3. 計算選定區間內「三大主力狀態」與「區間買超第一名／賣超第一名」。
     """
     broker_cols = [c for c in df_chips.columns if c != "date"]
     if not broker_cols or df_price.empty:
-        return {"main_force": "無分點資料", "status": "⚪ 無法判定", "top_buyers": {}, "top_sellers": {}, "details": []}
+        return {
+            "main_force": "無分點資料",
+            "main_force_sub_lines": [],
+            "status": "⚪ 無法判定",
+            "status_sub": "",
+            "top_buyers": {},
+            "top_sellers": {},
+            "details": []
+        }
 
     full_df = df_chips_full if df_chips_full is not None else df_chips
 
-    # 1. 全年度（2026/01/02 至今）累計排行 -> 決定真正的「波段大主力」
+    # 1. 全年度（2026/01/02 至今）累計排行 -> 決定波段大主力
     total_ytd = full_df[broker_cols].sum().sort_values(ascending=False)
     top_buyers_ytd = total_ytd[total_ytd > 0].head(5)
     top_sellers_ytd = total_ytd[total_ytd < 0].tail(5).sort_values(ascending=True)
 
-    # 2. 選定檢視區間內的買賣超變化 -> 觀察主力在該區間是在吃貨還是出貨
+    # 2. 選定檢視區間與近期交易日統計
     period_sum = df_chips[broker_cols].sum()
     recent_1 = full_df.tail(1)[broker_cols].sum()
     recent_10 = full_df.tail(10)[broker_cols].sum()
@@ -244,37 +250,53 @@ def analyze_main_force(df_price: pd.DataFrame, df_chips: pd.DataFrame, period_la
     if top_buyers_ytd.empty:
         return {
             "main_force": "無波段買超主力（全年度偏空）",
+            "main_force_sub_lines": ["今年以來主要分點與投信累計皆為淨賣超"],
             "status": "🔴 全年空方主導／出貨格局",
+            "status_sub": "",
             "top_buyers": {},
             "top_sellers": {k: int(v) for k, v in top_sellers_ytd.items()},
             "details": ["- 今年以來主要分點與投信累計皆為淨賣超"]
         }
 
-    # 鎖定年度最大主力與前三大主力
+    # 鎖定年度最大主力
     primary_player = top_buyers_ytd.index[0]
     primary_ytd_net = int(top_buyers_ytd.iloc[0])
+
+    # 計算該最大主力今年以來的「累計買超張數」與「累計賣超張數」
+    primary_series_ytd = full_df[primary_player]
+    primary_buy_total = int(primary_series_ytd[primary_series_ytd > 0].sum())
+    primary_sell_total = int(primary_series_ytd[primary_series_ytd < 0].sum())
+
     primary_period_net = int(period_sum.get(primary_player, 0))
     primary_1d = int(recent_1.get(primary_player, 0))
     primary_10d = int(recent_10.get(primary_player, 0))
     primary_20d = int(recent_20.get(primary_player, 0))
 
+    # 卡片一的補充說明（拉進卡片內的兩行資訊）
+    main_force_sub_lines = [
+        f"今年累計買超 <b>{primary_buy_total:+,}</b> 張 ／ 賣超 <b>{primary_sell_total:+,}</b> 張（淨額 <b>{primary_ytd_net:+,}</b> 張）",
+        f"主力買賣超（{primary_player}）：今日 <b>{primary_1d:+,}</b> 張 ｜ 近 10 日 <b>{primary_10d:+,}</b> 張 ｜ 近 20 日 <b>{primary_20d:+,}</b> 張"
+    ]
+
+    # 卡片二：區間內三大主力狀態
     top3_names = list(top_buyers_ytd.head(3).index)
     top3_period_net = int(period_sum[top3_names].sum())
     top3_20d = int(recent_20[top3_names].sum())
 
-    # 依據年度主力在「目前檢視區間」的動作判定狀態
     if primary_player in DAY_TRADE_BROKERS and abs(primary_ytd_net) < 500:
         status = "🟡 隔日沖短線客主導（慎防倒貨）"
-    elif top3_period_net > 300 and primary_period_net > 0:
-        status = f"🟢 區間內主力吃貨中（{top3_period_net:+,} 張）"
-    elif top3_period_net < -300 or primary_period_net < -200:
-        status = f"🔴 區間內主力出貨中（{top3_period_net:+,} 張）"
+    elif top3_period_net > 300:
+        status = f"🟢 區間內三大主力吃貨中（{top3_period_net:+,} 張）"
+    elif top3_period_net < -300:
+        status = f"🔴 區間內三大主力出貨中（{top3_period_net:+,} 張）"
     else:
-        status = f"🔵 區間內主力鎖碼觀望（{top3_period_net:+,} 張）"
+        status = f"🔵 區間內三大主力鎖碼觀望（{top3_period_net:+,} 張）"
 
+    status_sub = f"三大主力名單：{', '.join(top3_names)}"
+
+    # 下方條列明細
     details = [
-        f"- 今年最大買超主力：**{primary_player}**（今年累計 **{primary_ytd_net:+,}** 張 ｜ 本區間淨買賣 **{primary_period_net:+,}** 張）",
-        f"- **主力買賣超（{primary_player}）**：今日 **{primary_1d:+,}** 張 ｜ 近 10 日 **{primary_10d:+,}** 張 ｜ 近 20 日 **{primary_20d:+,}** 張",
+        f"- 今年最大主力區間買賣超：**{primary_player}**（本區間 **{primary_period_net:+,}** 張）",
         f"- 今年前三大主力（{', '.join(top3_names)}）本區間合計：**{top3_period_net:+,}** 張（近 20 日合計：**{top3_20d:+,}** 張）"
     ]
 
@@ -288,14 +310,17 @@ def analyze_main_force(df_price: pd.DataFrame, df_chips: pd.DataFrame, period_la
             f"  - **{name}**（今年累計 {b_ytd:+,} 張）：本區間 **{b_period:+,}** 張 ｜ 今日 **{b_1d:+,}** 張 ｜ 近 10 日 **{b_10d:+,}** 張 ｜ 近 20 日 **{b_20d:+,}** 張"
         )
 
-    # 額外附註：若該短線區間買超第一名不是年度最大主力，也列出來供參考
-    short_top = period_sum.sort_values(ascending=False)
-    if not short_top.empty and short_top.iloc[0] > 0 and short_top.index[0] != primary_player:
-        details.append(f"- 💡 備註：本檢視區間短線買超第一名為 **{short_top.index[0]}**（本區間 **{int(short_top.iloc[0]):+,}** 張）")
+    # 備註：同時顯示本檢視區間「買超第一名」與「賣超第一名」
+    sorted_period = period_sum.sort_values(ascending=False)
+    top_buy_text = f"**{sorted_period.index[0]}**（**{int(sorted_period.iloc[0]):+,}** 張）" if sorted_period.iloc[0] > 0 else "無"
+    top_sell_text = f"**{sorted_period.index[-1]}**（**{int(sorted_period.iloc[-1]):+,}** 張）" if sorted_period.iloc[-1] < 0 else "無"
+    details.append(f"- 💡 備註：本檢視區間買超第一名為 {top_buy_text} ｜ 賣超第一名為 {top_sell_text}")
 
     return {
         "main_force": f"{primary_player}（今年 {primary_ytd_net:+,} 張）",
+        "main_force_sub_lines": main_force_sub_lines,
         "status": status,
+        "status_sub": status_sub,
         "top_buyers": {k: int(v) for k, v in top_buyers_ytd.items()},
         "top_sellers": {k: int(v) for k, v in top_sellers_ytd.items()},
         "details": details
@@ -448,7 +473,7 @@ def update_stock_database(stock_id: str) -> bool:
         ok2, sync_msg = _sync_file_to_github(os.path.join(DB_DIR, chips_file), f"database/{chips_file}")
 
     # 4. 產出基礎摘要存檔
-    meta = analyze_main_force(df_price, df_chips, f"{start_date} 至今")
+    meta = analyze_main_force(df_price, df_chips, f"{start_date} 至今", df_chips_full=df_chips)
     meta["stock_id"] = stock_id
     meta["broker_count"] = fetched_count
     meta["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
