@@ -279,7 +279,7 @@ def _extract_brokers_from_html(html: str) -> list:
 
 
 def fetch_top_brokers(session: requests.Session, stock_id: str, start_date: str, end_date: str, mirror: str = None):
-    """抓取區間買超與賣超關鍵券商分點"""
+    """抓取區間買超前 15 大與賣超前 15 大關鍵券商分點（共 30 個）"""
     s_fmt = _format_dj_date(start_date)
     e_fmt = _format_dj_date(end_date)
 
@@ -289,7 +289,7 @@ def fetch_top_brokers(session: requests.Session, stock_id: str, start_date: str,
         f"/z/zc/zco/zco.djhtm?a={stock_id}",
     ]
 
-   last_err = ""
+    last_err = ""
     for path in candidate_paths:
         html, ok_mirror, err = _fetch_dj_html(session, path, mirror)
         if not html:
@@ -608,7 +608,7 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
     """
     更新指定個股資料並存檔至 database/：
     - incremental_days=None（手動查詢/更新）：從 2026-01-02 全量重抓並覆蓋。
-    - incremental_days=3（GitHub Actions 排程）：僅抓最近 3 個交易日並合併進既有資料庫，速度提升 5 倍以上。
+    - incremental_days=3（GitHub Actions 排程）：僅抓最近 3 個交易日並合併進既有資料庫。
     """
     stock_id = stock_id.strip()
     now_tw = _get_tw_now()
@@ -635,7 +635,6 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
             is_incremental = False
 
     if is_incremental:
-        # 往回抓 12 個日曆日確保至少涵蓋 3 個交易日（即使遇連假也夠用）
         lookback_start = (now_tw - timedelta(days=12)).strftime("%Y-%m-%d")
         df_price_recent = fetch_price_history(stock_id, lookback_start, end_date)
         if df_price_recent.empty:
@@ -661,7 +660,7 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
         if trust_err:
             debug_notes.append(f"投信異常: {trust_err}")
 
-    # 2. 抓中文股票名稱（增量模式下優先沿用既有 _meta.json 內的名稱，省去一次請求）
+    # 2. 抓中文股票名稱
     stock_name = ""
     if is_incremental and os.path.exists(meta_path):
         try:
@@ -672,7 +671,7 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
     if not stock_name:
         stock_name = fetch_stock_name(session, stock_id, active_mirror)
 
-    # 3. 抓前 25 大券商分點明細（6 執行緒併發加速）
+    # 3. 抓買超前 15 大與賣超前 15 大券商分點明細（共 30 個，6 執行緒併發加速）
     brokers, active_mirror, broker_err = fetch_top_brokers(session, stock_id, fetch_start, end_date, active_mirror)
     if broker_err:
         debug_notes.append(f"分點清單異常: {broker_err}")
