@@ -6,11 +6,15 @@ import time
 import base64
 from urllib.parse import urlparse, parse_qs
 from datetime import datetime, timedelta
+import urllib3
 import requests
 from requests.adapters import HTTPAdapter
 import pandas as pd
 import yfinance as yf
 from bs4 import BeautifulSoup
+
+# 關閉 verify=False 產生的大量 InsecureRequestWarning 日誌洗版
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 DB_DIR = "database"
 os.makedirs(DB_DIR, exist_ok=True)
@@ -85,6 +89,14 @@ def _parse_dj_date(date_str: str) -> str:
 def _format_dj_date(ad_date: str) -> str:
     dt = datetime.strptime(ad_date, "%Y-%m-%d")
     return f"{dt.year}-{dt.month}-{dt.day}"
+
+
+def _get_tw_now() -> datetime:
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Asia/Taipei"))
+    except Exception:
+        return datetime.utcnow() + timedelta(hours=8)
 
 
 def _fmt_html_num(val: int, suffix: str = " 張") -> str:
@@ -347,7 +359,7 @@ def analyze_main_force(
     1. 錨定 2026/01/02 至今全年度累計買超排行決定「波段大主力」。
     2. 計算最大主力的累計買超、累計賣超、淨總數與目前庫存均價（成本）。
     3. 計算前三大主力各分點的連買／連賣天數、區間控盤率 (%)。
-    4. 偵測近 5 日價量籌碼背離訊號（底部承接背離／高檔出貨背離）。
+    4. 偵測近 5 日價量籌碼背離訊號（股價漲跌 >= 3% 且三大主力控盤率 >= 2.0%）。
     """
     broker_cols = [c for c in df_chips.columns if c != "date"]
     if not broker_cols or df_price.empty:
@@ -437,24 +449,34 @@ def analyze_main_force(
 
     status_sub = f"三大主力名單：{', '.join(top3_names)}"
 
-    # 近 5 日價量籌碼背離警報（固定看近 5 個交易日）
+    # 近 5 日價量籌碼背離警報（收緊門檻：股價漲跌 >= 3% 且三大主力近 5 日控盤率 >= 2.0%）
     divergence_alert = None
     if len(full_price) >= 5:
         close_now = float(full_price.iloc[-1]["close"])
         close_5d_ago = float(full_price.iloc[-6]["close"]) if len(full_price) >= 6 else float(full_price.iloc[0]["close"])
         price_5d_pct = ((close_now - close_5d_ago) / close_5d_ago * 100) if close_5d_ago > 0 else 0.0
+        vol_5d = float(full_price.tail(5)["volume"].sum()) if "volume" in full_price.columns else 0.0
+        top3_5d_ctrl_pct = (top3_5d / vol_5d * 100) if vol_5d > 0 else 0.0
 
-        if price_5d_pct <= -3.0 and top3_5d > 0:
+        if price_5d_pct <= -3.0 and top3_5d > 0 and top3_5d_ctrl_pct >= 2.0:
             divergence_alert = {
                 "type": "bull",
                 "title": "🔴 底部承接背離警報（近 5 日價跌主力買）",
-                "desc": f"近 5 日股價下跌 <b>{price_5d_pct:.2f}%</b>，但今年前三大主力逆勢合計淨買超 <b style='color:#ef5350;'>{top3_5d:+,} 張</b>，留意低檔換手與止跌轉折訊號。"
+                "desc": (
+                    f"近 5 日股價下跌 <b>{price_5d_pct:.2f}%</b>，但今年前三大主力逆勢合計淨買超 "
+                    f"<b style='color:#ef5350;'>{top3_5d:+,} 張</b>（近 5 日控盤率 <b>{top3_5d_ctrl_pct:+.1f}%</b>），"
+                    f"留意低檔換手與止跌轉折訊號。"
+                )
             }
-        elif price_5d_pct >= 3.0 and top3_5d < 0:
+        elif price_5d_pct >= 3.0 and top3_5d < 0 and top3_5d_ctrl_pct <= -2.0:
             divergence_alert = {
                 "type": "bear",
                 "title": "🟢 高檔出貨背離警報（近 5 日價漲主力賣）",
-                "desc": f"近 5 日股價上漲 <b>{price_5d_pct:+.2f}%</b>，但今年前三大主力合計逢高賣超 <b style='color:#26a69a;'>{top3_5d:+,} 張</b>，慎防假突破或拉高倒貨。"
+                "desc": (
+                    f"近 5 日股價上漲 <b>{price_5d_pct:+.2f}%</b>，但今年前三大主力合計逢高賣超 "
+                    f"<b style='color:#26a69a;'>{top3_5d:+,} 張</b>（近 5 日控盤率 <b>{top3_5d_ctrl_pct:+.1f}%</b>），"
+                    f"慎防假突破或拉高倒貨。"
+                )
             }
 
     # 前三大主力各分點明細（含連買／連賣天數、區間控盤率 %）
@@ -590,7 +612,8 @@ def update_stock_database(stock_id: str) -> bool:
     """固定從 2026-01-02 開始抓取指定個股股價、中文股名、投信與前 25 大券商分點，存檔至 database/"""
     stock_id = stock_id.strip()
     start_date = START_DATE_FIXED
-    end_date = datetime.today().strftime("%Y-%m-%d")
+    now_tw = _get_tw_now()
+    end_date = now_tw.strftime("%Y-%m-%d")
 
     df_price = fetch_price_history(stock_id, start_date, end_date)
     if df_price.empty:
@@ -630,7 +653,7 @@ def update_stock_database(stock_id: str) -> bool:
 
     df_chips = df_chips.fillna(0.0)
 
-    # 4. 寫入本地 CSV 並同步至 GitHub
+    # 4. 寫入本地 CSV；若在 GitHub Actions 內執行則交由 workflow 統一 git push，避免衝突
     price_file = f"{stock_id}_price.csv"
     chips_file = f"{stock_id}_chips.csv"
     meta_file = f"{stock_id}_meta.json"
@@ -638,23 +661,28 @@ def update_stock_database(stock_id: str) -> bool:
     df_price.to_csv(os.path.join(DB_DIR, price_file), index=False, encoding="utf-8-sig")
     df_chips.to_csv(os.path.join(DB_DIR, chips_file), index=False, encoding="utf-8-sig")
 
-    ok1, sync_msg = _sync_file_to_github(os.path.join(DB_DIR, price_file), f"database/{price_file}")
-    if ok1:
-        ok2, sync_msg = _sync_file_to_github(os.path.join(DB_DIR, chips_file), f"database/{chips_file}")
+    is_gha = os.environ.get("GITHUB_ACTIONS", "").lower() == "true"
+    if is_gha:
+        ok1 = True
+        sync_msg = "由 GitHub Actions 每日排程自動同步"
+    else:
+        ok1, sync_msg = _sync_file_to_github(os.path.join(DB_DIR, price_file), f"database/{price_file}")
+        if ok1:
+            _, sync_msg = _sync_file_to_github(os.path.join(DB_DIR, chips_file), f"database/{chips_file}")
 
     # 5. 產出基礎摘要存檔
     meta = analyze_main_force(df_price, df_chips, f"{start_date} 至今", df_chips_full=df_chips, df_price_full=df_price)
     meta["stock_id"] = stock_id
     meta["stock_name"] = stock_name
     meta["broker_count"] = fetched_count
-    meta["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    meta["last_updated"] = now_tw.strftime("%Y-%m-%d %H:%M")
     meta["debug_notes"] = debug_notes
     meta["github_sync"] = f"✅ {sync_msg}" if ok1 else f"⚠️ {sync_msg}"
 
     with open(os.path.join(DB_DIR, meta_file), "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
 
-    if ok1:
+    if not is_gha and ok1:
         _sync_file_to_github(os.path.join(DB_DIR, meta_file), f"database/{meta_file}")
 
     return True
@@ -666,5 +694,9 @@ if __name__ == "__main__":
         for fname in os.listdir(DB_DIR)
         if fname.endswith("_price.csv")
     })
+    print(f"[Daily Update] 開始更新 {len(existing_stocks)} 檔個股：{existing_stocks}", flush=True)
     for sid in existing_stocks:
-        update_stock_database(sid)
+        t0 = time.time()
+        ok = update_stock_database(sid)
+        status = "成功" if ok else "失敗"
+        print(f"[Daily Update] {sid} 更新{status}（耗時 {time.time() - t0:.1f} 秒）", flush=True)
