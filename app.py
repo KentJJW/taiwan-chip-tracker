@@ -119,7 +119,7 @@ if target_stock:
     with open(meta_path, "r", encoding="utf-8") as f:
         meta_saved = json.load(f)
 
-    # 依「全部 / 5日 / 10日 / 20日 / 60日 / 指定日期」篩選資料區間
+    # 計算統計區間起訖日
     min_date = df_price_full["date"].min()
     max_date = df_price_full["date"].max()
     days_map = {"5日": 5, "10日": 10, "20日": 20, "60日": 60}
@@ -130,7 +130,6 @@ if target_stock:
         start_filter = df_price["date"].min()
         end_filter = df_price["date"].max()
         df_chips = df_chips_full[(df_chips_full["date"] >= start_filter) & (df_chips_full["date"] <= end_filter)].copy()
-        df_chips_ref = df_chips_full[df_chips_full["date"] <= end_filter].copy()
         period_label = f"近 {n_days} 日（{start_filter} ~ {end_filter}）"
     elif range_type == "指定日期":
         start_filter = parse_manual_date(custom_start_str, min_date)
@@ -140,14 +139,12 @@ if target_stock:
             st.stop()
         df_price = df_price_full[(df_price_full["date"] >= start_filter) & (df_price_full["date"] <= end_filter)].copy()
         df_chips = df_chips_full[(df_chips_full["date"] >= start_filter) & (df_chips_full["date"] <= end_filter)].copy()
-        df_chips_ref = df_chips_full[df_chips_full["date"] <= end_filter].copy()
         period_label = f"{start_filter} ~ {end_filter}"
     else:
-        start_filter = START_DATE_FIXED
+        start_filter = min_date
         end_filter = max_date
-        df_price = df_price_full[(df_price_full["date"] >= start_filter) & (df_price_full["date"] <= end_filter)].copy()
-        df_chips = df_chips_full[(df_chips_full["date"] >= start_filter) & (df_chips_full["date"] <= end_filter)].copy()
-        df_chips_ref = df_chips_full.copy()
+        df_price = df_price_full.copy()
+        df_chips = df_chips_full.copy()
         period_label = f"{min_date} ~ {max_date}（全部）"
 
     if df_price.empty:
@@ -155,7 +152,7 @@ if target_stock:
         st.stop()
 
     analysis = analyze_main_force(df_price, df_chips, period_label, df_chips_full=df_chips_full)
-    broker_count = len([c for c in df_chips.columns if c not in ("date", "投信")])
+    broker_count = len([c for c in df_chips_full.columns if c not in ("date", "投信")])
 
     if broker_count == 0 and meta_saved.get("debug_notes"):
         st.warning(f"⚠️ 分點明細未取得（{'；'.join(meta_saved['debug_notes'])}）")
@@ -195,38 +192,32 @@ if target_stock:
     top_buyers = analysis.get("top_buyers", {})
     top_sellers = analysis.get("top_sellers", {})
     if top_buyers:
-        st.caption("🟢 區間累計買超前 5 大（外資依個別券商統計）：" +
+        st.caption("🟢 今年以來累計買超前 5 大（外資依個別券商統計）：" +
                    " ｜ ".join([f"**{k}**: {v:+,} 張" for k, v in top_buyers.items()]))
     if top_sellers:
-        st.caption("🔴 區間累計賣超前 5 大（外資依個別券商統計）：" +
+        st.caption("🔴 今年以來累計賣超前 5 大（外資依個別券商統計）：" +
                    " ｜ ".join([f"**{k}**: {v:+,} 張" for k, v in top_sellers.items()]))
 
     st.divider()
 
-    # --- 區塊二：上方股價折線 ＋ 下方主力買賣超長條圖(紅買綠賣)與統計張數折線 ---
-    st.markdown(f"#### 📉 股價 vs. 主力買賣超長條圖與統計張數（{period_label}）")
+    # --- 區塊二：完整年度股價 vs. 主力買賣超長條圖與總和統計張數折線（特定區間反灰） ---
+    chart_title_suffix = f"（灰底反白區間：{period_label}）" if range_type != "全部" else f"（{period_label}）"
+    st.markdown(f"#### 📉 股價 vs. 主力買賣超長條圖與統計張數{chart_title_suffix}")
 
-    available_brokers = [c for c in df_chips.columns if c != "date"]
+    available_brokers = [c for c in df_chips_full.columns if c != "date"]
     default_selected = [list(top_buyers.keys())[0]] if top_buyers else available_brokers[:1]
 
-    col_ctrl1, col_ctrl2 = st.columns([3, 1.2])
-    with col_ctrl1:
-        selected_brokers = st.multiselect(
-            "選擇要觀察的券商分點或「投信」（可單選或多選）：",
-            options=available_brokers,
-            default=default_selected
-        )
-    with col_ctrl2:
-        chart_mode = st.radio(
-            "多分點顯示方式",
-            options=["所選分點加總合力", "各分點獨立統計折線"],
-            horizontal=False
-        )
+    selected_brokers = st.multiselect(
+        "選擇要觀察的券商分點或「投信」（可單選或多選，多選時自動加總顯示總和折線）：",
+        options=available_brokers,
+        default=default_selected
+    )
 
     if not selected_brokers:
         st.warning("請至少選擇一個券商分點或「投信」來繪製圖表。")
     else:
-        df_plot = df_price[["date", "close"]].merge(df_chips, on="date", how="left").fillna(0)
+        # 圖表永遠顯示完整年度 (df_price_full + df_chips_full)
+        df_plot = df_price_full[["date", "close"]].merge(df_chips_full, on="date", how="left").fillna(0)
 
         fig = make_subplots(
             rows=2,
@@ -252,7 +243,7 @@ if target_stock:
         # 下層主軸：每日買賣超長條圖（紅買超往上、綠賣超往下）
         daily_net = df_plot[selected_brokers].sum(axis=1)
         bar_colors = ["#ef5350" if v >= 0 else "#26a69a" for v in daily_net]
-        bar_label = f"{selected_brokers[0]} 每日買賣超" if len(selected_brokers) == 1 else f"所選({len(selected_brokers)}個)合計每日買賣超"
+        bar_label = f"{selected_brokers[0]} 每日買賣超" if len(selected_brokers) == 1 else f"所選({len(selected_brokers)}個)總和每日買賣超"
 
         fig.add_trace(
             go.Bar(
@@ -266,36 +257,36 @@ if target_stock:
             row=2, col=1, secondary_y=False
         )
 
-        # 下層副軸：統計張數折線（累計買賣超，完整整數張數不顯示 K）
-        if chart_mode == "所選分點加總合力" or len(selected_brokers) == 1:
-            cum_total = daily_net.cumsum()
-            line_label = f"{selected_brokers[0]} 統計張數" if len(selected_brokers) == 1 else "所選合力統計張數"
-            fig.add_trace(
-                go.Scatter(
-                    x=df_plot["date"],
-                    y=cum_total,
-                    name=f"{line_label} (累計張)",
-                    line=dict(color="#00E5FF", width=2.5),
-                    hovertemplate="%{y:+,.0f} 張<extra>" + line_label + "</extra>"
-                ),
-                row=2, col=1, secondary_y=True
+        # 下層副軸：統一顯示總和統計張數折線（累計買賣超）
+        cum_total = daily_net.cumsum()
+        line_label = f"{selected_brokers[0]} 統計張數" if len(selected_brokers) == 1 else f"所選({len(selected_brokers)}個)總和統計張數"
+        fig.add_trace(
+            go.Scatter(
+                x=df_plot["date"],
+                y=cum_total,
+                name=f"{line_label} (累計張)",
+                line=dict(color="#00E5FF", width=2.5),
+                hovertemplate="%{y:+,.0f} 張<extra>" + line_label + "</extra>"
+            ),
+            row=2, col=1, secondary_y=True
+        )
+
+        # 若有選定特定統計區間（非「全部」），在上下兩張圖加上反灰背景區塊標示
+        if range_type != "全部":
+            fig.add_vrect(
+                x0=start_filter,
+                x1=end_filter,
+                fillcolor="rgba(255, 255, 255, 0.14)",
+                line_width=1,
+                line_dash="dash",
+                line_color="rgba(255, 255, 255, 0.45)",
+                annotation_text=f"統計區間 ({range_type})",
+                annotation_position="top left",
+                annotation_font_color="#e5e7eb"
             )
-        else:
-            for b_name in selected_brokers:
-                fig.add_trace(
-                    go.Scatter(
-                        x=df_plot["date"],
-                        y=df_plot[b_name].cumsum(),
-                        name=f"{b_name} 統計張數",
-                        line=dict(width=2),
-                        hovertemplate="%{y:+,.0f} 張<extra>" + b_name + "</extra>"
-                    ),
-                    row=2, col=1, secondary_y=True
-                )
 
         fig.add_hline(y=0, line_width=1, line_color="rgba(255, 255, 255, 0.25)", row=2, col=1)
 
-        # 圖例移至左上角並加大上方留白，徹底避開右上角工具列重疊
         fig.update_layout(
             height=640,
             template="plotly_dark",
