@@ -289,7 +289,7 @@ def fetch_top_brokers(session: requests.Session, stock_id: str, start_date: str,
         f"/z/zc/zco/zco.djhtm?a={stock_id}",
     ]
 
-    last_err = ""
+   last_err = ""
     for path in candidate_paths:
         html, ok_mirror, err = _fetch_dj_html(session, path, mirror)
         if not html:
@@ -297,7 +297,7 @@ def fetch_top_brokers(session: requests.Session, stock_id: str, start_date: str,
             continue
         broker_list = _extract_brokers_from_html(html)
         if broker_list:
-            return broker_list[:25], ok_mirror, ""
+            return broker_list[:30], ok_mirror, ""
         last_err = f"頁面 {path} 無法解析分點連結 (HTML長度:{len(html)})"
 
     return [], mirror, last_err
