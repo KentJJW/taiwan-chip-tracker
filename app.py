@@ -44,6 +44,55 @@ st.markdown("""
     margin-top: 6px;
     line-height: 1.45;
 }
+.div-alert-bull {
+    background-color: rgba(239, 83, 80, 0.12);
+    border-left: 4px solid #ef5350;
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin: 10px 0 4px 0;
+    font-size: 0.9rem;
+    color: #f8fafc;
+}
+.div-alert-bear {
+    background-color: rgba(38, 166, 154, 0.12);
+    border-left: 4px solid #26a69a;
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin: 10px 0 4px 0;
+    font-size: 0.9rem;
+    color: #f8fafc;
+}
+.mf-list {
+    margin: 2px 0 8px 22px;
+    overflow-x: auto;
+}
+.mf-row {
+    display: grid;
+    grid-template-columns: 145px 158px 138px 124px 140px 140px 92px 128px;
+    align-items: center;
+    padding: 4px 0;
+    font-size: 0.92rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    color: #e2e8f0;
+}
+.mf-name {
+    font-weight: 700;
+    color: #f8fafc;
+    padding-right: 8px;
+}
+.mf-cell {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 10px;
+    border-left: 1px solid #334155;
+}
+.mf-lbl {
+    color: #94a3b8;
+    font-size: 0.84rem;
+    margin-right: 6px;
+}
 .cost-banner {
     background-color: #1a2230;
     border-left: 4px solid #ff9800;
@@ -72,6 +121,7 @@ st.markdown("""
     padding: 7px 12px;
     border-top: 1px solid #262c3d;
     color: #e2e8f0;
+    font-variant-numeric: tabular-nums;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -134,6 +184,24 @@ def parse_manual_date(text: str, fallback: str) -> str:
         except ValueError:
             pass
     return fallback
+
+
+def _span_num(val: int, suffix: str = " 張") -> str:
+    color = "#ef5350" if val > 0 else ("#26a69a" if val < 0 else "#cbd5e1")
+    return f'<span style="color:{color}; font-weight:700;">{val:+,}{suffix}</span>'
+
+
+def _span_streak(streak: int) -> str:
+    if streak > 0:
+        return f'<span style="color:#ef5350; font-weight:700;">連買 {streak} 日</span>'
+    elif streak < 0:
+        return f'<span style="color:#26a69a; font-weight:700;">連賣 {abs(streak)} 日</span>'
+    return '<span style="color:#94a3b8;">持平</span>'
+
+
+def _span_ctrl(pct: float) -> str:
+    color = "#ef5350" if pct > 0 else ("#26a69a" if pct < 0 else "#94a3b8")
+    return f'<span style="color:{color}; font-weight:700;">{pct:+.1f}%</span>'
 
 
 st.markdown("### 📈 台股主力分點吃貨／出貨追蹤系統")
@@ -243,7 +311,7 @@ if target_stock:
         st.warning(f"在指定區間 `{start_filter} ~ {end_filter}` 內查無交易資料，請確認輸入的日期。")
         st.stop()
 
-    # 計算區間股價漲跌幅（優先對照區間前一日收盤價，若無則用區間首日收盤價）
+    # 計算區間股價漲跌幅
     latest_close = float(df_price.iloc[-1]["close"])
     prior_rows = df_price_full[df_price_full["date"] < start_filter]
     base_close = float(prior_rows.iloc[-1]["close"]) if not prior_rows.empty else float(df_price.iloc[0]["close"])
@@ -306,8 +374,40 @@ if target_stock:
         </div>
         """, unsafe_allow_html=True)
 
+    # --- 近 5 日價量籌碼背離警報（觸發才顯示） ---
+    div_alert = analysis.get("divergence_alert")
+    if div_alert:
+        css_cls = "div-alert-bull" if div_alert["type"] == "bull" else "div-alert-bear"
+        st.markdown(
+            f'<div class="{css_cls}"><b>{div_alert["title"]}</b><br>{div_alert["desc"]}</div>',
+            unsafe_allow_html=True,
+        )
+
+    # --- 前三大主力明細（方案 A：CSS 隱形網格對齊，含連買賣與控盤率） ---
     st.write("")
-    st.markdown("\n".join(analysis.get("details", [])))
+    if analysis.get("top3_header_md"):
+        st.markdown(analysis["top3_header_md"])
+
+    top3_rows = analysis.get("top3_rows", [])
+    if top3_rows:
+        rows_html = []
+        for r in top3_rows:
+            rows_html.append(
+                f'<div class="mf-row">'
+                f'  <div class="mf-name">◦ {r["name"]}</div>'
+                f'  <div class="mf-cell"><span class="mf-lbl">今年累計</span>{_span_num(r["ytd"])}</div>'
+                f'  <div class="mf-cell"><span class="mf-lbl">本區間</span>{_span_num(r["period"])}</div>'
+                f'  <div class="mf-cell"><span class="mf-lbl">今日</span>{_span_num(r["d1"])}</div>'
+                f'  <div class="mf-cell"><span class="mf-lbl">近 10 日</span>{_span_num(r["d10"])}</div>'
+                f'  <div class="mf-cell"><span class="mf-lbl">近 20 日</span>{_span_num(r["d20"])}</div>'
+                f'  <div class="mf-cell" style="justify-content:center;">{_span_streak(r["streak"])}</div>'
+                f'  <div class="mf-cell"><span class="mf-lbl">控盤率</span>{_span_ctrl(r["ctrl_pct"])}</div>'
+                f'</div>'
+            )
+        st.markdown(f'<div class="mf-list">{"".join(rows_html)}</div>', unsafe_allow_html=True)
+
+    if analysis.get("remark_md"):
+        st.markdown(analysis["remark_md"])
 
     # --- 買超前 5 大 & 賣超前 5 大左右並排對照表 ---
     top_buyers = analysis.get("top_buyers", {})
@@ -340,9 +440,9 @@ if target_stock:
 
     st.divider()
 
-    # --- 區塊二：完整年度股價、主力成本線 vs. 買賣超長條圖與總和統計張數折線 ---
+    # --- 區塊二：完整年度股價、10MA/20MA、主力成本線 vs. 買賣超長條圖與總和統計張數折線 ---
     chart_title_suffix = f"（標示區間：{period_label}）" if range_type != "全部" else f"（{period_label}）"
-    st.markdown(f"#### 📉 {stock_title} 股價與主力成本線 vs. 買賣超統計{chart_title_suffix}")
+    st.markdown(f"#### 📉 {stock_title} 股價、10/20MA 與主力成本線 vs. 買賣超統計{chart_title_suffix}")
 
     available_brokers = [c for c in df_chips_full.columns if c != "date"]
     top3_names = analysis.get("top3_names", [])
@@ -371,6 +471,8 @@ if target_stock:
     else:
         price_cols = [c for c in ["date", "open", "high", "low", "close"] if c in df_price_full.columns]
         df_plot = df_price_full[price_cols].merge(df_chips_full, on="date", how="left").fillna(0)
+        df_plot["ma10"] = df_plot["close"].rolling(10).mean()
+        df_plot["ma20"] = df_plot["close"].rolling(20).mean()
 
         daily_net = df_plot[selected_brokers].sum(axis=1)
         cum_total = daily_net.cumsum()
@@ -417,13 +519,35 @@ if target_stock:
             row=1, col=1, secondary_y=False
         )
 
+        # 上層：10MA 與 20MA 均線
+        fig.add_trace(
+            go.Scatter(
+                x=df_plot["date"],
+                y=df_plot["ma10"],
+                name="10MA",
+                line=dict(color="#42A5F5", width=1.4),
+                hovertemplate="%{y:,.2f} 元<extra>10MA</extra>"
+            ),
+            row=1, col=1, secondary_y=False
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=df_plot["date"],
+                y=df_plot["ma20"],
+                name="20MA",
+                line=dict(color="#EC407A", width=1.4),
+                hovertemplate="%{y:,.2f} 元<extra>20MA</extra>"
+            ),
+            row=1, col=1, secondary_y=False
+        )
+
         # 上層：主力成本線（目前庫存均價，橘色虛線）
         if cost_series.notna().any():
             fig.add_trace(
                 go.Scatter(
                     x=df_plot["date"],
                     y=cost_series,
-                    name=f"{target_label} 成本線 (均價)",
+                    name=f"{target_label} 成本線",
                     line=dict(color="#FF9800", width=2.0, dash="dash"),
                     connectgaps=False,
                     hovertemplate="%{y:,.2f} 元<extra>主力成本均價</extra>"
@@ -492,9 +616,9 @@ if target_stock:
             template="plotly_dark",
             hovermode="x unified",
             legend=dict(orientation="h", yanchor="bottom", y=1.06, xanchor="left", x=0),
-            margin=dict(l=20, r=20, t=65, b=20)
+            margin=dict(l=20, r=20, t=75, b=20)
         )
-        fig.update_yaxes(title_text="收盤價／主力成本 (元)", row=1, col=1, showgrid=True)
+        fig.update_yaxes(title_text="股價／均線／成本 (元)", row=1, col=1, showgrid=True)
         fig.update_yaxes(title_text="每日買賣超 (張)", row=2, col=1, secondary_y=False, showgrid=True, zeroline=True, tickformat=",.0f")
         fig.update_yaxes(title_text="統計張數 (累計張)", row=2, col=1, secondary_y=True, showgrid=False, tickformat=",.0f")
 
