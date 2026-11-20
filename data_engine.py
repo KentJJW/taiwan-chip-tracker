@@ -87,6 +87,24 @@ def _format_dj_date(ad_date: str) -> str:
     return f"{dt.year}-{dt.month}-{dt.day}"
 
 
+def _fmt_html_num(val: int, suffix: str = " 張") -> str:
+    """HTML 卡片專用：紅買綠賣配色"""
+    if val > 0:
+        return f'<span style="color:#ef5350; font-weight:700;">{val:+,}{suffix}</span>'
+    elif val < 0:
+        return f'<span style="color:#26a69a; font-weight:700;">{val:+,}{suffix}</span>'
+    return f'<span style="color:#cbd5e1; font-weight:700;">0{suffix}</span>'
+
+
+def _fmt_md_num(val: int, suffix: str = " 張") -> str:
+    """Markdown 條列專用：紅買綠賣配色"""
+    if val > 0:
+        return f":red[**{val:+,}{suffix}**]"
+    elif val < 0:
+        return f":green[**{val:+,}{suffix}**]"
+    return f"**0{suffix}**"
+
+
 def fetch_price_history(stock_id: str, start_date: str, end_date: str) -> pd.DataFrame:
     """抓取指定區間每日股價 (自動判斷上市 .TW 或上櫃 .TWO)"""
     end_dt = (datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -103,6 +121,20 @@ def fetch_price_history(stock_id: str, start_date: str, end_date: str) -> pd.Dat
             df["volume"] = (df["volume"] / 1000).round(0)
             return df[df["date"] >= start_date].dropna(subset=["close"])
     return pd.DataFrame()
+
+
+def fetch_stock_name(session: requests.Session, stock_id: str, mirror: str = None) -> str:
+    """從券商個股頁面自動擷取中文股票名稱（例如：環球晶）"""
+    html, _, _ = _fetch_dj_html(session, f"/z/zc/zco/zco.djhtm?a={stock_id}", mirror)
+    if not html:
+        return ""
+    pattern = re.compile(rf"([^\s<>()（）\"'=\-]+)\s*[\(（]{re.escape(stock_id)}[\)）]")
+    m = pattern.search(html)
+    if m:
+        name = m.group(1).strip()
+        if 1 <= len(name) <= 10:
+            return name
+    return ""
 
 
 def fetch_investment_trust_history(session: requests.Session, stock_id: str, start_date: str, end_date: str, mirror: str = None):
@@ -132,7 +164,7 @@ def fetch_investment_trust_history(session: requests.Session, stock_id: str, sta
 
 
 def _extract_brokers_from_html(html: str) -> list:
-    """從 zco.djhtm 解析所有買賣超分點連結 (同時相容不同大小寫與相對路徑)"""
+    """從 zco.djhtm 解析所有買賣超分點連結"""
     soup = BeautifulSoup(html, "html.parser")
     brokers = {}
 
@@ -152,7 +184,7 @@ def _extract_brokers_from_html(html: str) -> list:
 
 
 def fetch_top_brokers(session: requests.Session, stock_id: str, start_date: str, end_date: str, mirror: str = None):
-    """抓取區間買超與賣超關鍵券商分點，若區間頁無結果自動退回預設頁"""
+    """抓取區間買超與賣超關鍵券商分點"""
     s_fmt = _format_dj_date(start_date)
     e_fmt = _format_dj_date(end_date)
 
@@ -177,7 +209,7 @@ def fetch_top_brokers(session: requests.Session, stock_id: str, start_date: str,
 
 
 def fetch_broker_daily_history(session: requests.Session, stock_id: str, broker_info: dict, start_date: str, end_date: str, mirror: str) -> pd.DataFrame:
-    """抓取單一券商分點每日買賣超明細(張)，多路徑備援並讀取最後一欄(買賣超)"""
+    """抓取單一券商分點每日買賣超明細(張)"""
     bhid = broker_info["bhid"]
     b_hex = broker_info["b"]
     broker_name = broker_info["name"]
@@ -219,16 +251,17 @@ def fetch_broker_daily_history(session: requests.Session, stock_id: str, broker_
 def analyze_main_force(df_price: pd.DataFrame, df_chips: pd.DataFrame, period_label: str, df_chips_full: pd.DataFrame = None) -> dict:
     """
     1. 錨定 2026/01/02 至今全年度累計買超排行決定「波段大主力」。
-    2. 計算最大主力的累計買超、累計賣超、淨總數，以及今日／近10日／近20日進出。
-    3. 計算選定區間內「三大主力狀態」與「區間買超第一名／賣超第一名」。
+    2. 計算最大主力的累計買超、累計賣超與淨總數。
+    3. 計算選定區間內「三大主力狀態」、「前三大各自進出明細」與「區間買賣超第一名」。
     """
     broker_cols = [c for c in df_chips.columns if c != "date"]
     if not broker_cols or df_price.empty:
         return {
-            "main_force": "無分點資料",
+            "main_force_html": "無分點資料",
             "main_force_sub_lines": [],
-            "status": "⚪ 無法判定",
+            "status_html": "⚪ 無法判定",
             "status_sub": "",
+            "top3_names": [],
             "top_buyers": {},
             "top_sellers": {},
             "details": []
@@ -249,10 +282,11 @@ def analyze_main_force(df_price: pd.DataFrame, df_chips: pd.DataFrame, period_la
 
     if top_buyers_ytd.empty:
         return {
-            "main_force": "無波段買超主力（全年度偏空）",
+            "main_force_html": "無波段買超主力（全年度偏空）",
             "main_force_sub_lines": ["今年以來主要分點與投信累計皆為淨賣超"],
-            "status": "🔴 全年空方主導／出貨格局",
+            "status_html": "🔴 全年空方主導／出貨格局",
             "status_sub": "",
+            "top3_names": [],
             "top_buyers": {},
             "top_sellers": {k: int(v) for k, v in top_sellers_ytd.items()},
             "details": ["- 今年以來主要分點與投信累計皆為淨賣超"]
@@ -262,20 +296,14 @@ def analyze_main_force(df_price: pd.DataFrame, df_chips: pd.DataFrame, period_la
     primary_player = top_buyers_ytd.index[0]
     primary_ytd_net = int(top_buyers_ytd.iloc[0])
 
-    # 計算該最大主力今年以來的「累計買超張數」與「累計賣超張數」
+    # 計算最大主力今年以來的「累計買超張數」與「累計賣超張數」
     primary_series_ytd = full_df[primary_player]
     primary_buy_total = int(primary_series_ytd[primary_series_ytd > 0].sum())
     primary_sell_total = int(primary_series_ytd[primary_series_ytd < 0].sum())
 
-    primary_period_net = int(period_sum.get(primary_player, 0))
-    primary_1d = int(recent_1.get(primary_player, 0))
-    primary_10d = int(recent_10.get(primary_player, 0))
-    primary_20d = int(recent_20.get(primary_player, 0))
-
-    # 卡片一的補充說明（拉進卡片內的兩行資訊）
+    main_force_html = f"{primary_player}（今年 {_fmt_html_num(primary_ytd_net)}）"
     main_force_sub_lines = [
-        f"今年累計買超 <b>{primary_buy_total:+,}</b> 張 ／ 賣超 <b>{primary_sell_total:+,}</b> 張（淨額 <b>{primary_ytd_net:+,}</b> 張）",
-        f"主力買賣超（{primary_player}）：今日 <b>{primary_1d:+,}</b> 張 ｜ 近 10 日 <b>{primary_10d:+,}</b> 張 ｜ 近 20 日 <b>{primary_20d:+,}</b> 張"
+        f"今年累計買超 {_fmt_html_num(primary_buy_total)} ／ 賣超 {_fmt_html_num(primary_sell_total)}（淨額 {_fmt_html_num(primary_ytd_net)}）"
     ]
 
     # 卡片二：區間內三大主力狀態
@@ -284,20 +312,19 @@ def analyze_main_force(df_price: pd.DataFrame, df_chips: pd.DataFrame, period_la
     top3_20d = int(recent_20[top3_names].sum())
 
     if primary_player in DAY_TRADE_BROKERS and abs(primary_ytd_net) < 500:
-        status = "🟡 隔日沖短線客主導（慎防倒貨）"
+        status_html = "🟡 隔日沖短線客主導（慎防倒貨）"
     elif top3_period_net > 300:
-        status = f"🟢 區間內三大主力吃貨中（{top3_period_net:+,} 張）"
+        status_html = f"🟢 區間內三大主力吃貨中（{_fmt_html_num(top3_period_net)}）"
     elif top3_period_net < -300:
-        status = f"🔴 區間內三大主力出貨中（{top3_period_net:+,} 張）"
+        status_html = f"🔴 區間內三大主力出貨中（{_fmt_html_num(top3_period_net)}）"
     else:
-        status = f"🔵 區間內三大主力鎖碼觀望（{top3_period_net:+,} 張）"
+        status_html = f"🔵 區間內三大主力鎖碼觀望（{_fmt_html_num(top3_period_net)}）"
 
     status_sub = f"三大主力名單：{', '.join(top3_names)}"
 
-    # 下方條列明細
+    # 下方條列明細（消除重複行，直接從前三大主力展開，並套用紅買綠賣配色）
     details = [
-        f"- 今年最大主力區間買賣超：**{primary_player}**（本區間 **{primary_period_net:+,}** 張）",
-        f"- 今年前三大主力（{', '.join(top3_names)}）本區間合計：**{top3_period_net:+,}** 張（近 20 日合計：**{top3_20d:+,}** 張）"
+        f"- 今年前三大主力（**{', '.join(top3_names)}**）本區間合計：{_fmt_md_num(top3_period_net)}（近 20 日合計：{_fmt_md_num(top3_20d)}）"
     ]
 
     for name in top3_names:
@@ -307,20 +334,21 @@ def analyze_main_force(df_price: pd.DataFrame, df_chips: pd.DataFrame, period_la
         b_10d = int(recent_10.get(name, 0))
         b_20d = int(recent_20.get(name, 0))
         details.append(
-            f"  - **{name}**（今年累計 {b_ytd:+,} 張）：本區間 **{b_period:+,}** 張 ｜ 今日 **{b_1d:+,}** 張 ｜ 近 10 日 **{b_10d:+,}** 張 ｜ 近 20 日 **{b_20d:+,}** 張"
+            f"  - **{name}**（今年累計 {_fmt_md_num(b_ytd)}）：本區間 {_fmt_md_num(b_period)} ｜ 今日 {_fmt_md_num(b_1d)} ｜ 近 10 日 {_fmt_md_num(b_10d)} ｜ 近 20 日 {_fmt_md_num(b_20d)}"
         )
 
     # 備註：同時顯示本檢視區間「買超第一名」與「賣超第一名」
     sorted_period = period_sum.sort_values(ascending=False)
-    top_buy_text = f"**{sorted_period.index[0]}**（**{int(sorted_period.iloc[0]):+,}** 張）" if sorted_period.iloc[0] > 0 else "無"
-    top_sell_text = f"**{sorted_period.index[-1]}**（**{int(sorted_period.iloc[-1]):+,}** 張）" if sorted_period.iloc[-1] < 0 else "無"
+    top_buy_text = f"**{sorted_period.index[0]}**（{_fmt_md_num(int(sorted_period.iloc[0]))}）" if sorted_period.iloc[0] > 0 else "無"
+    top_sell_text = f"**{sorted_period.index[-1]}**（{_fmt_md_num(int(sorted_period.iloc[-1]))}）" if sorted_period.iloc[-1] < 0 else "無"
     details.append(f"- 💡 備註：本檢視區間買超第一名為 {top_buy_text} ｜ 賣超第一名為 {top_sell_text}")
 
     return {
-        "main_force": f"{primary_player}（今年 {primary_ytd_net:+,} 張）",
+        "main_force_html": main_force_html,
         "main_force_sub_lines": main_force_sub_lines,
-        "status": status,
+        "status_html": status_html,
         "status_sub": status_sub,
+        "top3_names": top3_names,
         "top_buyers": {k: int(v) for k, v in top_buyers_ytd.items()},
         "top_sellers": {k: int(v) for k, v in top_sellers_ytd.items()},
         "details": details
@@ -420,7 +448,7 @@ def delete_stock_database(stock_id: str) -> tuple[bool, str]:
 
 
 def update_stock_database(stock_id: str) -> bool:
-    """固定從 2026-01-02 開始抓取指定個股股價、投信與前 25 大券商分點，存檔至 database/"""
+    """固定從 2026-01-02 開始抓取指定個股股價、中文股名、投信與前 25 大券商分點，存檔至 database/"""
     stock_id = stock_id.strip()
     start_date = START_DATE_FIXED
     end_date = datetime.today().strftime("%Y-%m-%d")
@@ -442,7 +470,10 @@ def update_stock_database(stock_id: str) -> bool:
         if trust_err:
             debug_notes.append(f"投信異常: {trust_err}")
 
-    # 2. 抓前 25 大券商分點（外資依個別券商名稱獨立統計）
+    # 2. 抓中文股票名稱
+    stock_name = fetch_stock_name(session, stock_id, active_mirror)
+
+    # 3. 抓前 25 大券商分點（外資依個別券商名稱獨立統計）
     brokers, active_mirror, broker_err = fetch_top_brokers(session, stock_id, start_date, end_date, active_mirror)
     if broker_err:
         debug_notes.append(f"分點清單異常: {broker_err}")
@@ -456,11 +487,11 @@ def update_stock_database(stock_id: str) -> bool:
         time.sleep(0.15)
 
     if brokers and fetched_count == 0:
-        debug_notes.append(f"找到 {len(brokers)} 個分點連結，但明細回傳為空（範例: {brokers[0]}）")
+        debug_notes.append(f"找到 {len(brokers)} 個分點連結，但明細回傳為空")
 
     df_chips = df_chips.fillna(0.0)
 
-    # 3. 寫入本地 CSV 並同步至 GitHub
+    # 4. 寫入本地 CSV 並同步至 GitHub
     price_file = f"{stock_id}_price.csv"
     chips_file = f"{stock_id}_chips.csv"
     meta_file = f"{stock_id}_meta.json"
@@ -472,9 +503,10 @@ def update_stock_database(stock_id: str) -> bool:
     if ok1:
         ok2, sync_msg = _sync_file_to_github(os.path.join(DB_DIR, chips_file), f"database/{chips_file}")
 
-    # 4. 產出基礎摘要存檔
+    # 5. 產出基礎摘要存檔
     meta = analyze_main_force(df_price, df_chips, f"{start_date} 至今", df_chips_full=df_chips)
     meta["stock_id"] = stock_id
+    meta["stock_name"] = stock_name
     meta["broker_count"] = fetched_count
     meta["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     meta["debug_notes"] = debug_notes
