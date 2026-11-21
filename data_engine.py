@@ -42,7 +42,7 @@ SCENARIO_MATRIX = [
         "id": 1,
         "name": "1. 雙重共振（主升段）",
         "type": "bull",
-        "main_cond": "股價站穩庫存均價之上，且近 5 日三大主力控盤率 ≥ +2.0%",
+        "main_cond": "股價站穩庫存均價與 10MA 之上，且近 5 日三大主力控盤率 ≥ +2.0%",
         "conc_cond": "5 / 10 / 20 日集中度皆為正，且呈現遞增加速（短 > 長）",
         "action": "最強多頭格局。波段大戶與短線資金同步鎖碼，沿 10MA 或主力成本線偏多操作。"
     },
@@ -50,7 +50,7 @@ SCENARIO_MATRIX = [
         "id": 2,
         "name": "2. 換手接棒（藏分點）",
         "type": "bull",
-        "main_cond": "近 5 日三大主力控盤率 ≤ +1.5%（持平或小幅調節）",
+        "main_cond": "收盤價站上 10MA（濾除空頭急跌），且近 5 日三大主力控盤率 ≤ +1.5%",
         "conc_cond": "20 日偏低或負值，但 5 日、10 日集中度翻正並飆高（≥ +5.0%）",
         "action": "隱形起漲／新莊家進場。主力改用其他分點吃貨或新大戶接手，留意「本區間買超第一名」動向。"
     },
@@ -60,7 +60,7 @@ SCENARIO_MATRIX = [
         "type": "bear",
         "main_cond": "近 5 日股價上漲 ≥ +2.0%，但三大主力近 5 日控盤率 ≤ -2.0%",
         "conc_cond": "20 日仍為正值，但 5 日集中度率先轉負（≤ -3.0%，籌碼由集中轉發散）",
-        "action": "高檔出貨警訊。波段大戶趁散戶追價倒貨，慎防假突破與拉回套牢風險。"
+        "action": "高檔出貨警訊。波段大戶趁散戶追價倒貨，慎防假突破與拉高套牢風險。"
     },
     {
         "id": 4,
@@ -482,11 +482,12 @@ def evaluate_chip_scenario(
     top3_5d: int,
     top3_5d_ctrl_pct: float,
     latest_close: float,
+    ma10: float,
     primary_cost: float,
     price_5d_pct: float,
     conc: dict,
 ) -> dict:
-    """根據今年三大主力近 5 日控盤率 (%)、成本均價與 5/10/20 日集中度，自動判定五大實戰劇本"""
+    """根據今年三大主力近 5 日控盤率 (%)、收盤價與 10MA/成本均價，以及 5/10/20 日集中度，判定五大實戰劇本"""
     c5 = conc.get("d5", {}).get("pct")
     c10 = conc.get("d10", {}).get("pct")
     c20 = conc.get("d20", {}).get("pct")
@@ -501,6 +502,7 @@ def evaluate_chip_scenario(
         }
 
     above_cost = (primary_cost > 0 and latest_close >= primary_cost)
+    above_ma10 = (ma10 > 0 and latest_close >= ma10)
     near_or_below_cost = (primary_cost > 0 and latest_close <= primary_cost * 1.02)
 
     # 情境 5：主力棄守（真破線）
@@ -517,8 +519,8 @@ def evaluate_chip_scenario(
             "type": "bear",
             "title": "🟢 當前劇本：5. 主力棄守（真破線）",
             "desc": (
-                f"股價已跌破最大主力均價（{primary_cost:,.2f} 元），且近 5 日三大主力大賣 {top3_5d:+,} 張"
-                f"（控盤率 {top3_5d_ctrl_pct:+.1f}%）、5 日集中度降至 {c5:+.1f}%。"
+                f"收盤價（{latest_close:,.2f} 元）已跌破最大主力均價（{primary_cost:,.2f} 元），"
+                f"且近 5 日三大主力大賣 {top3_5d:+,} 張（控盤率 {top3_5d_ctrl_pct:+.1f}%）、5 日集中度降至 {c5:+.1f}%。"
             ),
             "action": "連波段大戶都在停損結帳，下方無大資金承接，切忌因主力帳面虧損而盲目攤平。"
         }
@@ -544,20 +546,22 @@ def evaluate_chip_scenario(
 
     # 情境 1：雙重共振（主升段）
     if (
-        top3_5d >= 30
+        above_ma10
+        and (above_cost or primary_cost == 0)
+        and top3_5d >= 30
         and top3_5d_ctrl_pct >= 2.0
         and c5 > 3.0
         and c10 > 0
         and c20 > 0
         and (c5 >= c10 or c5 >= 8.0)
-        and (above_cost or primary_cost == 0)
     ):
         return {
             "id": 1,
             "type": "bull",
             "title": "🔴 當前劇本：1. 雙重共振（主升段）",
             "desc": (
-                f"今年三大主力近 5 日買超 {top3_5d:+,} 張（控盤率 {top3_5d_ctrl_pct:+.1f}%），"
+                f"收盤價（{latest_close:,.2f} 元）站穩 10MA（{ma10:,.2f} 元）與主力成本之上，"
+                f"三大主力近 5 日買超 {top3_5d:+,} 張（控盤率 {top3_5d_ctrl_pct:+.1f}%），"
                 f"且 20日({c20:+.1f}%) → 10日({c10:+.1f}%) → 5日({c5:+.1f}%) 集中度全面翻正加速。"
             ),
             "action": "最強多頭格局！波段大戶與短線大資金同步鎖碼，可沿 10MA 或主力成本線偏多操作。"
@@ -576,15 +580,16 @@ def evaluate_chip_scenario(
             "type": "bull",
             "title": "🔴 當前劇本：4. 成本護盤（真洗盤）",
             "desc": (
-                f"股價回測主力均價（{primary_cost:,.2f} 元）附近，但三大主力逆勢買超 {top3_5d:+,} 張"
-                f"（控盤率 {top3_5d_ctrl_pct:+.1f}%），5 日集中度維持 {c5:+.1f}%。"
+                f"收盤價（{latest_close:,.2f} 元）回測主力均價（{primary_cost:,.2f} 元）附近，"
+                f"但三大主力逆勢買超 {top3_5d:+,} 張（控盤率 {top3_5d_ctrl_pct:+.1f}%），5 日集中度維持 {c5:+.1f}%。"
             ),
             "action": "主力刻意洗盤護成本，趁恐慌承接浮額，一旦止跌回穩極易展開下一波反彈。"
         }
 
     # 情境 2：換手接棒（藏分點）
     if (
-        top3_5d_ctrl_pct <= 1.5
+        above_ma10
+        and top3_5d_ctrl_pct <= 1.5
         and c5 >= 5.0
         and (c10 >= 2.0 or c20 < c5)
     ):
@@ -593,6 +598,7 @@ def evaluate_chip_scenario(
             "type": "bull",
             "title": "🔴 當前劇本：2. 換手接棒（藏分點）",
             "desc": (
+                f"收盤價（{latest_close:,.2f} 元）已站上 10MA（{ma10:,.2f} 元），"
                 f"今年三大主力近 5 日控盤率僅 {top3_5d_ctrl_pct:+.1f}%（{top3_5d:+,} 張），"
                 f"但全市場 5 日集中度逆勢飆升至 {c5:+.1f}%。"
             ),
@@ -604,10 +610,10 @@ def evaluate_chip_scenario(
         "type": "neutral",
         "title": "⚪ 當前狀態：籌碼中性整理（尚未觸發五大關鍵劇本）",
         "desc": (
-            f"目前三大主力近 5 日淨額 {top3_5d:+,} 張（控盤率 {top3_5d_ctrl_pct:+.1f}%），"
-            f"全市場 5 日集中度 {c5:+.1f}%，處於多空均衡或橫盤整理階段。"
+            f"收盤價 {latest_close:,.2f} 元（10MA {ma10:,.2f} 元），三大主力近 5 日淨額 {top3_5d:+,} 張"
+            f"（控盤率 {top3_5d_ctrl_pct:+.1f}%），全市場 5 日集中度 {c5:+.1f}%，處於多空均衡或橫盤整理階段。"
         ),
-        "action": "持續觀察 5 日集中度是否突破 ±5% 或三大主力控盤率表態。"
+        "action": "持續觀察收盤價與 10MA 位置、5 日集中度是否突破 ±5% 或三大主力控盤率表態。"
     }
 
 
@@ -623,7 +629,7 @@ def analyze_main_force(
     1. 錨定 2026/01/02 至今全年度累計買超排行決定「波段大主力」。
     2. 計算最大主力的累計買超、累計賣超、淨總數與目前庫存均價（成本）。
     3. 計算前三大主力各分點的連買／連賣天數、區間控盤率 (%)。
-    4. 偵測近 5 日價量籌碼背離訊號，並結合 5/10/20 日集中度判定五大實戰劇本。
+    4. 偵測近 5 日價量籌碼背離訊號，並結合收盤價、10MA 與 5/10/20 日集中度判定五大實戰劇本。
     """
     broker_cols = [c for c in df_chips.columns if c != "date"]
     if not broker_cols or df_price.empty:
@@ -686,6 +692,7 @@ def analyze_main_force(
     merged_for_cost = full_price.merge(full_df[["date", primary_player]], on="date", how="left").fillna({primary_player: 0.0})
     _, primary_cost, primary_inv = calculate_main_force_cost(merged_for_cost, merged_for_cost[primary_player])
     latest_close_full = float(full_price.iloc[-1]["close"])
+    latest_ma10 = round(float(full_price["close"].tail(10).mean()), 2)
 
     main_force_html = f"{primary_player}（今年 {_fmt_html_num(primary_ytd_net)}）"
     main_force_sub_lines = [
@@ -747,11 +754,12 @@ def analyze_main_force(
                 )
             }
 
-    # 判定五大實戰劇本（採用控盤率 % 自適應門檻）
+    # 判定五大實戰劇本（結合收盤價、10MA、庫存均價與控盤率 % 自適應門檻）
     scenario = evaluate_chip_scenario(
         top3_5d=top3_5d,
         top3_5d_ctrl_pct=top3_5d_ctrl_pct,
         latest_close=latest_close_full,
+        ma10=latest_ma10,
         primary_cost=primary_cost if primary_inv > 0 else 0.0,
         price_5d_pct=price_5d_pct,
         conc=concentrations or {},
