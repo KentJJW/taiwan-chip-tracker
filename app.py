@@ -304,6 +304,16 @@ st.markdown("""
     border-top: 1px solid rgba(38, 166, 154, 0.45);
     border-bottom: 1px solid rgba(38, 166, 154, 0.45);
 }
+.sidebar-help-box {
+    background-color: #1a1f2b;
+    border: 1px solid #2d3548;
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 0.78rem;
+    color: #94a3b8;
+    line-height: 1.45;
+    margin-bottom: 8px;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -392,7 +402,7 @@ def _format_conc_card(label: str, info: dict) -> str:
         return (
             f'<div class="conc-box">'
             f'  <div class="conc-box-left"><span class="conc-period">{label}</span><span class="conc-val" style="color:#94a3b8;">待更新</span></div>'
-            f'  <span class="conc-badge" style="background:#262e40; color:#94a3b8;">請重抓更新</span>'
+            f'  <span class="conc-badge" style="background:#262e40; color:#94a3b8;">請點左側 🔄</span>'
             f'</div>'
         )
 
@@ -426,11 +436,11 @@ if "active_stock" not in st.session_state:
 if "sort_mode" not in st.session_state:
     st.session_state["sort_mode"] = False
 
-# --- 側邊欄：查詢、統計區間與 database 管理（支援自訂排序） ---
+# --- 側邊欄：新增個股、統計區間與已存個股管理（支援單檔全量校準、全部增量快刷、自訂排序） ---
 with st.sidebar:
-    st.header("🔍 查詢與建檔")
-    input_stock = st.text_input("輸入台股代號（例如：6488、2330、3231）", value="6488").strip()
-    btn_query = st.button("抓取／更新資料 (2026/01/02起)", type="primary", width="stretch")
+    st.header("🔍 新增個股建檔")
+    input_stock = st.text_input("輸入新台股代號（例如：2330、3231）", value="", placeholder="輸入 4 碼上市櫃代號").strip()
+    btn_add = st.button("➕ 新增並建檔 (2026/01/02起)", type="primary", width="stretch")
 
     st.divider()
     st.subheader("📅 統計區間")
@@ -449,11 +459,35 @@ with st.sidebar:
         custom_end_str = st.text_input("結束日期", value=datetime.today().strftime("%Y%m%d"))
 
     st.divider()
-    col_hdr, col_sort_btn = st.columns([2.6, 1.4])
-    with col_hdr:
-        st.subheader(f"📁 已存個股 ({len(saved_list)})")
-    with col_sort_btn:
-        if saved_list:
+    st.subheader(f"📁 已存個股 ({len(saved_list)})")
+
+    if saved_list:
+        st.markdown(
+            '<div class="sidebar-help-box">'
+            '• <b>🔄 全部快刷</b>：近 3 日增量更新所有個股與集中度<br>'
+            '• <b>個股旁 🔄</b>：全年度重抓校準（補齊新分點全年明細）'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+        col_all_upd, col_sort_btn = st.columns([1.25, 1])
+        with col_all_upd:
+            if st.button(
+                "🔄 全部快刷",
+                key="btn_update_all",
+                help="對所有已存個股執行近 3 個交易日增量更新，並重算最新 5/10/20 日集中度（每檔約 2.5 秒）",
+                width="stretch",
+                disabled=st.session_state["sort_mode"],
+            ):
+                prog = st.progress(0, text="準備批量增量更新...")
+                for idx, sid in enumerate(saved_list):
+                    lbl = get_stock_display_label(sid)
+                    prog.progress((idx) / len(saved_list), text=f"正在增量更新 {lbl} ({idx+1}/{len(saved_list)})...")
+                    update_stock_database(sid, incremental_days=3)
+                prog.progress(1.0, text="全部增量更新完成！")
+                st.rerun()
+
+        with col_sort_btn:
             if not st.session_state["sort_mode"]:
                 if st.button("↕️ 排序", key="btn_enter_sort", help="手動調整自選股排列順序", width="stretch"):
                     st.session_state["sort_mode"] = True
@@ -464,7 +498,6 @@ with st.sidebar:
                     st.session_state["sort_mode"] = False
                     st.rerun()
 
-    if saved_list:
         if st.session_state["sort_mode"]:
             st.caption("點擊 ↑ / ↓ 調整順序，完成後請按「✓ 完成」同步儲存")
             for idx, sid in enumerate(saved_list):
@@ -490,13 +523,25 @@ with st.sidebar:
                         st.rerun()
         else:
             for sid in saved_list:
-                col_s, col_del = st.columns([4, 1])
+                col_s, col_upd, col_del = st.columns([3.3, 0.85, 0.85])
                 display_name = get_stock_display_label(sid)
                 with col_s:
                     is_current = (sid == st.session_state.get("active_stock"))
                     btn_label = f"▶ {display_name}" if is_current else display_name
                     if st.button(btn_label, key=f"sel_{sid}", width="stretch"):
                         st.session_state["active_stock"] = sid
+                        st.rerun()
+                with col_upd:
+                    if st.button(
+                        "🔄",
+                        key=f"upd_{sid}",
+                        help=f"全年度重抓校準 {display_name}（從 2026/01/02 完整回溯，約 5 秒）",
+                        width="stretch",
+                    ):
+                        with st.spinner(f"正在全年度重抓校準 {display_name}..."):
+                            ok = update_stock_database(sid, incremental_days=None)
+                            if ok:
+                                st.session_state["active_stock"] = sid
                         st.rerun()
                 with col_del:
                     if st.button("✕", key=f"del_{sid}", help=f"刪除 {display_name} 的所有歷史資料", width="stretch"):
@@ -506,9 +551,9 @@ with st.sidebar:
                             st.session_state["active_stock"] = remaining[0] if remaining else ""
                         st.rerun()
     else:
-        st.caption("目前 database 尚無資料，請輸入代號查詢。")
+        st.caption("目前 database 尚無資料，請在上方輸入代號新增。")
 
-if btn_query and input_stock:
+if btn_add and input_stock:
     st.session_state["active_stock"] = input_stock
 
 target_stock = st.session_state.get("active_stock", "").strip()
@@ -518,13 +563,12 @@ if target_stock:
     chips_path = os.path.join(DB_DIR, f"{target_stock}_chips.csv")
     meta_path = os.path.join(DB_DIR, f"{target_stock}_meta.json")
 
-    if btn_query or not os.path.exists(price_path):
+    if (btn_add and input_stock) or not os.path.exists(price_path):
         with st.spinner(f"正在從 2026/01/02 抓取 {target_stock} 股價、投信、前 30 大主力與 5/10/20 日籌碼集中度..."):
-            ok = update_stock_database(target_stock)
+            ok = update_stock_database(target_stock, incremental_days=None)
             if not ok:
                 st.error(f"找不到股票代號 `{target_stock}`，請確認是否為正確的上市櫃代號（目前不支援興櫃）。")
                 st.stop()
-            # 新建檔個股自動加到自訂排序清單
             cur_order = get_saved_stocks()
             if target_stock not in cur_order:
                 cur_order.insert(0, target_stock)
@@ -982,4 +1026,4 @@ if target_stock:
 
         st.plotly_chart(fig, width="stretch")
 else:
-    st.info("👈 請在左側輸入上市或上櫃股票代號（例如 `6488`、`2330`）開始查詢。")
+    st.info("👈 請在左側輸入上市或上櫃股票代號（例如 `6488`、`2330`）新增建檔。")
