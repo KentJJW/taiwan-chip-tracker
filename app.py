@@ -8,11 +8,14 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from data_engine import (
     DB_DIR,
+    SCENARIO_MATRIX,
     update_stock_database,
     analyze_main_force,
     delete_stock_database,
     calculate_main_force_cost,
     fetch_stock_name,
+    load_stock_order,
+    save_stock_order,
 )
 
 st.set_page_config(page_title="台股主力分點吃貨／出貨追蹤系統", layout="wide")
@@ -44,12 +47,109 @@ st.markdown("""
     margin-top: 6px;
     line-height: 1.45;
 }
+.conc-panel {
+    background-color: #161a23;
+    border: 1px solid #2d3548;
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin-top: 10px;
+    margin-bottom: 6px;
+}
+.conc-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    gap: 8px;
+}
+.conc-title {
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: #e2e8f0;
+    display: inline-flex;
+    align-items: center;
+}
+.conc-sub-tag {
+    font-size: 0.78rem;
+    color: #94a3b8;
+    background-color: #232938;
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-left: 8px;
+    font-weight: 400;
+}
+.conc-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+}
+.conc-box {
+    background-color: #1e2330;
+    border: 1px solid #2e374b;
+    border-radius: 8px;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.conc-box-left {
+    display: flex;
+    flex-direction: column;
+}
+.conc-period {
+    font-size: 0.8rem;
+    color: #94a3b8;
+    margin-bottom: 2px;
+}
+.conc-val {
+    font-size: 1.15rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+.conc-badge {
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 5px;
+    white-space: nowrap;
+}
+.scenario-bull {
+    background-color: rgba(239, 83, 80, 0.13);
+    border-left: 4px solid #ef5350;
+    border-radius: 6px;
+    padding: 9px 13px;
+    margin-top: 10px;
+    font-size: 0.88rem;
+    color: #f8fafc;
+    line-height: 1.5;
+}
+.scenario-bear {
+    background-color: rgba(38, 166, 154, 0.13);
+    border-left: 4px solid #26a69a;
+    border-radius: 6px;
+    padding: 9px 13px;
+    margin-top: 10px;
+    font-size: 0.88rem;
+    color: #f8fafc;
+    line-height: 1.5;
+}
+.scenario-neutral {
+    background-color: rgba(148, 163, 184, 0.08);
+    border-left: 4px solid #64748b;
+    border-radius: 6px;
+    padding: 8px 13px;
+    margin-top: 10px;
+    font-size: 0.85rem;
+    color: #cbd5e1;
+    line-height: 1.45;
+}
 .div-alert-bull {
     background-color: rgba(239, 83, 80, 0.12);
     border-left: 4px solid #ef5350;
     border-radius: 6px;
     padding: 10px 14px;
-    margin: 10px 0 4px 0;
+    margin: 8px 0 4px 0;
     font-size: 0.9rem;
     color: #f8fafc;
 }
@@ -58,7 +158,7 @@ st.markdown("""
     border-left: 4px solid #26a69a;
     border-radius: 6px;
     padding: 10px 14px;
-    margin: 10px 0 4px 0;
+    margin: 8px 0 4px 0;
     font-size: 0.9rem;
     color: #f8fafc;
 }
@@ -113,7 +213,7 @@ st.markdown("""
     opacity: 0;
     position: absolute;
     z-index: 9999;
-    width: 290px;
+    width: 300px;
     background-color: #0f172a;
     color: #e2e8f0;
     border: 1px solid #475569;
@@ -172,6 +272,38 @@ st.markdown("""
     color: #e2e8f0;
     font-variant-numeric: tabular-nums;
 }
+.matrix-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    background-color: #141821;
+}
+.matrix-table th {
+    background-color: #1f2533;
+    color: #cbd5e1;
+    text-align: left;
+    padding: 8px 10px;
+    font-weight: 600;
+}
+.matrix-table td {
+    padding: 8px 10px;
+    border-top: 1px solid #262e40;
+    color: #cbd5e1;
+    line-height: 1.45;
+    vertical-align: top;
+}
+.matrix-active-bull td {
+    background-color: rgba(239, 83, 80, 0.14);
+    color: #ffffff;
+    border-top: 1px solid rgba(239, 83, 80, 0.45);
+    border-bottom: 1px solid rgba(239, 83, 80, 0.45);
+}
+.matrix-active-bear td {
+    background-color: rgba(38, 166, 154, 0.14);
+    color: #ffffff;
+    border-top: 1px solid rgba(38, 166, 154, 0.45);
+    border-bottom: 1px solid rgba(38, 166, 154, 0.45);
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -179,9 +311,10 @@ st.markdown("""
 def get_saved_stocks() -> list:
     if not os.path.exists(DB_DIR):
         return []
-    return sorted({
+    raw_ids = [
         f.split("_")[0] for f in os.listdir(DB_DIR) if f.endswith("_price.csv")
-    })
+    ]
+    return load_stock_order(raw_ids)
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
@@ -218,7 +351,6 @@ def get_stock_display_label(stock_id: str) -> str:
 
 
 def parse_manual_date(text: str, fallback: str) -> str:
-    """支援手動輸入 20260501、2026/5/1、2026-05-01 等格式"""
     raw = text.strip()
     digits = re.sub(r"\D", "", raw)
     if len(digits) == 8:
@@ -253,13 +385,48 @@ def _span_ctrl(pct: float) -> str:
     return f'<span style="color:{color}; font-weight:700;">{pct:+.1f}%</span>'
 
 
+def _format_conc_card(label: str, info: dict) -> str:
+    pct = info.get("pct") if isinstance(info, dict) else None
+    net = info.get("net", 0) if isinstance(info, dict) else 0
+    if pct is None:
+        return (
+            f'<div class="conc-box">'
+            f'  <div class="conc-box-left"><span class="conc-period">{label}</span><span class="conc-val" style="color:#94a3b8;">待更新</span></div>'
+            f'  <span class="conc-badge" style="background:#262e40; color:#94a3b8;">請重抓更新</span>'
+            f'</div>'
+        )
+
+    if pct >= 10.0:
+        color, badge_bg, badge_txt = "#ef5350", "rgba(239,83,80,0.18)", "🔥 高度集中"
+    elif pct >= 3.0:
+        color, badge_bg, badge_txt = "#ef5350", "rgba(239,83,80,0.14)", "📈 偏多吸籌"
+    elif pct <= -10.0:
+        color, badge_bg, badge_txt = "#26a69a", "rgba(38,166,154,0.18)", "⚠️ 嚴重發散"
+    elif pct <= -3.0:
+        color, badge_bg, badge_txt = "#26a69a", "rgba(38,166,154,0.14)", "📉 籌碼微散"
+    else:
+        color, badge_bg, badge_txt = "#cbd5e1", "rgba(148,163,184,0.14)", "⚪ 籌碼中性"
+
+    return (
+        f'<div class="conc-box">'
+        f'  <div class="conc-box-left">'
+        f'    <span class="conc-period">{label}（淨額 {net:+,} 張）</span>'
+        f'    <span class="conc-val" style="color:{color};">{pct:+.2f}%</span>'
+        f'  </div>'
+        f'  <span class="conc-badge" style="background:{badge_bg}; color:{color};">{badge_txt}</span>'
+        f'</div>'
+    )
+
+
 st.markdown("### 📈 台股主力分點吃貨／出貨追蹤系統")
 
 saved_list = get_saved_stocks()
 if "active_stock" not in st.session_state:
     st.session_state["active_stock"] = saved_list[0] if saved_list else "6488"
+if "sort_mode" not in st.session_state:
+    st.session_state["sort_mode"] = False
 
-# --- 側邊欄：查詢、統計區間與 database 管理 ---
+# --- 側邊欄：查詢、統計區間與 database 管理（支援自訂排序） ---
 with st.sidebar:
     st.header("🔍 查詢與建檔")
     input_stock = st.text_input("輸入台股代號（例如：6488、2330、3231）", value="6488").strip()
@@ -282,24 +449,62 @@ with st.sidebar:
         custom_end_str = st.text_input("結束日期", value=datetime.today().strftime("%Y%m%d"))
 
     st.divider()
-    st.subheader(f"📁 database 已存個股 ({len(saved_list)} 檔)")
+    col_hdr, col_sort_btn = st.columns([2.6, 1.4])
+    with col_hdr:
+        st.subheader(f"📁 已存個股 ({len(saved_list)})")
+    with col_sort_btn:
+        if saved_list:
+            if not st.session_state["sort_mode"]:
+                if st.button("↕️ 排序", key="btn_enter_sort", help="手動調整自選股排列順序", width="stretch"):
+                    st.session_state["sort_mode"] = True
+                    st.rerun()
+            else:
+                if st.button("✓ 完成", key="btn_exit_sort", type="primary", help="完成排序並儲存", width="stretch"):
+                    save_stock_order(saved_list, sync_github=True)
+                    st.session_state["sort_mode"] = False
+                    st.rerun()
+
     if saved_list:
-        for sid in saved_list:
-            col_s, col_del = st.columns([4, 1])
-            display_name = get_stock_display_label(sid)
-            with col_s:
-                is_current = (sid == st.session_state.get("active_stock"))
-                btn_label = f"▶ {display_name}" if is_current else display_name
-                if st.button(btn_label, key=f"sel_{sid}", width="stretch"):
-                    st.session_state["active_stock"] = sid
-                    st.rerun()
-            with col_del:
-                if st.button("✕", key=f"del_{sid}", help=f"刪除 {display_name} 的所有歷史資料", width="stretch"):
-                    with st.spinner(f"正在刪除 {display_name}..."):
-                        delete_stock_database(sid)
-                        remaining = get_saved_stocks()
-                        st.session_state["active_stock"] = remaining[0] if remaining else ""
-                    st.rerun()
+        if st.session_state["sort_mode"]:
+            st.caption("點擊 ↑ / ↓ 調整順序，完成後請按「✓ 完成」同步儲存")
+            for idx, sid in enumerate(saved_list):
+                display_name = get_stock_display_label(sid)
+                c_name, c_up, c_dn = st.columns([3.4, 0.8, 0.8])
+                with c_name:
+                    st.markdown(
+                        f'<div style="padding:6px 10px; background:#1e2330; border:1px solid #334155; '
+                        f'border-radius:6px; font-size:0.88rem; color:#f1f5f9;">{idx+1}. {display_name}</div>',
+                        unsafe_allow_html=True,
+                    )
+                with c_up:
+                    if st.button("↑", key=f"up_{sid}", disabled=(idx == 0), width="stretch"):
+                        new_list = list(saved_list)
+                        new_list[idx - 1], new_list[idx] = new_list[idx], new_list[idx - 1]
+                        save_stock_order(new_list, sync_github=False)
+                        st.rerun()
+                with c_dn:
+                    if st.button("↓", key=f"dn_{sid}", disabled=(idx == len(saved_list) - 1), width="stretch"):
+                        new_list = list(saved_list)
+                        new_list[idx + 1], new_list[idx] = new_list[idx], new_list[idx + 1]
+                        save_stock_order(new_list, sync_github=False)
+                        st.rerun()
+        else:
+            for sid in saved_list:
+                col_s, col_del = st.columns([4, 1])
+                display_name = get_stock_display_label(sid)
+                with col_s:
+                    is_current = (sid == st.session_state.get("active_stock"))
+                    btn_label = f"▶ {display_name}" if is_current else display_name
+                    if st.button(btn_label, key=f"sel_{sid}", width="stretch"):
+                        st.session_state["active_stock"] = sid
+                        st.rerun()
+                with col_del:
+                    if st.button("✕", key=f"del_{sid}", help=f"刪除 {display_name} 的所有歷史資料", width="stretch"):
+                        with st.spinner(f"正在刪除 {display_name}..."):
+                            delete_stock_database(sid)
+                            remaining = get_saved_stocks()
+                            st.session_state["active_stock"] = remaining[0] if remaining else ""
+                        st.rerun()
     else:
         st.caption("目前 database 尚無資料，請輸入代號查詢。")
 
@@ -314,11 +519,16 @@ if target_stock:
     meta_path = os.path.join(DB_DIR, f"{target_stock}_meta.json")
 
     if btn_query or not os.path.exists(price_path):
-        with st.spinner(f"正在從 2026/01/02 抓取 {target_stock} 股價、投信與前 30 大券商分點明細..."):
+        with st.spinner(f"正在從 2026/01/02 抓取 {target_stock} 股價、投信、前 30 大主力與 5/10/20 日籌碼集中度..."):
             ok = update_stock_database(target_stock)
             if not ok:
                 st.error(f"找不到股票代號 `{target_stock}`，請確認是否為正確的上市櫃代號（目前不支援興櫃）。")
                 st.stop()
+            # 新建檔個股自動加到自訂排序清單
+            cur_order = get_saved_stocks()
+            if target_stock not in cur_order:
+                cur_order.insert(0, target_stock)
+                save_stock_order(cur_order, sync_github=True)
             st.rerun()
 
     df_price_full = pd.read_csv(price_path)
@@ -372,19 +582,21 @@ if target_stock:
     else:
         pct_html = '<span style="color:#cbd5e1; font-weight:700;">0.00%</span>'
 
+    concentrations = meta_saved.get("concentrations", {})
     analysis = analyze_main_force(
         df_price,
         df_chips,
         period_label,
         df_chips_full=df_chips_full,
         df_price_full=df_price_full,
+        concentrations=concentrations,
     )
     broker_count = len([c for c in df_chips_full.columns if c not in ("date", "投信")])
 
     if broker_count == 0 and meta_saved.get("debug_notes"):
         st.warning(f"⚠️ 分點明細未取得（{'；'.join(meta_saved['debug_notes'])}）")
 
-    # --- 區塊一：主力診斷結論（標題旁顯示最新更新時間與交易日） ---
+    # --- 區塊一：主力診斷結論 ---
     updated_str = meta_saved.get("last_updated", "")
     latest_trade_date = df_price_full["date"].max()
     time_badge = f"🕒 更新時間：{updated_str}（最新交易日：{latest_trade_date}）" if updated_str else f"🕒 最新交易日：{latest_trade_date}"
@@ -419,7 +631,7 @@ if target_stock:
         )
         st.markdown(f"""
         <div class="summary-card">
-            <div class="card-label">區間內三大主力狀態</div>
+            <div class="card-label">區間內今年三大主力狀態</div>
             <div class="card-value">{analysis.get("status_html", "N/A")}</div>
             {status_sub_html}
         </div>
@@ -431,6 +643,72 @@ if target_stock:
             <div class="card-value">{latest_close:.2f} 元</div>
             <div class="card-sub">區間漲跌：{pct_html}<br>更新：{updated_str[:16] if updated_str else latest_trade_date}</div>
         </div>
+        """, unsafe_allow_html=True)
+
+    # --- 區塊一點五：全市場前 15 大籌碼集中度橫條 ＋ 五大劇本自動亮燈提示 ---
+    conc_tip = (
+        "計算公式：（該區間全市場前 15 大買超分點總張數 － 前 15 大賣超分點總張數）÷ 區間總成交量 × 100%。"
+        "正值代表籌碼向大戶集中（偏多），負值代表籌碼流向散戶（發散）。此數據直接取自 MoneyDJ 總表，涵蓋全市場前 15 大分點。"
+    )
+    scenario = analysis.get("scenario", {})
+    sc_type = scenario.get("type", "neutral")
+    sc_cls = "scenario-bull" if sc_type == "bull" else ("scenario-bear" if sc_type == "bear" else "scenario-neutral")
+    sc_action_html = f'<br><span style="color:#cbd5e1;">💡 操作應對：{scenario["action"]}</span>' if scenario.get("action") else ""
+
+    st.markdown(
+        f'<div class="conc-panel">'
+        f'  <div class="conc-header">'
+        f'    <div class="conc-title">'
+        f'      📊 全市場前 15 大籌碼集中度'
+        f'      <span class="tip-wrap tip-right">ⓘ<span class="tip-box">{conc_tip}</span></span>'
+        f'      <span class="conc-sub-tag">短中線全市場視角，不限今年主力名單</span>'
+        f'    </div>'
+        f'  </div>'
+        f'  <div class="conc-grid">'
+        f'    {_format_conc_card("近 5 日集中度", concentrations.get("d5", {}))}'
+        f'    {_format_conc_card("近 10 日集中度", concentrations.get("d10", {}))}'
+        f'    {_format_conc_card("近 20 日集中度", concentrations.get("d20", {}))}'
+        f'  </div>'
+        f'  <div class="{sc_cls}">'
+        f'    <b>{scenario.get("title", "")}</b><br>'
+        f'    {scenario.get("desc", "")}'
+        f'    {sc_action_html}'
+        f'  </div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    # --- 可收合抽屜：兩大維度交叉判讀矩陣（自動高亮當前符合劇本） ---
+    matched_id = scenario.get("id", 0)
+    with st.expander("📖 兩大維度交叉判讀矩陣（點擊展開 5 大實戰劇本與操作應對）", expanded=False):
+        m_rows = []
+        for item in SCENARIO_MATRIX:
+            is_match = (item["id"] == matched_id)
+            row_cls = ""
+            badge = ""
+            if is_match:
+                row_cls = "matrix-active-bull" if item["type"] == "bull" else "matrix-active-bear"
+                badge = '<br><span style="display:inline-block; margin-top:4px; padding:1px 6px; border-radius:4px; background:#f59e0b; color:#0f172a; font-weight:700; font-size:0.75rem;">👈 目前符合</span>'
+            m_rows.append(
+                f'<tr class="{row_cls}">'
+                f'  <td style="width:18%; font-weight:700;">{item["name"]}{badge}</td>'
+                f'  <td style="width:24%;">{item["main_cond"]}</td>'
+                f'  <td style="width:24%;">{item["conc_cond"]}</td>'
+                f'  <td style="width:34%;">{item["action"]}</td>'
+                f'</tr>'
+            )
+        st.markdown(f"""
+        <table class="matrix-table">
+            <thead>
+                <tr>
+                    <th>盤面情境劇本</th>
+                    <th>今年三大主力動向（點）</th>
+                    <th>5 / 10 / 20 日集中度（面）</th>
+                    <th>籌碼實戰解讀與操作應對</th>
+                </tr>
+            </thead>
+            <tbody>{"".join(m_rows)}</tbody>
+        </table>
         """, unsafe_allow_html=True)
 
     # --- 近 5 日價量籌碼背離警報（含 ⓘ 指標說明） ---
@@ -559,7 +837,6 @@ if target_stock:
         cum_total = daily_net.cumsum()
         cost_series, latest_cost, latest_inv = calculate_main_force_cost(df_plot, daily_net)
 
-        # 顯示所選主力的目前庫存均價與帳面損益摘要條
         target_label = selected_brokers[0] if len(selected_brokers) == 1 else f"所選 {len(selected_brokers)} 個分點合力"
         latest_full_close = float(df_plot.iloc[-1]["close"])
         if latest_cost > 0 and latest_inv > 0:
@@ -666,7 +943,6 @@ if target_stock:
             row=2, col=1, secondary_y=True
         )
 
-        # 選定特定統計區間時，在圖表中標示（單日用垂直虛線，多日用反灰區塊）
         if range_type != "全部":
             if start_filter == end_filter:
                 fig.add_vline(
