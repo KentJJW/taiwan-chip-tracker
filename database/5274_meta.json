@@ -4,9 +4,16 @@
     "今年累計買超 <span style=\"color:#ef5350; font-weight:700;\">+4,112 張</span> ／ 賣超 <span style=\"color:#26a69a; font-weight:700;\">-2,996 張</span>（淨額 <span style=\"color:#ef5350; font-weight:700;\">+1,116 張</span>）",
     "目前庫存均價：<b style='color:#ffb74d;'>16,066.29 元</b>（帳面損益 <span style=\"color:#26a69a; font-weight:700;\">-51.08%</span>）"
   ],
-  "status_html": "🟢 區間內三大主力吃貨中（<span style=\"color:#ef5350; font-weight:700;\">+2,097 張</span>）",
+  "status_html": "🟢 區間內今年三大主力吃貨中（<span style=\"color:#ef5350; font-weight:700;\">+2,097 張</span>）",
   "status_sub": "三大主力名單：投信, 台灣摩根士丹利, 新加坡商瑞銀",
   "divergence_alert": null,
+  "scenario": {
+    "id": 0,
+    "type": "neutral",
+    "title": "⚪ 當前狀態：籌碼中性整理（尚未觸發五大關鍵劇本）",
+    "desc": "目前三大主力近 5 日淨額 +17 張，全市場 5 日集中度 -3.4%，處於多空均衡或橫盤整理階段。",
+    "action": "持續觀察 5 日集中度是否突破 ±5% 或出現主力連續買賣超表態。"
+  },
   "top3_names": [
     "投信",
     "台灣摩根士丹利",
@@ -58,12 +65,32 @@
     "永豐金-匯立": -446,
     "香港上海匯豐": -415,
     "美林": -342,
-    "國泰證券": -260
+    "國泰證券": -251
   },
   "stock_id": "5274",
   "stock_name": "信驊",
-  "broker_count": 36,
-  "last_updated": "2026-11-20 22:32",
+  "broker_count": 41,
+  "concentrations": {
+    "d5": {
+      "pct": -3.43,
+      "net": -78,
+      "buy15": 575,
+      "sell15": 653
+    },
+    "d10": {
+      "pct": -2.44,
+      "net": -130,
+      "buy15": 724,
+      "sell15": 854
+    },
+    "d20": {
+      "pct": -4.67,
+      "net": -418,
+      "buy15": 907,
+      "sell15": 1325
+    }
+  },
+  "last_updated": "2026-11-21 10:41",
   "debug_notes": [],
   "github_sync": "✅ 已同步至 GitHub database/"
 }
