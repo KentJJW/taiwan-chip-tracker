@@ -20,6 +20,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 DB_DIR = "database"
 os.makedirs(DB_DIR, exist_ok=True)
 
+ORDER_FILE = os.path.join(DB_DIR, "stock_order.json")
 START_DATE_FIXED = "2026-01-02"
 
 DJ_MIRRORS = [
@@ -35,6 +36,49 @@ DAY_TRADE_BROKERS = {
     "凱基-台北", "元大-土城永寧", "富邦-嘉義", "群益金鼎-大安",
     "國票-敦北法人", "統一-內湖", "永豐金-松山", "兆豐-大同"
 }
+
+SCENARIO_MATRIX = [
+    {
+        "id": 1,
+        "name": "1. 雙重共振（主升段）",
+        "type": "bull",
+        "main_cond": "今年三大主力持續買超，且股價站穩庫存均價之上",
+        "conc_cond": "5 / 10 / 20 日集中度皆為正，且呈現遞增加速（短 > 長）",
+        "action": "最強多頭格局。波段大戶與短線資金同步鎖碼，沿 10MA 或主力成本線偏多操作。"
+    },
+    {
+        "id": 2,
+        "name": "2. 換手接棒／藏分點",
+        "type": "bull",
+        "main_cond": "今年三大主力持平或小幅調節，無明顯大買",
+        "conc_cond": "20 日偏低或負值，但 5 日、10 日集中度翻正並飆高（> +5%）",
+        "action": "隱形起漲／新莊家進場。主力改用其他分點吃貨或新大戶接手，留意「本區間買超第一名」動向。"
+    },
+    {
+        "id": 3,
+        "name": "3. 高檔派發（假突破）",
+        "type": "bear",
+        "main_cond": "股價近 5 日走高或創波段高，但今年三大主力轉為賣超",
+        "conc_cond": "20 日仍為正值，但 5 日集中度率先轉負（籌碼由集中轉發散）",
+        "action": "高檔出貨警訊。波段大戶趁散戶追價倒貨，慎防假突破與拉回套牢風險。"
+    },
+    {
+        "id": 4,
+        "name": "4. 成本線護盤（真洗盤）",
+        "type": "bull",
+        "main_cond": "股價回測甚至微幅跌破主力庫存均價，但三大主力逆勢低接",
+        "conc_cond": "近 5 日集中度維持正值（急跌時籌碼反而向大戶集中）",
+        "action": "主力刻意洗盤。大戶不願跌破自身成本區，趁恐慌承接浮額，止跌回穩後易展開反彈。"
+    },
+    {
+        "id": 5,
+        "name": "5. 主力棄守（真破線）",
+        "type": "bear",
+        "main_cond": "股價跌破主力庫存均價，且今年三大主力同步大額賣超",
+        "conc_cond": "5 日、10 日集中度同步明顯為負（< -5%）",
+        "action": "多殺多棄守格局。連波段最大主力都在停損結帳，下方無大資金接手，切忌盲目攤平。"
+    }
+]
 
 
 class LegacySSLAdapter(HTTPAdapter):
@@ -101,7 +145,6 @@ def _get_tw_now() -> datetime:
 
 
 def _fmt_html_num(val: int, suffix: str = " 張") -> str:
-    """HTML 卡片專用：紅買綠賣配色"""
     if val > 0:
         return f'<span style="color:#ef5350; font-weight:700;">{val:+,}{suffix}</span>'
     elif val < 0:
@@ -110,7 +153,6 @@ def _fmt_html_num(val: int, suffix: str = " 張") -> str:
 
 
 def _fmt_html_pct(val: float) -> str:
-    """HTML 卡片專用：損益百分比紅綠配色"""
     if val > 0:
         return f'<span style="color:#ef5350; font-weight:700;">{val:+.2f}%</span>'
     elif val < 0:
@@ -119,7 +161,6 @@ def _fmt_html_pct(val: float) -> str:
 
 
 def _fmt_md_num(val: int, suffix: str = " 張") -> str:
-    """Markdown 條列專用：紅買綠賣配色"""
     if val > 0:
         return f":red[**{val:+,}{suffix}**]"
     elif val < 0:
@@ -128,7 +169,6 @@ def _fmt_md_num(val: int, suffix: str = " 張") -> str:
 
 
 def _calc_streak(series: pd.Series) -> int:
-    """計算最新連續買超天數(正數)或連續賣超天數(負數)，當日為0則回傳0"""
     vals = series.tolist()
     if not vals or vals[-1] == 0:
         return 0
@@ -259,7 +299,7 @@ def fetch_investment_trust_history(session: requests.Session, stock_id: str, sta
 
 
 def _extract_brokers_from_html(html: str) -> list:
-    """從 zco.djhtm 解析所有買賣超分點連結（交錯擷取買超與賣超排行，避免截斷時漏掉賣方）"""
+    """從 zco.djhtm 解析所有買賣超分點連結"""
     soup = BeautifulSoup(html, "html.parser")
     brokers = {}
 
@@ -276,6 +316,101 @@ def _extract_brokers_from_html(html: str) -> list:
                 brokers[key] = {"bhid": bhid, "b": b_hex, "name": name}
 
     return list(brokers.values())
+
+
+def _parse_zco_totals(html: str) -> tuple[float, float]:
+    """從 zco.djhtm 表格底部解析『合計買超張數』與『合計賣超張數』（前 15 大合計）"""
+    soup = BeautifulSoup(html, "html.parser")
+    buy_total = None
+    sell_total = None
+
+    for tr in soup.find_all("tr"):
+        tds = [td.get_text(strip=True).replace(",", "").replace("+", "") for td in tr.find_all("td")]
+        for i, text in enumerate(tds):
+            if "合計買超" in text and i + 1 < len(tds):
+                try:
+                    buy_total = abs(float(tds[i + 1]))
+                except ValueError:
+                    pass
+            elif "合計賣超" in text and i + 1 < len(tds):
+                try:
+                    sell_total = abs(float(tds[i + 1]))
+                except ValueError:
+                    pass
+
+    if buy_total is not None and sell_total is not None:
+        return buy_total, sell_total
+
+    # 備援機制：直接加總左右兩側各前 15 列分點的買賣超張數
+    b_sum = 0.0
+    s_sum = 0.0
+    for tr in soup.find_all("tr"):
+        tds = tr.find_all("td")
+        if len(tds) >= 10:
+            left_a = tds[0].find("a", href=True)
+            right_a = tds[5].find("a", href=True)
+            if left_a and "zco0" in left_a["href"].lower():
+                try:
+                    b_sum += abs(float(tds[3].get_text(strip=True).replace(",", "").replace("+", "")))
+                except ValueError:
+                    pass
+            if right_a and "zco0" in right_a["href"].lower():
+                try:
+                    s_sum += abs(float(tds[8].get_text(strip=True).replace(",", "").replace("+", "")))
+                except ValueError:
+                    pass
+    return b_sum, s_sum
+
+
+def fetch_period_concentration(stock_id: str, start_date: str, end_date: str, period_vol: float, mirror: str = None) -> dict:
+    """抓取指定區間的官方前 15 大買賣超合計張數，計算精準籌碼集中度 (%)"""
+    session = _create_session()
+    s_fmt = _format_dj_date(start_date)
+    e_fmt = _format_dj_date(end_date)
+    html, _, _ = _fetch_dj_html(session, f"/z/zc/zco/zco.djhtm?a={stock_id}&e={s_fmt}&f={e_fmt}", mirror, timeout=6)
+    if not html or period_vol <= 0:
+        return {"pct": None, "net": 0, "buy15": 0, "sell15": 0}
+
+    buy15, sell15 = _parse_zco_totals(html)
+    net_15 = buy15 - sell15
+    pct = round((net_15 / period_vol) * 100, 2)
+    return {
+        "pct": pct,
+        "net": int(round(net_15)),
+        "buy15": int(round(buy15)),
+        "sell15": int(round(sell15)),
+    }
+
+
+def fetch_rolling_concentrations(stock_id: str, df_price: pd.DataFrame, mirror: str = None) -> dict:
+    """併發抓取近 5 日、近 10 日、近 20 日的全市場前 15 大籌碼集中度"""
+    if df_price.empty:
+        return {}
+
+    end_date = df_price["date"].max()
+    windows = {"d5": 5, "d10": 10, "d20": 20}
+    tasks = {}
+
+    for key, n_days in windows.items():
+        sub = df_price.tail(n_days)
+        s_date = sub["date"].min()
+        vol = float(sub["volume"].sum()) if "volume" in sub.columns else 0.0
+        tasks[key] = (s_date, end_date, vol)
+
+    results = {}
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        future_map = {
+            executor.submit(fetch_period_concentration, stock_id, s_dt, e_dt, vol, mirror): key
+            for key, (s_dt, e_dt, vol) in tasks.items()
+        }
+        for future in as_completed(future_map):
+            key = future_map[future]
+            try:
+                results[key] = future.result()
+            except Exception:
+                results[key] = {"pct": None, "net": 0, "buy15": 0, "sell15": 0}
+
+    return results
 
 
 def fetch_top_brokers(session: requests.Session, stock_id: str, start_date: str, end_date: str, mirror: str = None, limit: int = 30):
@@ -344,18 +479,102 @@ def fetch_broker_daily_history(stock_id: str, broker_info: dict, start_date: str
     return pd.DataFrame(columns=["date", broker_name])
 
 
+def evaluate_chip_scenario(
+    top3_5d: int,
+    latest_close: float,
+    primary_cost: float,
+    price_5d_pct: float,
+    conc: dict,
+) -> dict:
+    """根據今年三大主力動向、成本均價與 5/10/20 日集中度，自動判定五大實戰劇本"""
+    c5 = conc.get("d5", {}).get("pct")
+    c10 = conc.get("d10", {}).get("pct")
+    c20 = conc.get("d20", {}).get("pct")
+
+    if c5 is None or c10 is None or c20 is None:
+        return {
+            "id": 0,
+            "type": "neutral",
+            "title": "⚪ 籌碼中性整理（尚未取得完整集中度數據）",
+            "desc": "請點擊左側「抓取／更新資料」以補齊最新 5 / 10 / 20 日全市場集中度。",
+            "action": ""
+        }
+
+    above_cost = (primary_cost > 0 and latest_close >= primary_cost)
+    near_or_below_cost = (primary_cost > 0 and latest_close <= primary_cost * 1.02)
+
+    # 情境 5：主力棄守（真破線）
+    if primary_cost > 0 and latest_close < primary_cost * 0.98 and top3_5d < -200 and c5 <= -5.0 and c10 <= -3.0:
+        return {
+            "id": 5,
+            "type": "bear",
+            "title": "🟢 當前劇本：5. 主力棄守（真破線）",
+            "desc": f"股價已跌破最大主力均價（{primary_cost:,.2f} 元），且近 5 日三大主力大賣 {top3_5d:+,} 張、5 日集中度降至 {c5:+.1f}%。",
+            "action": "連波段大戶都在停損結帳，下方無大資金承接，切忌因主力帳面虧損而盲目攤平。"
+        }
+
+    # 情境 3：高檔派發（假突破）
+    if price_5d_pct >= 2.0 and top3_5d < -150 and c20 > 0 and c5 <= -3.0:
+        return {
+            "id": 3,
+            "type": "bear",
+            "title": "🟢 當前劇本：3. 高檔派發（假突破）",
+            "desc": f"近 5 日股價上漲 {price_5d_pct:+.2f}%，但今年三大主力逢高賣超 {top3_5d:+,} 張，且 5 日集中度由正轉負（{c5:+.1f}%）。",
+            "action": "波段大戶正趁散戶追價把籌碼倒出，慎防假突破與拉高套牢風險。"
+        }
+
+    # 情境 1：雙重共振（主升段）
+    if top3_5d > 150 and c5 > 3.0 and c10 > 0 and c20 > 0 and (c5 >= c10 or c5 >= 8.0) and (above_cost or primary_cost == 0):
+        return {
+            "id": 1,
+            "type": "bull",
+            "title": "🔴 當前劇本：1. 雙重共振（主升段）",
+            "desc": f"今年三大主力近 5 日買超 {top3_5d:+,} 張，且 20日({c20:+.1f}%) → 10日({c10:+.1f}%) → 5日({c5:+.1f}%) 集中度全面翻正加速。",
+            "action": "最強多頭格局！波段大戶與短線大資金同步鎖碼，可沿 10MA 或主力成本線偏多操作。"
+        }
+
+    # 情境 4：成本線護盤（真洗盤）
+    if near_or_below_cost and price_5d_pct <= -1.5 and top3_5d > 100 and c5 >= 3.0:
+        return {
+            "id": 4,
+            "type": "bull",
+            "title": "🔴 當前劇本：4. 成本線護盤（真洗盤）",
+            "desc": f"股價回測主力均價（{primary_cost:,.2f} 元）附近，但三大主力逆勢買超 {top3_5d:+,} 張，5 日集中度維持 {c5:+.1f}%。",
+            "action": "主力刻意洗盤護成本，趁恐慌承接浮額，一旦止跌回穩極易展開下一波反彈。"
+        }
+
+    # 情境 2：換手接棒／藏分點
+    if top3_5d <= 100 and c5 >= 5.0 and (c10 >= 2.0 or c20 < c5):
+        return {
+            "id": 2,
+            "type": "bull",
+            "title": "🔴 當前劇本：2. 換手接棒／藏分點",
+            "desc": f"今年三大主力近 5 日未大買（{top3_5d:+,} 張），但全市場 5 日集中度逆勢飆升至 {c5:+.1f}%。",
+            "action": "有新莊家進場接手或主力改用其他分點暗中吃貨，可對照下方「本區間買超第一名」鎖定新主力。"
+        }
+
+    return {
+        "id": 0,
+        "type": "neutral",
+        "title": "⚪ 當前狀態：籌碼中性整理（尚未觸發五大關鍵劇本）",
+        "desc": f"目前三大主力近 5 日淨額 {top3_5d:+,} 張，全市場 5 日集中度 {c5:+.1f}%，處於多空均衡或橫盤整理階段。",
+        "action": "持續觀察 5 日集中度是否突破 ±5% 或出現主力連續買賣超表態。"
+    }
+
+
 def analyze_main_force(
     df_price: pd.DataFrame,
     df_chips: pd.DataFrame,
     period_label: str,
     df_chips_full: pd.DataFrame = None,
     df_price_full: pd.DataFrame = None,
+    concentrations: dict = None,
 ) -> dict:
     """
     1. 錨定 2026/01/02 至今全年度累計買超排行決定「波段大主力」。
     2. 計算最大主力的累計買超、累計賣超、淨總數與目前庫存均價（成本）。
     3. 計算前三大主力各分點的連買／連賣天數、區間控盤率 (%)。
-    4. 偵測近 5 日價量籌碼背離訊號（股價漲跌 >= 3% 且三大主力控盤率 >= 2.0%）。
+    4. 偵測近 5 日價量籌碼背離訊號，並結合 5/10/20 日集中度判定五大實戰劇本。
     """
     broker_cols = [c for c in df_chips.columns if c != "date"]
     if not broker_cols or df_price.empty:
@@ -365,6 +584,7 @@ def analyze_main_force(
             "status_html": "⚪ 無法判定",
             "status_sub": "",
             "divergence_alert": None,
+            "scenario": {"id": 0, "type": "neutral", "title": "⚪ 無資料", "desc": "", "action": ""},
             "top3_names": [],
             "top3_header_md": "",
             "top3_rows": [],
@@ -396,6 +616,7 @@ def analyze_main_force(
             "status_html": "🔴 全年空方主導／出貨格局",
             "status_sub": "",
             "divergence_alert": None,
+            "scenario": {"id": 5, "type": "bear", "title": "🟢 當前劇本：全年空方主導", "desc": "今年以來主要分點累計皆為淨賣超。", "action": "避開空頭排列個股。"},
             "top3_names": [],
             "top3_header_md": "",
             "top3_rows": [],
@@ -427,7 +648,7 @@ def analyze_main_force(
             f"目前庫存均價：<b style='color:#ffb74d;'>{primary_cost:,.2f} 元</b>（帳面損益 {_fmt_html_pct(pnl_pct)}）"
         )
 
-    # 卡片二：區間內三大主力狀態
+    # 卡片二：區間內今年三大主力狀態
     top3_names = list(top_buyers_ytd.head(3).index)
     top3_period_net = int(period_sum[top3_names].sum())
     top3_5d = int(recent_5[top3_names].sum())
@@ -437,16 +658,17 @@ def analyze_main_force(
     if primary_player in DAY_TRADE_BROKERS and abs(primary_ytd_net) < 500:
         status_html = "🟡 隔日沖短線客主導（慎防倒貨）"
     elif top3_period_net > threshold:
-        status_html = f"🟢 區間內三大主力吃貨中（{_fmt_html_num(top3_period_net)}）"
+        status_html = f"🟢 區間內今年三大主力吃貨中（{_fmt_html_num(top3_period_net)}）"
     elif top3_period_net < -threshold:
-        status_html = f"🔴 區間內三大主力出貨中（{_fmt_html_num(top3_period_net)}）"
+        status_html = f"🔴 區間內今年三大主力出貨中（{_fmt_html_num(top3_period_net)}）"
     else:
-        status_html = f"🔵 區間內三大主力鎖碼觀望（{_fmt_html_num(top3_period_net)}）"
+        status_html = f"🔵 區間內今年三大主力鎖碼觀望（{_fmt_html_num(top3_period_net)}）"
 
     status_sub = f"三大主力名單：{', '.join(top3_names)}"
 
-    # 近 5 日價量籌碼背離警報（收緊門檻：股價漲跌 >= 3% 且三大主力近 5 日控盤率 >= 2.0%）
+    # 近 5 日價量籌碼背離警報 & 5日漲跌幅
     divergence_alert = None
+    price_5d_pct = 0.0
     if len(full_price) >= 5:
         close_now = float(full_price.iloc[-1]["close"])
         close_5d_ago = float(full_price.iloc[-6]["close"]) if len(full_price) >= 6 else float(full_price.iloc[0]["close"])
@@ -474,6 +696,15 @@ def analyze_main_force(
                     f"慎防假突破或拉高倒貨。"
                 )
             }
+
+    # 判定五大實戰劇本
+    scenario = evaluate_chip_scenario(
+        top3_5d=top3_5d,
+        latest_close=latest_close_full,
+        primary_cost=primary_cost if primary_inv > 0 else 0.0,
+        price_5d_pct=price_5d_pct,
+        conc=concentrations or {},
+    )
 
     # 前三大主力各分點明細（含連買／連賣天數、區間控盤率 %）
     top3_rows = []
@@ -503,6 +734,7 @@ def analyze_main_force(
         "status_html": status_html,
         "status_sub": status_sub,
         "divergence_alert": divergence_alert,
+        "scenario": scenario,
         "top3_names": top3_names,
         "top3_header_md": f"- 今年前三大主力（**{', '.join(top3_names)}**）本區間合計：{_fmt_md_num(top3_period_net)}（近 20 日合計：{_fmt_md_num(top3_20d)}）",
         "top3_rows": top3_rows,
@@ -586,8 +818,44 @@ def _delete_file_from_github(repo_path: str) -> tuple[bool, str]:
     return False, f"GitHub 刪除失敗 (HTTP {del_resp.status_code})"
 
 
+def load_stock_order(existing_ids: list) -> list:
+    """讀取自訂排序清單，並與實際存在的個股檔案對齊"""
+    saved_order = []
+    if os.path.exists(ORDER_FILE):
+        try:
+            with open(ORDER_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    saved_order = [str(x).strip() for x in data]
+        except Exception:
+            pass
+
+    existing_set = set(existing_ids)
+    ordered = [sid for sid in saved_order if sid in existing_set]
+    for sid in sorted(existing_ids):
+        if sid not in ordered:
+            ordered.append(sid)
+    return ordered
+
+
+def save_stock_order(order_list: list, sync_github: bool = True) -> None:
+    """儲存自訂排序清單至 database/stock_order.json，並同步到 GitHub"""
+    clean_list = []
+    for sid in order_list:
+        s = str(sid).strip()
+        if s and s not in clean_list:
+            clean_list.append(s)
+
+    with open(ORDER_FILE, "w", encoding="utf-8") as f:
+        json.dump(clean_list, f, ensure_ascii=False, indent=2)
+
+    is_gha = os.environ.get("GITHUB_ACTIONS", "").lower() == "true"
+    if sync_github and not is_gha:
+        _sync_file_to_github(ORDER_FILE, "database/stock_order.json")
+
+
 def delete_stock_database(stock_id: str) -> tuple[bool, str]:
-    """同時刪除本地 database/ 與 GitHub 上的該個股所有資料檔"""
+    """同時刪除本地 database/ 與 GitHub 上的該個股所有資料檔，並更新排序清單"""
     stock_id = stock_id.strip()
     target_files = [
         f"{stock_id}_price.csv",
@@ -600,6 +868,16 @@ def delete_stock_database(stock_id: str) -> tuple[bool, str]:
         if os.path.exists(local_path):
             os.remove(local_path)
         _delete_file_from_github(f"database/{fname}")
+
+    if os.path.exists(ORDER_FILE):
+        try:
+            with open(ORDER_FILE, "r", encoding="utf-8") as f:
+                cur_order = json.load(f)
+            if isinstance(cur_order, list) and stock_id in cur_order:
+                cur_order = [x for x in cur_order if x != stock_id]
+                save_stock_order(cur_order, sync_github=True)
+        except Exception:
+            pass
 
     return True, f"已刪除 {stock_id}"
 
@@ -723,7 +1001,10 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
         if brokers and fetched_count == 0:
             debug_notes.append(f"找到 {len(brokers)} 個分點連結，但明細回傳為空")
 
-    # 6. 寫入本地 CSV；若在 GitHub Actions 內執行則交由 workflow 統一 git push，避免衝突
+    # 6. 抓取近 5 / 10 / 20 日全市場前 15 大精準籌碼集中度
+    concentrations = fetch_rolling_concentrations(stock_id, df_price, active_mirror)
+
+    # 7. 寫入本地 CSV；若在 GitHub Actions 內執行則交由 workflow 統一 git push，避免衝突
     df_price.to_csv(price_path, index=False, encoding="utf-8-sig")
     df_chips.to_csv(chips_path, index=False, encoding="utf-8-sig")
 
@@ -736,11 +1017,19 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
         if ok1:
             _, sync_msg = _sync_file_to_github(chips_path, f"database/{chips_file}")
 
-    # 7. 產出基礎摘要存檔
-    meta = analyze_main_force(df_price, df_chips, f"{START_DATE_FIXED} 至今", df_chips_full=df_chips, df_price_full=df_price)
+    # 8. 產出基礎摘要存檔
+    meta = analyze_main_force(
+        df_price,
+        df_chips,
+        f"{START_DATE_FIXED} 至今",
+        df_chips_full=df_chips,
+        df_price_full=df_price,
+        concentrations=concentrations,
+    )
     meta["stock_id"] = stock_id
     meta["stock_name"] = stock_name
     meta["broker_count"] = total_brokers
+    meta["concentrations"] = concentrations
     meta["last_updated"] = now_tw.strftime("%Y-%m-%d %H:%M")
     meta["debug_notes"] = debug_notes
     meta["github_sync"] = f"✅ {sync_msg}" if ok1 else f"⚠️ {sync_msg}"
