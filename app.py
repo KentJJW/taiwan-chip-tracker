@@ -275,7 +275,7 @@ st.markdown("""
 .matrix-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.85rem;
+    font-size: 0.84rem;
     background-color: #141821;
 }
 .matrix-table th {
@@ -289,7 +289,7 @@ st.markdown("""
     padding: 8px 10px;
     border-top: 1px solid #262e40;
     color: #cbd5e1;
-    line-height: 1.45;
+    line-height: 1.5;
     vertical-align: top;
 }
 .matrix-active-bull td {
@@ -722,9 +722,9 @@ if target_stock:
         unsafe_allow_html=True,
     )
 
-    # --- 可收合抽屜：兩大維度交叉判讀矩陣（自動高亮當前符合劇本） ---
+    # --- 可收合抽屜：價 × 點 × 面 三維度交叉判讀矩陣（自動高亮當前符合劇本） ---
     matched_id = scenario.get("id", 0)
-    with st.expander("📖 兩大維度交叉判讀矩陣（點擊展開 5 大實戰劇本與操作應對）", expanded=False):
+    with st.expander("📖 價 × 點 × 面 交叉判讀矩陣（點擊展開 5 大實戰劇本與操作應對）", expanded=False):
         m_rows = []
         for item in SCENARIO_MATRIX:
             is_match = (item["id"] == matched_id)
@@ -735,10 +735,11 @@ if target_stock:
                 badge = '<br><span style="display:inline-block; margin-top:4px; padding:1px 6px; border-radius:4px; background:#f59e0b; color:#0f172a; font-weight:700; font-size:0.75rem;">👈 目前符合</span>'
             m_rows.append(
                 f'<tr class="{row_cls}">'
-                f'  <td style="width:18%; font-weight:700;">{item["name"]}{badge}</td>'
-                f'  <td style="width:24%;">{item["main_cond"]}</td>'
-                f'  <td style="width:24%;">{item["conc_cond"]}</td>'
-                f'  <td style="width:34%;">{item["action"]}</td>'
+                f'  <td style="width:17%; font-weight:700;">{item["name"]}{badge}</td>'
+                f'  <td style="width:18%;">{item.get("price_cond", "")}</td>'
+                f'  <td style="width:16%;">{item.get("main_cond", "")}</td>'
+                f'  <td style="width:21%;">{item.get("conc_cond", "")}</td>'
+                f'  <td style="width:28%;">{item.get("action", "")}</td>'
                 f'</tr>'
             )
         st.markdown(f"""
@@ -746,9 +747,10 @@ if target_stock:
             <thead>
                 <tr>
                     <th>盤面情境劇本</th>
-                    <th>今年三大主力動向（點）</th>
-                    <th>5 / 10 / 20 日集中度（面）</th>
-                    <th>籌碼實戰解讀與操作應對</th>
+                    <th>股價與均線（價）</th>
+                    <th>三大主力（點）</th>
+                    <th>5/10/20日集中度（面）</th>
+                    <th>實戰解讀與操作應對</th>
                 </tr>
             </thead>
             <tbody>{"".join(m_rows)}</tbody>
