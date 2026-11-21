@@ -311,7 +311,7 @@ st.markdown("""
     padding: 7px 10px;
     font-size: 0.78rem;
     color: #94a3b8;
-    line-height: 1.45;
+    line-height: 1.5;
     margin-bottom: 8px;
 }
 </style>
@@ -402,7 +402,7 @@ def _format_conc_card(label: str, info: dict) -> str:
         return (
             f'<div class="conc-box">'
             f'  <div class="conc-box-left"><span class="conc-period">{label}</span><span class="conc-val" style="color:#94a3b8;">待更新</span></div>'
-            f'  <span class="conc-badge" style="background:#262e40; color:#94a3b8;">請點左側 🔄</span>'
+            f'  <span class="conc-badge" style="background:#262e40; color:#94a3b8;">請點左側更新</span>'
             f'</div>'
         )
 
@@ -436,7 +436,7 @@ if "active_stock" not in st.session_state:
 if "sort_mode" not in st.session_state:
     st.session_state["sort_mode"] = False
 
-# --- 側邊欄：新增個股、統計區間與已存個股管理（支援單檔全量校準、全部增量快刷、自訂排序） ---
+# --- 側邊欄：新增個股、統計區間與已存個股管理（支援單檔全量校準、全部增量更新、自訂排序） ---
 with st.sidebar:
     st.header("🔍 新增個股建檔")
     input_stock = st.text_input("輸入新台股代號（例如：2330、3231）", value="", placeholder="輸入 4 碼上市櫃代號").strip()
@@ -464,8 +464,8 @@ with st.sidebar:
     if saved_list:
         st.markdown(
             '<div class="sidebar-help-box">'
-            '• <b>🔄 全部快刷</b>：近 3 日增量更新所有個股與集中度<br>'
-            '• <b>個股旁 🔄</b>：全年度重抓校準（補齊新分點全年明細）'
+            '全部更新：近 3 日增量更新所有個股與集中度<br>'
+            '個股更新：全年度重抓校準（補齊新分點全年明細）'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -473,9 +473,9 @@ with st.sidebar:
         col_all_upd, col_sort_btn = st.columns([1.25, 1])
         with col_all_upd:
             if st.button(
-                "🔄 全部快刷",
+                "🔄 全部更新",
                 key="btn_update_all",
-                help="對所有已存個股執行近 3 個交易日增量更新，並重算最新 5/10/20 日集中度（每檔約 2.5 秒）",
+                help="對所有已存個股執行近 3 個交易日增量更新，並重算最新 5/10/20 日集中度",
                 width="stretch",
                 disabled=st.session_state["sort_mode"],
             ):
@@ -535,7 +535,7 @@ with st.sidebar:
                     if st.button(
                         "🔄",
                         key=f"upd_{sid}",
-                        help=f"全年度重抓校準 {display_name}（從 2026/01/02 完整回溯，約 5 秒）",
+                        help=f"全年度重抓校準 {display_name}（從 2026/01/02 完整回溯）",
                         width="stretch",
                     ):
                         with st.spinner(f"正在全年度重抓校準 {display_name}..."):
