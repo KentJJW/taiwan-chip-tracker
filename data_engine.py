@@ -42,40 +42,40 @@ SCENARIO_MATRIX = [
         "id": 1,
         "name": "1. 雙重共振（主升段）",
         "type": "bull",
-        "main_cond": "今年三大主力持續買超，且股價站穩庫存均價之上",
+        "main_cond": "股價站穩庫存均價之上，且近 5 日三大主力控盤率 ≥ +2.0%",
         "conc_cond": "5 / 10 / 20 日集中度皆為正，且呈現遞增加速（短 > 長）",
         "action": "最強多頭格局。波段大戶與短線資金同步鎖碼，沿 10MA 或主力成本線偏多操作。"
     },
     {
         "id": 2,
-        "name": "2. 換手接棒／藏分點",
+        "name": "2. 換手接棒（藏分點）",
         "type": "bull",
-        "main_cond": "今年三大主力持平或小幅調節，無明顯大買",
-        "conc_cond": "20 日偏低或負值，但 5 日、10 日集中度翻正並飆高（> +5%）",
+        "main_cond": "近 5 日三大主力控盤率 ≤ +1.5%（持平或小幅調節）",
+        "conc_cond": "20 日偏低或負值，但 5 日、10 日集中度翻正並飆高（≥ +5.0%）",
         "action": "隱形起漲／新莊家進場。主力改用其他分點吃貨或新大戶接手，留意「本區間買超第一名」動向。"
     },
     {
         "id": 3,
         "name": "3. 高檔派發（假突破）",
         "type": "bear",
-        "main_cond": "股價近 5 日走高或創波段高，但今年三大主力轉為賣超",
-        "conc_cond": "20 日仍為正值，但 5 日集中度率先轉負（籌碼由集中轉發散）",
+        "main_cond": "近 5 日股價上漲 ≥ +2.0%，但三大主力近 5 日控盤率 ≤ -2.0%",
+        "conc_cond": "20 日仍為正值，但 5 日集中度率先轉負（≤ -3.0%，籌碼由集中轉發散）",
         "action": "高檔出貨警訊。波段大戶趁散戶追價倒貨，慎防假突破與拉回套牢風險。"
     },
     {
         "id": 4,
-        "name": "4. 成本線護盤（真洗盤）",
+        "name": "4. 成本護盤（真洗盤）",
         "type": "bull",
-        "main_cond": "股價回測甚至微幅跌破主力庫存均價，但三大主力逆勢低接",
-        "conc_cond": "近 5 日集中度維持正值（急跌時籌碼反而向大戶集中）",
+        "main_cond": "股價回測均價 +2% 內或微幅跌破，近 5 日下跌但三大主力控盤率 ≥ +1.5%",
+        "conc_cond": "近 5 日集中度維持 ≥ +3.0%（急跌時籌碼反而向大戶集中）",
         "action": "主力刻意洗盤。大戶不願跌破自身成本區，趁恐慌承接浮額，止跌回穩後易展開反彈。"
     },
     {
         "id": 5,
         "name": "5. 主力棄守（真破線）",
         "type": "bear",
-        "main_cond": "股價跌破主力庫存均價，且今年三大主力同步大額賣超",
-        "conc_cond": "5 日、10 日集中度同步明顯為負（< -5%）",
+        "main_cond": "股價跌破主力均價逾 2%，且近 5 日三大主力控盤率 ≤ -3.0%",
+        "conc_cond": "5 日（≤ -5.0%）、10 日（≤ -3.0%）集中度同步明顯為負",
         "action": "多殺多棄守格局。連波段最大主力都在停損結帳，下方無大資金接手，切忌盲目攤平。"
     }
 ]
@@ -341,7 +341,6 @@ def _parse_zco_totals(html: str) -> tuple[float, float]:
     if buy_total is not None and sell_total is not None:
         return buy_total, sell_total
 
-    # 備援機制：直接加總左右兩側各前 15 列分點的買賣超張數
     b_sum = 0.0
     s_sum = 0.0
     for tr in soup.find_all("tr"):
@@ -481,12 +480,13 @@ def fetch_broker_daily_history(stock_id: str, broker_info: dict, start_date: str
 
 def evaluate_chip_scenario(
     top3_5d: int,
+    top3_5d_ctrl_pct: float,
     latest_close: float,
     primary_cost: float,
     price_5d_pct: float,
     conc: dict,
 ) -> dict:
-    """根據今年三大主力動向、成本均價與 5/10/20 日集中度，自動判定五大實戰劇本"""
+    """根據今年三大主力近 5 日控盤率 (%)、成本均價與 5/10/20 日集中度，自動判定五大實戰劇本"""
     c5 = conc.get("d5", {}).get("pct")
     c10 = conc.get("d10", {}).get("pct")
     c20 = conc.get("d20", {}).get("pct")
@@ -496,7 +496,7 @@ def evaluate_chip_scenario(
             "id": 0,
             "type": "neutral",
             "title": "⚪ 籌碼中性整理（尚未取得完整集中度數據）",
-            "desc": "請點擊左側「抓取／更新資料」以補齊最新 5 / 10 / 20 日全市場集中度。",
+            "desc": "請點擊左側「全部更新」或個股旁「🔄」以補齊最新 5 / 10 / 20 日全市場集中度。",
             "action": ""
         }
 
@@ -504,52 +504,98 @@ def evaluate_chip_scenario(
     near_or_below_cost = (primary_cost > 0 and latest_close <= primary_cost * 1.02)
 
     # 情境 5：主力棄守（真破線）
-    if primary_cost > 0 and latest_close < primary_cost * 0.98 and top3_5d < -200 and c5 <= -5.0 and c10 <= -3.0:
+    if (
+        primary_cost > 0
+        and latest_close < primary_cost * 0.98
+        and top3_5d <= -30
+        and top3_5d_ctrl_pct <= -3.0
+        and c5 <= -5.0
+        and c10 <= -3.0
+    ):
         return {
             "id": 5,
             "type": "bear",
             "title": "🟢 當前劇本：5. 主力棄守（真破線）",
-            "desc": f"股價已跌破最大主力均價（{primary_cost:,.2f} 元），且近 5 日三大主力大賣 {top3_5d:+,} 張、5 日集中度降至 {c5:+.1f}%。",
+            "desc": (
+                f"股價已跌破最大主力均價（{primary_cost:,.2f} 元），且近 5 日三大主力大賣 {top3_5d:+,} 張"
+                f"（控盤率 {top3_5d_ctrl_pct:+.1f}%）、5 日集中度降至 {c5:+.1f}%。"
+            ),
             "action": "連波段大戶都在停損結帳，下方無大資金承接，切忌因主力帳面虧損而盲目攤平。"
         }
 
     # 情境 3：高檔派發（假突破）
-    if price_5d_pct >= 2.0 and top3_5d < -150 and c20 > 0 and c5 <= -3.0:
+    if (
+        price_5d_pct >= 2.0
+        and top3_5d <= -30
+        and top3_5d_ctrl_pct <= -2.0
+        and c20 > 0
+        and c5 <= -3.0
+    ):
         return {
             "id": 3,
             "type": "bear",
             "title": "🟢 當前劇本：3. 高檔派發（假突破）",
-            "desc": f"近 5 日股價上漲 {price_5d_pct:+.2f}%，但今年三大主力逢高賣超 {top3_5d:+,} 張，且 5 日集中度由正轉負（{c5:+.1f}%）。",
+            "desc": (
+                f"近 5 日股價上漲 {price_5d_pct:+.2f}%，但今年三大主力逢高賣超 {top3_5d:+,} 張"
+                f"（控盤率 {top3_5d_ctrl_pct:+.1f}%），且 5 日集中度由正轉負（{c5:+.1f}%）。"
+            ),
             "action": "波段大戶正趁散戶追價把籌碼倒出，慎防假突破與拉高套牢風險。"
         }
 
     # 情境 1：雙重共振（主升段）
-    if top3_5d > 150 and c5 > 3.0 and c10 > 0 and c20 > 0 and (c5 >= c10 or c5 >= 8.0) and (above_cost or primary_cost == 0):
+    if (
+        top3_5d >= 30
+        and top3_5d_ctrl_pct >= 2.0
+        and c5 > 3.0
+        and c10 > 0
+        and c20 > 0
+        and (c5 >= c10 or c5 >= 8.0)
+        and (above_cost or primary_cost == 0)
+    ):
         return {
             "id": 1,
             "type": "bull",
             "title": "🔴 當前劇本：1. 雙重共振（主升段）",
-            "desc": f"今年三大主力近 5 日買超 {top3_5d:+,} 張，且 20日({c20:+.1f}%) → 10日({c10:+.1f}%) → 5日({c5:+.1f}%) 集中度全面翻正加速。",
+            "desc": (
+                f"今年三大主力近 5 日買超 {top3_5d:+,} 張（控盤率 {top3_5d_ctrl_pct:+.1f}%），"
+                f"且 20日({c20:+.1f}%) → 10日({c10:+.1f}%) → 5日({c5:+.1f}%) 集中度全面翻正加速。"
+            ),
             "action": "最強多頭格局！波段大戶與短線大資金同步鎖碼，可沿 10MA 或主力成本線偏多操作。"
         }
 
-    # 情境 4：成本線護盤（真洗盤）
-    if near_or_below_cost and price_5d_pct <= -1.5 and top3_5d > 100 and c5 >= 3.0:
+    # 情境 4：成本護盤（真洗盤）
+    if (
+        near_or_below_cost
+        and price_5d_pct <= -1.5
+        and top3_5d >= 30
+        and top3_5d_ctrl_pct >= 1.5
+        and c5 >= 3.0
+    ):
         return {
             "id": 4,
             "type": "bull",
-            "title": "🔴 當前劇本：4. 成本線護盤（真洗盤）",
-            "desc": f"股價回測主力均價（{primary_cost:,.2f} 元）附近，但三大主力逆勢買超 {top3_5d:+,} 張，5 日集中度維持 {c5:+.1f}%。",
+            "title": "🔴 當前劇本：4. 成本護盤（真洗盤）",
+            "desc": (
+                f"股價回測主力均價（{primary_cost:,.2f} 元）附近，但三大主力逆勢買超 {top3_5d:+,} 張"
+                f"（控盤率 {top3_5d_ctrl_pct:+.1f}%），5 日集中度維持 {c5:+.1f}%。"
+            ),
             "action": "主力刻意洗盤護成本，趁恐慌承接浮額，一旦止跌回穩極易展開下一波反彈。"
         }
 
-    # 情境 2：換手接棒／藏分點
-    if top3_5d <= 100 and c5 >= 5.0 and (c10 >= 2.0 or c20 < c5):
+    # 情境 2：換手接棒（藏分點）
+    if (
+        top3_5d_ctrl_pct <= 1.5
+        and c5 >= 5.0
+        and (c10 >= 2.0 or c20 < c5)
+    ):
         return {
             "id": 2,
             "type": "bull",
-            "title": "🔴 當前劇本：2. 換手接棒／藏分點",
-            "desc": f"今年三大主力近 5 日未大買（{top3_5d:+,} 張），但全市場 5 日集中度逆勢飆升至 {c5:+.1f}%。",
+            "title": "🔴 當前劇本：2. 換手接棒（藏分點）",
+            "desc": (
+                f"今年三大主力近 5 日控盤率僅 {top3_5d_ctrl_pct:+.1f}%（{top3_5d:+,} 張），"
+                f"但全市場 5 日集中度逆勢飆升至 {c5:+.1f}%。"
+            ),
             "action": "有新莊家進場接手或主力改用其他分點暗中吃貨，可對照下方「本區間買超第一名」鎖定新主力。"
         }
 
@@ -557,8 +603,11 @@ def evaluate_chip_scenario(
         "id": 0,
         "type": "neutral",
         "title": "⚪ 當前狀態：籌碼中性整理（尚未觸發五大關鍵劇本）",
-        "desc": f"目前三大主力近 5 日淨額 {top3_5d:+,} 張，全市場 5 日集中度 {c5:+.1f}%，處於多空均衡或橫盤整理階段。",
-        "action": "持續觀察 5 日集中度是否突破 ±5% 或出現主力連續買賣超表態。"
+        "desc": (
+            f"目前三大主力近 5 日淨額 {top3_5d:+,} 張（控盤率 {top3_5d_ctrl_pct:+.1f}%），"
+            f"全市場 5 日集中度 {c5:+.1f}%，處於多空均衡或橫盤整理階段。"
+        ),
+        "action": "持續觀察 5 日集中度是否突破 ±5% 或三大主力控盤率表態。"
     }
 
 
@@ -666,15 +715,16 @@ def analyze_main_force(
 
     status_sub = f"三大主力名單：{', '.join(top3_names)}"
 
-    # 近 5 日價量籌碼背離警報 & 5日漲跌幅
+    # 近 5 日價量籌碼背離警報 & 近 5 日三大主力控盤率 (%)
     divergence_alert = None
     price_5d_pct = 0.0
+    vol_5d = float(full_price.tail(5)["volume"].sum()) if "volume" in full_price.columns else 0.0
+    top3_5d_ctrl_pct = round((top3_5d / vol_5d * 100), 2) if vol_5d > 0 else 0.0
+
     if len(full_price) >= 5:
         close_now = float(full_price.iloc[-1]["close"])
         close_5d_ago = float(full_price.iloc[-6]["close"]) if len(full_price) >= 6 else float(full_price.iloc[0]["close"])
         price_5d_pct = ((close_now - close_5d_ago) / close_5d_ago * 100) if close_5d_ago > 0 else 0.0
-        vol_5d = float(full_price.tail(5)["volume"].sum()) if "volume" in full_price.columns else 0.0
-        top3_5d_ctrl_pct = (top3_5d / vol_5d * 100) if vol_5d > 0 else 0.0
 
         if price_5d_pct <= -3.0 and top3_5d > 0 and top3_5d_ctrl_pct >= 2.0:
             divergence_alert = {
@@ -697,9 +747,10 @@ def analyze_main_force(
                 )
             }
 
-    # 判定五大實戰劇本
+    # 判定五大實戰劇本（採用控盤率 % 自適應門檻）
     scenario = evaluate_chip_scenario(
         top3_5d=top3_5d,
+        top3_5d_ctrl_pct=top3_5d_ctrl_pct,
         latest_close=latest_close_full,
         primary_cost=primary_cost if primary_inv > 0 else 0.0,
         price_5d_pct=price_5d_pct,
@@ -885,8 +936,8 @@ def delete_stock_database(stock_id: str) -> tuple[bool, str]:
 def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
     """
     更新指定個股資料並存檔至 database/：
-    - incremental_days=None（手動查詢/更新）：聯集「全年度前 30 大波段主力」與「近 3 個交易日前 20 大活躍分點」，回溯全年明細。
-    - incremental_days=3（GitHub Actions 排程）：僅抓最近 3 個交易日並合併進既有資料庫。
+    - incremental_days=None（手動單檔全量校準）：聯集「全年度前 30 大波段主力」與「近 3 個交易日前 20 大活躍分點」，回溯全年明細。
+    - incremental_days=3（全部更新／GitHub Actions 排程）：僅抓最近 3 個交易日並合併進既有資料庫。
     """
     stock_id = stock_id.strip()
     now_tw = _get_tw_now()
