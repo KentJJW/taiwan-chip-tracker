@@ -4,9 +4,16 @@
     "今年累計買超 <span style=\"color:#ef5350; font-weight:700;\">+60,123 張</span> ／ 賣超 <span style=\"color:#26a69a; font-weight:700;\">-49,291 張</span>（淨額 <span style=\"color:#ef5350; font-weight:700;\">+10,832 張</span>）",
     "目前庫存均價：<b style='color:#ffb74d;'>839.61 元</b>（帳面損益 <span style=\"color:#26a69a; font-weight:700;\">-47.42%</span>）"
   ],
-  "status_html": "🟢 區間內三大主力吃貨中（<span style=\"color:#ef5350; font-weight:700;\">+23,499 張</span>）",
+  "status_html": "🟢 區間內今年三大主力吃貨中（<span style=\"color:#ef5350; font-weight:700;\">+23,499 張</span>）",
   "status_sub": "三大主力名單：投信, 美商高盛, 元大證券",
   "divergence_alert": null,
+  "scenario": {
+    "id": 0,
+    "type": "neutral",
+    "title": "⚪ 當前狀態：籌碼中性整理（尚未觸發五大關鍵劇本）",
+    "desc": "目前三大主力近 5 日淨額 -4,263 張，全市場 5 日集中度 -4.3%，處於多空均衡或橫盤整理階段。",
+    "action": "持續觀察 5 日集中度是否突破 ±5% 或出現主力連續買賣超表態。"
+  },
   "top3_names": [
     "投信",
     "美商高盛",
@@ -63,7 +70,27 @@
   "stock_id": "6488",
   "stock_name": "環球晶",
   "broker_count": 37,
-  "last_updated": "2026-11-20 22:32",
+  "concentrations": {
+    "d5": {
+      "pct": -4.28,
+      "net": -1864,
+      "buy15": 4348,
+      "sell15": 6212
+    },
+    "d10": {
+      "pct": -0.71,
+      "net": -765,
+      "buy15": 7851,
+      "sell15": 8616
+    },
+    "d20": {
+      "pct": -5.88,
+      "net": -12818,
+      "buy15": 11300,
+      "sell15": 24118
+    }
+  },
+  "last_updated": "2026-11-21 10:29",
   "debug_notes": [],
   "github_sync": "✅ 已同步至 GitHub database/"
 }
