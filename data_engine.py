@@ -447,7 +447,7 @@ def analyze_main_force(
     """
     1. 錨定 2026/01/02 至今全年度累計買超排行決定「波段大主力」。
     2. 計算最大主力的累計買超、累計賣超、淨總數與目前庫存均價（成本）。
-    3. 計算前三大主力各分點的連買／連賣天數、區間控盤率 (%)。
+    3. 計算前三大主力各分點的連買／連賣天數、區間控盤率 (%)，以及今日／今年前五大買賣超排行。
     4. 呼叫 strategy.py 判定背離警報與五大實戰劇本。
     """
     broker_cols = [c for c in df_chips.columns if c != "date"]
@@ -465,6 +465,8 @@ def analyze_main_force(
             "remark_md": "",
             "top_buyers": {},
             "top_sellers": {},
+            "today_buyers": {},
+            "today_sellers": {},
         }
 
     full_df = df_chips_full if df_chips_full is not None else df_chips
@@ -475,10 +477,14 @@ def analyze_main_force(
     top_buyers_ytd = total_ytd[total_ytd > 0].head(5)
     top_sellers_ytd = total_ytd[total_ytd < 0].tail(5).sort_values(ascending=True)
 
-    # 2. 選定檢視區間與近期交易日統計
+    # 2. 選定檢視區間與近期交易日統計（含今日買賣超前 5 大）
     period_sum = df_chips[broker_cols].sum()
     period_vol = float(df_price["volume"].sum()) if "volume" in df_price.columns else 0.0
     recent_1 = full_df.tail(1)[broker_cols].sum()
+    recent_1_sorted = recent_1.sort_values(ascending=False)
+    today_buyers = recent_1_sorted[recent_1_sorted > 0].head(5)
+    today_sellers = recent_1_sorted[recent_1_sorted < 0].tail(5).sort_values(ascending=True)
+
     recent_5 = full_df.tail(5)[broker_cols].sum()
     recent_10 = full_df.tail(10)[broker_cols].sum()
     recent_20 = full_df.tail(20)[broker_cols].sum()
@@ -497,6 +503,8 @@ def analyze_main_force(
             "remark_md": "",
             "top_buyers": {},
             "top_sellers": {k: int(v) for k, v in top_sellers_ytd.items()},
+            "today_buyers": {k: int(v) for k, v in today_buyers.items()},
+            "today_sellers": {k: int(v) for k, v in today_sellers.items()},
         }
 
     # 鎖定年度最大主力
@@ -600,6 +608,8 @@ def analyze_main_force(
         "remark_md": f"- 💡 備註：本檢視區間買超第一名為 {top_buy_text} ｜ 賣超第一名為 {top_sell_text}",
         "top_buyers": {k: int(v) for k, v in top_buyers_ytd.items()},
         "top_sellers": {k: int(v) for k, v in top_sellers_ytd.items()},
+        "today_buyers": {k: int(v) for k, v in today_buyers.items()},
+        "today_sellers": {k: int(v) for k, v in today_sellers.items()},
     }
 
 
