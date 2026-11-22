@@ -254,7 +254,7 @@ st.markdown("""
 .rank-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.88rem;
+    font-size: 0.81rem;
     background-color: #161922;
     border-radius: 8px;
     overflow: hidden;
@@ -263,14 +263,16 @@ st.markdown("""
     background-color: #222736;
     color: #cbd5e1;
     text-align: left;
-    padding: 8px 12px;
+    padding: 7px 9px;
     font-weight: 600;
+    white-space: nowrap;
 }
 .rank-table td {
-    padding: 7px 12px;
+    padding: 6px 9px;
     border-top: 1px solid #262c3d;
     color: #e2e8f0;
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
 }
 .matrix-table {
     width: 100%;
@@ -425,6 +427,24 @@ def _format_conc_card(label: str, info: dict) -> str:
         f'  </div>'
         f'  <span class="conc-badge" style="background:{badge_bg}; color:{color};">{badge_txt}</span>'
         f'</div>'
+    )
+
+
+def _render_rank_table(title: str, data_dict: dict, val_color: str, empty_msg: str) -> str:
+    rows_html = "".join([
+        f'<tr>'
+        f'  <td style="width:28px; color:#94a3b8;">#{i+1}</td>'
+        f'  <td><b>{k}</b></td>'
+        f'  <td style="text-align:right; color:{val_color}; font-weight:700;">{v:+,} 張</td>'
+        f'</tr>'
+        for i, (k, v) in enumerate(data_dict.items())
+    ]) or f'<tr><td colspan="3" style="color:#94a3b8;">{empty_msg}</td></tr>'
+
+    return (
+        f'<table class="rank-table">'
+        f'  <thead><tr><th colspan="3">{title}</th></tr></thead>'
+        f'  <tbody>{rows_html}</tbody>'
+        f'</table>'
     )
 
 
@@ -810,34 +830,36 @@ if target_stock:
     if analysis.get("remark_md"):
         st.markdown(analysis["remark_md"])
 
-    # --- 買超前 5 大 & 賣超前 5 大左右並排對照表 ---
+    # --- 四欄並排排行榜：今日買賣超前 5 大（左） ＋ 今年累計買賣超前 5 大（右） ---
     top_buyers = analysis.get("top_buyers", {})
     top_sellers = analysis.get("top_sellers", {})
-    if top_buyers or top_sellers:
+    today_buyers = analysis.get("today_buyers", {})
+    today_sellers = analysis.get("today_sellers", {})
+
+    if top_buyers or top_sellers or today_buyers or today_sellers:
         st.write("")
-        col_b, col_s = st.columns(2)
-        with col_b:
-            rows_b = "".join([
-                f'<tr><td>#{i+1}</td><td><b>{k}</b></td><td style="text-align:right; color:#ef5350; font-weight:700;">{v:+,} 張</td></tr>'
-                for i, (k, v) in enumerate(top_buyers.items())
-            ]) or '<tr><td colspan="3">無淨買超分點</td></tr>'
-            st.markdown(f"""
-            <table class="rank-table">
-                <thead><tr><th colspan="3">🟢 今年以來累計買超前 5 大（外資依個別券商統計）</th></tr></thead>
-                <tbody>{rows_b}</tbody>
-            </table>
-            """, unsafe_allow_html=True)
-        with col_s:
-            rows_s = "".join([
-                f'<tr><td>#{i+1}</td><td><b>{k}</b></td><td style="text-align:right; color:#26a69a; font-weight:700;">{v:+,} 張</td></tr>'
-                for i, (k, v) in enumerate(top_sellers.items())
-            ]) or '<tr><td colspan="3">無淨賣超分點</td></tr>'
-            st.markdown(f"""
-            <table class="rank-table">
-                <thead><tr><th colspan="3">🔴 今年以來累計賣超前 5 大（外資依個別券商統計）</th></tr></thead>
-                <tbody>{rows_s}</tbody>
-            </table>
-            """, unsafe_allow_html=True)
+        short_dt = latest_trade_date[5:] if len(latest_trade_date) >= 10 else latest_trade_date
+        col_tb, col_ts, col_yb, col_ys = st.columns(4)
+        with col_tb:
+            st.markdown(
+                _render_rank_table(f"🔴 今日買超前 5 大（{short_dt}）", today_buyers, "#ef5350", "今日無淨買超分點"),
+                unsafe_allow_html=True,
+            )
+        with col_ts:
+            st.markdown(
+                _render_rank_table(f"🟢 今日賣超前 5 大（{short_dt}）", today_sellers, "#26a69a", "今日無淨賣超分點"),
+                unsafe_allow_html=True,
+            )
+        with col_yb:
+            st.markdown(
+                _render_rank_table("🔴 今年累計買超前 5 大", top_buyers, "#ef5350", "今年無淨買超分點"),
+                unsafe_allow_html=True,
+            )
+        with col_ys:
+            st.markdown(
+                _render_rank_table("🟢 今年累計賣超前 5 大", top_sellers, "#26a69a", "今年無淨賣超分點"),
+                unsafe_allow_html=True,
+            )
 
     st.divider()
 
