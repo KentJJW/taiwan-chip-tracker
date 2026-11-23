@@ -2,7 +2,7 @@
   "main_force_html": "美林（今年 <span style=\"color:#ef5350; font-weight:700;\">+3,866 張</span>）",
   "main_force_sub_lines": [
     "今年累計買超 <span style=\"color:#ef5350; font-weight:700;\">+10,362 張</span> ／ 賣超 <span style=\"color:#26a69a; font-weight:700;\">-6,496 張</span>（淨額 <span style=\"color:#ef5350; font-weight:700;\">+3,866 張</span>）",
-    "目前庫存均價：<b style='color:#ffb74d;'>51.14 元</b>（帳面損益 <span style=\"color:#26a69a; font-weight:700;\">-30.48%</span>）"
+    "目前庫存均價：<b style='color:#ffb74d;'>51.14 元</b>（帳面損益 <span style=\"color:#26a69a; font-weight:700;\">-30.88%</span>）"
   ],
   "status_html": "🟢 區間內今年三大主力吃貨中（<span style=\"color:#ef5350; font-weight:700;\">+7,755 張</span>）",
   "status_sub": "三大主力名單：美林, 元大-永和, 統一-屏東",
@@ -11,8 +11,8 @@
     "id": 0,
     "type": "neutral",
     "title": "⚪ 當前狀態：籌碼中性整理（尚未觸發五大關鍵劇本）",
-    "desc": "目前三大主力近 5 日淨額 -81 張，全市場 5 日集中度 -12.7%，處於多空均衡或橫盤整理階段。",
-    "action": "持續觀察 5 日集中度是否突破 ±5% 或出現主力連續買賣超表態。"
+    "desc": "收盤價 35.35 元（10MA 43.80 ／ 20MA 44.84），三大主力近 5 日淨額 -10 張（控盤率 -0.1%），全市場 5 日集中度 -17.2%，處於多空均衡或橫盤整理階段。",
+    "action": "持續觀察收盤價與 10MA/20MA 位置、5 日集中度是否突破 ±5% 或三大主力控盤率表態。"
   },
   "top3_names": [
     "美林",
@@ -26,7 +26,7 @@
       "ytd": 3866,
       "period": 3866,
       "d1": 0,
-      "d10": -26,
+      "d10": -53,
       "d20": 1,
       "streak": 0,
       "ctrl_pct": 0.7
@@ -46,13 +46,13 @@
       "ytd": 1764,
       "period": 1764,
       "d1": 0,
-      "d10": -57,
+      "d10": -45,
       "d20": -198,
       "streak": 0,
       "ctrl_pct": 0.3
     }
   ],
-  "remark_md": "- 💡 備註：本檢視區間買超第一名為 **美林**（:red[**+3,866 張**]） ｜ 賣超第一名為 **摩根大通**（:green[**-3,425 張**]）",
+  "remark_md": "- 💡 備註：本檢視區間買超第一名為 **美林**（:red[**+3,866 張**]） ｜ 賣超第一名為 **摩根大通**（:green[**-3,370 張**]）",
   "top_buyers": {
     "美林": 3866,
     "元大-永和": 2125,
@@ -61,36 +61,38 @@
     "華南永昌": 1073
   },
   "top_sellers": {
-    "摩根大通": -3425,
+    "摩根大通": -3370,
     "美商高盛": -2010,
     "台灣摩根士丹利": -1222,
     "群益金鼎-新竹": -857,
     "凱基-東港": -698
   },
+  "today_buyers": {},
+  "today_sellers": {},
   "stock_id": "4743",
   "stock_name": "合一",
-  "broker_count": 52,
+  "broker_count": 59,
   "concentrations": {
-    "d5": {
-      "pct": -12.68,
-      "net": -2540,
-      "buy15": 1975,
-      "sell15": 4515
-    },
-    "d10": {
-      "pct": 0.8,
-      "net": 240,
-      "buy15": 3855,
-      "sell15": 3615
-    },
     "d20": {
-      "pct": 1.92,
+      "pct": 1.81,
       "net": 810,
       "buy15": 4622,
       "sell15": 3812
+    },
+    "d5": {
+      "pct": -17.25,
+      "net": -3050,
+      "buy15": 1503,
+      "sell15": 4553
+    },
+    "d10": {
+      "pct": -0.59,
+      "net": -183,
+      "buy15": 3431,
+      "sell15": 3614
     }
   },
-  "last_updated": "2026-11-21 10:41",
+  "last_updated": "2026-11-23 17:09",
   "debug_notes": [],
   "github_sync": "✅ 已同步至 GitHub database/"
 }
