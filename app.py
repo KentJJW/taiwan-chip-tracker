@@ -47,6 +47,51 @@ st.markdown("""
     margin-top: 6px;
     line-height: 1.45;
 }
+.trust-bar {
+    background-color: #181d28;
+    border: 1px solid #2f3b52;
+    border-left: 4px solid #38bdf8;
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-top: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 0.88rem;
+    color: #e2e8f0;
+}
+.trust-title {
+    font-weight: 700;
+    color: #f8fafc;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.trust-tag {
+    font-size: 0.74rem;
+    color: #94a3b8;
+    background-color: #232a3b;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-weight: 400;
+}
+.trust-metrics {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px;
+    font-variant-numeric: tabular-nums;
+}
+.trust-item {
+    color: #cbd5e1;
+}
+.trust-lbl {
+    color: #94a3b8;
+    font-size: 0.82rem;
+    margin-right: 4px;
+}
 .conc-panel {
     background-color: #161a23;
     border: 1px solid #2d3548;
@@ -254,7 +299,7 @@ st.markdown("""
 .rank-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.81rem;
+    font-size: 0.79rem;
     background-color: #161922;
     border-radius: 8px;
     overflow: hidden;
@@ -263,12 +308,12 @@ st.markdown("""
     background-color: #222736;
     color: #cbd5e1;
     text-align: left;
-    padding: 7px 9px;
+    padding: 7px 7px;
     font-weight: 600;
     white-space: nowrap;
 }
 .rank-table td {
-    padding: 6px 9px;
+    padding: 6px 7px;
     border-top: 1px solid #262c3d;
     color: #e2e8f0;
     font-variant-numeric: tabular-nums;
@@ -433,7 +478,7 @@ def _format_conc_card(label: str, info: dict) -> str:
 def _render_rank_table(title: str, data_dict: dict, val_color: str, empty_msg: str) -> str:
     rows_html = "".join([
         f'<tr>'
-        f'  <td style="width:28px; color:#94a3b8;">#{i+1}</td>'
+        f'  <td style="width:24px; color:#94a3b8;">#{i+1}</td>'
         f'  <td><b>{k}</b></td>'
         f'  <td style="text-align:right; color:{val_color}; font-weight:700;">{v:+,} 張</td>'
         f'</tr>'
@@ -456,7 +501,7 @@ if "active_stock" not in st.session_state:
 if "sort_mode" not in st.session_state:
     st.session_state["sort_mode"] = False
 
-# --- 側邊欄：新增個股、統計區間與已存個股管理（支援單檔全量校準、全部增量更新、自訂排序） ---
+# --- 側邊欄：新增個股、統計區間與已存個股管理 ---
 with st.sidebar:
     st.header("🔍 新增個股建檔")
     input_stock = st.text_input("輸入新台股代號（例如：2330、3231）", value="", placeholder="輸入 4 碼上市櫃代號").strip()
@@ -660,7 +705,7 @@ if target_stock:
     if broker_count == 0 and meta_saved.get("debug_notes"):
         st.warning(f"⚠️ 分點明細未取得（{'；'.join(meta_saved['debug_notes'])}）")
 
-    # --- 區塊一：主力診斷結論 ---
+    # --- 區塊一：主力診斷結論（純券商分點口徑，不與投信重複計算） ---
     updated_str = meta_saved.get("last_updated", "")
     latest_trade_date = df_price_full["date"].max()
     time_badge = f"🕒 更新時間：{updated_str}（最新交易日：{latest_trade_date}）" if updated_str else f"🕒 最新交易日：{latest_trade_date}"
@@ -683,7 +728,7 @@ if target_stock:
         ])
         st.markdown(f"""
         <div class="summary-card">
-            <div class="card-label">今年以來最大主力</div>
+            <div class="card-label">今年以來最大券商分點主力</div>
             <div class="card-value">{analysis.get("main_force_html", "N/A")}</div>
             {sub_html}
         </div>
@@ -695,7 +740,7 @@ if target_stock:
         )
         st.markdown(f"""
         <div class="summary-card">
-            <div class="card-label">區間內今年三大主力狀態</div>
+            <div class="card-label">區間內今年三大分點主力狀態</div>
             <div class="card-value">{analysis.get("status_html", "N/A")}</div>
             {status_sub_html}
         </div>
@@ -708,6 +753,44 @@ if target_stock:
             <div class="card-sub">區間漲跌：{pct_html}<br>更新：{updated_str[:16] if updated_str else latest_trade_date}</div>
         </div>
         """, unsafe_allow_html=True)
+
+    # --- 區塊一之二：投信獨立追蹤列（身分維度獨立顯示，不與券商分點混算） ---
+    trust_info = analysis.get("trust_info")
+    if trust_info:
+        trust_tip = (
+            "投信下單分散於元大、富邦、國泰、玉山等各大本土券商法人專戶中，若與券商分點並列加總會產生重複計算。"
+            "系統已將投信獨立於此列呈現，不計入下方券商分點排行與三大分點主力合計。"
+        )
+        cost_seg = ""
+        if trust_info.get("cost", 0) > 0 and trust_info.get("pnl_pct") is not None:
+            p_val = trust_info["pnl_pct"]
+            p_col = "#ef5350" if p_val > 0 else ("#26a69a" if p_val < 0 else "#cbd5e1")
+            cost_seg = (
+                f'<span class="trust-item"><span class="trust-lbl">庫存均價</span>'
+                f'<b style="color:#ffb74d;">{trust_info["cost"]:,.2f} 元</b> '
+                f'(<span style="color:{p_col}; font-weight:700;">{p_val:+.2f}%</span>)</span>'
+            )
+
+        st.markdown(
+            f'<div class="trust-bar">'
+            f'  <div class="trust-title">'
+            f'    🏦 投信獨立追蹤'
+            f'    <span class="tip-wrap tip-right">ⓘ<span class="tip-box">{trust_tip}</span></span>'
+            f'    <span class="trust-tag">獨立法人維度｜不與分點重複加總</span>'
+            f'  </div>'
+            f'  <div class="trust-metrics">'
+            f'    <span class="trust-item"><span class="trust-lbl">今年累計</span>{_span_num(trust_info["ytd"])}</span>'
+            f'    <span class="trust-item"><span class="trust-lbl">本區間</span>{_span_num(trust_info["period"])}</span>'
+            f'    <span class="trust-item"><span class="trust-lbl">今日</span>{_span_num(trust_info["d1"])}</span>'
+            f'    <span class="trust-item"><span class="trust-lbl">近 10 日</span>{_span_num(trust_info["d10"])}</span>'
+            f'    <span class="trust-item"><span class="trust-lbl">近 20 日</span>{_span_num(trust_info["d20"])}</span>'
+            f'    <span class="trust-item">{_span_streak(trust_info["streak"])}</span>'
+            f'    <span class="trust-item"><span class="trust-lbl">控盤率</span>{_span_ctrl(trust_info["ctrl_pct"])}</span>'
+            f'    {cost_seg}'
+            f'  </div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
 
     # --- 區塊一點五：全市場前 15 大籌碼集中度橫條 ＋ 五大劇本自動亮燈提示 ---
     conc_tip = (
@@ -742,7 +825,7 @@ if target_stock:
         unsafe_allow_html=True,
     )
 
-    # --- 可收合抽屜：價 × 點 × 面 三維度交叉判讀矩陣（自動高亮當前符合劇本） ---
+    # --- 可收合抽屜：價 × 點 × 面 三維度交叉判讀矩陣 ---
     matched_id = scenario.get("id", 0)
     with st.expander("📖 價 × 點 × 面 交叉判讀矩陣（點擊展開 5 大實戰劇本與操作應對）", expanded=False):
         m_rows = []
@@ -768,7 +851,7 @@ if target_stock:
                 <tr>
                     <th>盤面情境劇本</th>
                     <th>股價與均線（價）</th>
-                    <th>三大主力（點）</th>
+                    <th>三大分點主力（點）</th>
                     <th>5/10/20日集中度（面）</th>
                     <th>實戰解讀與操作應對</th>
                 </tr>
@@ -777,15 +860,15 @@ if target_stock:
         </table>
         """, unsafe_allow_html=True)
 
-    # --- 近 5 日價量籌碼背離警報（含 ⓘ 指標說明） ---
+    # --- 近 5 日價量籌碼背離警報 ---
     div_alert = analysis.get("divergence_alert")
     if div_alert:
         css_cls = "div-alert-bull" if div_alert["type"] == "bull" else "div-alert-bear"
         div_tip_text = (
-            "觸發條件：近 5 日股價跌幅 ≥ 3%，且今年前三大主力近 5 日合計淨買超控盤率 ≥ +2.0%。"
+            "觸發條件：近 5 日股價跌幅 ≥ 3%，且今年前三大券商分點主力近 5 日合計淨買超控盤率 ≥ +2.0%。"
             "代表大資金趁急跌有效承接，常為低檔換手或止跌轉折的前兆。"
             if div_alert["type"] == "bull" else
-            "觸發條件：近 5 日股價漲幅 ≥ 3%，且今年前三大主力近 5 日合計淨賣超控盤率 ≤ -2.0%。"
+            "觸發條件：近 5 日股價漲幅 ≥ 3%，且今年前三大券商分點主力近 5 日合計淨賣超控盤率 ≤ -2.0%。"
             "代表大資金趁反彈有效出貨，需慎防假突破或拉高倒貨風險。"
         )
         st.markdown(
@@ -797,7 +880,7 @@ if target_stock:
             unsafe_allow_html=True,
         )
 
-    # --- 前三大主力明細（CSS 隱形網格對齊，含連買賣與控盤率 ⓘ 說明） ---
+    # --- 前三大券商分點主力明細 ---
     st.write("")
     if analysis.get("top3_header_md"):
         st.markdown(analysis["top3_header_md"])
@@ -830,7 +913,7 @@ if target_stock:
     if analysis.get("remark_md"):
         st.markdown(analysis["remark_md"])
 
-    # --- 四欄並排排行榜：今日買賣超前 5 大（左） ＋ 今年累計買賣超前 5 大（右） ---
+    # --- 四欄並排排行榜（純券商分點口徑，不含投信）：今日買賣超前 5 大（左） ＋ 今年累計買賣超前 5 大（右） ---
     top_buyers = analysis.get("top_buyers", {})
     top_sellers = analysis.get("top_sellers", {})
     today_buyers = analysis.get("today_buyers", {})
@@ -842,22 +925,22 @@ if target_stock:
         col_tb, col_ts, col_yb, col_ys = st.columns(4)
         with col_tb:
             st.markdown(
-                _render_rank_table(f"🔴 今日買超前 5 大（{short_dt}）", today_buyers, "#ef5350", "今日無淨買超分點"),
+                _render_rank_table(f"🔴 今日分點買超前 5 大（{short_dt}）", today_buyers, "#ef5350", "今日無淨買超分點"),
                 unsafe_allow_html=True,
             )
         with col_ts:
             st.markdown(
-                _render_rank_table(f"🟢 今日賣超前 5 大（{short_dt}）", today_sellers, "#26a69a", "今日無淨賣超分點"),
+                _render_rank_table(f"🟢 今日分點賣超前 5 大（{short_dt}）", today_sellers, "#26a69a", "今日無淨賣超分點"),
                 unsafe_allow_html=True,
             )
         with col_yb:
             st.markdown(
-                _render_rank_table("🔴 今年累計買超前 5 大", top_buyers, "#ef5350", "今年無淨買超分點"),
+                _render_rank_table("🔴 今年分點買超前 5 大", top_buyers, "#ef5350", "今年無淨買超分點"),
                 unsafe_allow_html=True,
             )
         with col_ys:
             st.markdown(
-                _render_rank_table("🟢 今年累計賣超前 5 大", top_sellers, "#26a69a", "今年無淨賣超分點"),
+                _render_rank_table("🟢 今年分點賣超前 5 大", top_sellers, "#26a69a", "今年無淨賣超分點"),
                 unsafe_allow_html=True,
             )
 
@@ -875,11 +958,11 @@ if target_stock:
     if ms_key not in st.session_state:
         st.session_state[ms_key] = default_selected
 
-    col_sel, col_btn, col_ma = st.columns([3.8, 1.1, 1.0])
+    col_sel, col_btn, col_ma = st.columns([3.8, 1.2, 1.0])
     with col_btn:
         st.write("")
         st.write("")
-        if st.button("⚡ 帶入前三大主力", width="stretch", disabled=not bool(top3_names)):
+        if st.button("⚡ 帶入前三大分點", width="stretch", disabled=not bool(top3_names)):
             st.session_state[ms_key] = [n for n in top3_names if n in available_brokers]
             st.rerun()
     with col_ma:
@@ -888,7 +971,7 @@ if target_stock:
         show_ma = st.checkbox("顯示 10/20MA", value=True)
     with col_sel:
         selected_brokers = st.multiselect(
-            "選擇要觀察的券商分點或「投信」（可單選或多選，多選時自動加總計算合力成本與總和折線）：",
+            "選擇要觀察的券商分點或「投信」（多選時自動加總計算合力成本；若欲觀察投信建議單獨勾選）：",
             options=available_brokers,
             key=ms_key
         )
