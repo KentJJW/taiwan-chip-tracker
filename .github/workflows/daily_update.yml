@@ -2,8 +2,8 @@ name: Daily Stock Chip Update
 
 on:
   schedule:
-    # 台灣時間每日 19:00（UTC 11:00）；週一至週五執行
-    - cron: "0 11 * * 1-5"
+    # 台灣時間每日 19:23（UTC 11:23，避開整點尖峰佇列）；週一至週五執行
+    - cron: "23 11 * * 1-5"
   workflow_dispatch:
 
 permissions:
