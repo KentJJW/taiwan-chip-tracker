@@ -9,6 +9,7 @@ from plotly.subplots import make_subplots
 from data_engine import (
     DB_DIR,
     SCENARIO_MATRIX,
+    STRATEGY_PARAMS,
     update_stock_database,
     analyze_main_force,
     delete_stock_database,
@@ -30,22 +31,40 @@ st.markdown("""
     height: 100%;
 }
 .card-label {
-    font-size: 0.85rem;
+    font-size: 0.83rem;
     color: #9aa4b2;
     margin-bottom: 6px;
 }
 .card-value {
-    font-size: 1.15rem;
+    font-size: 1.1rem;
     font-weight: 700;
     color: #f3f4f6;
     line-height: 1.4;
     word-break: break-word;
 }
 .card-sub {
-    font-size: 0.82rem;
+    font-size: 0.8rem;
     color: #94a3b8;
     margin-top: 6px;
     line-height: 1.45;
+}
+.score-val {
+    font-size: 1.45rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+}
+.score-bar-bg {
+    width: 100%;
+    height: 6px;
+    background-color: #273043;
+    border-radius: 4px;
+    margin-top: 8px;
+    overflow: hidden;
+}
+.score-bar-fill {
+    height: 100%;
+    border-radius: 4px;
 }
 .div-alert-bull {
     background-color: rgba(239, 83, 80, 0.12);
@@ -77,7 +96,7 @@ st.markdown("""
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    font-size: 0.88rem;
+    font-size: 0.86rem;
     color: #e2e8f0;
 }
 .trust-title {
@@ -85,6 +104,7 @@ st.markdown("""
     color: #f8fafc;
     display: inline-flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 6px;
 }
 .trust-tag {
@@ -93,13 +113,13 @@ st.markdown("""
     background-color: #232a3b;
     padding: 2px 7px;
     border-radius: 4px;
-    font-weight: 400;
+    font-weight: 500;
 }
 .trust-metrics {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 14px;
+    gap: 13px;
     font-variant-numeric: tabular-nums;
 }
 .trust-item {
@@ -107,8 +127,54 @@ st.markdown("""
 }
 .trust-lbl {
     color: #94a3b8;
-    font-size: 0.82rem;
+    font-size: 0.8rem;
     margin-right: 4px;
+}
+.aux-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-top: 10px;
+}
+.aux-card {
+    background-color: #161b26;
+    border: 1px solid #2a3347;
+    border-radius: 8px;
+    padding: 10px 13px;
+    font-variant-numeric: tabular-nums;
+}
+.aux-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 5px;
+    gap: 6px;
+}
+.aux-title {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #cbd5e1;
+    display: inline-flex;
+    align-items: center;
+}
+.aux-src {
+    font-size: 0.72rem;
+    color: #94a3b8;
+    background-color: #232a3b;
+    padding: 1px 6px;
+    border-radius: 4px;
+}
+.aux-main {
+    font-size: 1.02rem;
+    font-weight: 700;
+    color: #f8fafc;
+    line-height: 1.35;
+}
+.aux-sub {
+    font-size: 0.78rem;
+    color: #94a3b8;
+    margin-top: 4px;
+    line-height: 1.45;
 }
 .conc-panel {
     background-color: #161a23;
@@ -132,9 +198,10 @@ st.markdown("""
     color: #e2e8f0;
     display: inline-flex;
     align-items: center;
+    flex-wrap: wrap;
 }
 .conc-sub-tag {
-    font-size: 0.78rem;
+    font-size: 0.77rem;
     color: #94a3b8;
     background-color: #232938;
     padding: 2px 8px;
@@ -155,23 +222,37 @@ st.markdown("""
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 8px;
 }
 .conc-box-left {
     display: flex;
     flex-direction: column;
 }
 .conc-period {
-    font-size: 0.8rem;
+    font-size: 0.79rem;
     color: #94a3b8;
     margin-bottom: 2px;
+}
+.conc-val-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
 }
 .conc-val {
     font-size: 1.15rem;
     font-weight: 700;
     font-variant-numeric: tabular-nums;
 }
-.conc-badge {
+.conc-z {
     font-size: 0.78rem;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background-color: #252d3f;
+    font-variant-numeric: tabular-nums;
+}
+.conc-badge {
+    font-size: 0.77rem;
     font-weight: 600;
     padding: 3px 8px;
     border-radius: 5px;
@@ -181,7 +262,7 @@ st.markdown("""
     background-color: rgba(239, 83, 80, 0.13);
     border-left: 4px solid #ef5350;
     border-radius: 6px;
-    padding: 9px 13px;
+    padding: 10px 14px;
     margin-top: 10px;
     font-size: 0.88rem;
     color: #f8fafc;
@@ -191,7 +272,7 @@ st.markdown("""
     background-color: rgba(38, 166, 154, 0.13);
     border-left: 4px solid #26a69a;
     border-radius: 6px;
-    padding: 9px 13px;
+    padding: 10px 14px;
     margin-top: 10px;
     font-size: 0.88rem;
     color: #f8fafc;
@@ -201,14 +282,51 @@ st.markdown("""
     background-color: rgba(148, 163, 184, 0.08);
     border-left: 4px solid #64748b;
     border-radius: 6px;
-    padding: 8px 13px;
+    padding: 9px 14px;
     margin-top: 10px;
     font-size: 0.85rem;
     color: #cbd5e1;
-    line-height: 1.45;
+    line-height: 1.48;
+}
+.badge-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin-top: 9px;
+}
+.res-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.77rem;
+    font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    cursor: help;
+}
+.res-bull {
+    background-color: rgba(239, 83, 80, 0.16);
+    border-color: rgba(239, 83, 80, 0.4);
+    color: #fca5a5;
+}
+.res-bear {
+    background-color: rgba(38, 166, 154, 0.16);
+    border-color: rgba(38, 166, 154, 0.4);
+    color: #80cbc4;
+}
+.res-warn {
+    background-color: rgba(245, 158, 11, 0.16);
+    border-color: rgba(245, 158, 11, 0.45);
+    color: #fcd34d;
+}
+.res-info {
+    background-color: rgba(148, 163, 184, 0.14);
+    border-color: rgba(148, 163, 184, 0.35);
+    color: #cbd5e1;
 }
 .top3-header-line {
-    font-size: 0.96rem;
+    font-size: 0.94rem;
     color: #f1f5f9;
     margin: 4px 0 6px 4px;
     display: flex;
@@ -217,37 +335,70 @@ st.markdown("""
     gap: 4px;
 }
 .mf-list {
-    margin: 2px 0 8px 22px;
+    margin: 2px 0 8px 16px;
     overflow: visible;
 }
 .mf-row {
     display: grid;
-    grid-template-columns: 145px 155px 135px 120px 135px 135px 90px 145px;
+    grid-template-columns: 205px 140px 130px 112px 128px 128px 88px 132px;
     align-items: center;
-    padding: 4px 0;
-    font-size: 0.92rem;
+    padding: 5px 0;
+    font-size: 0.89rem;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
     color: #e2e8f0;
+    border-bottom: 1px dashed rgba(51, 65, 85, 0.45);
 }
 .mf-name {
     font-weight: 700;
     color: #f8fafc;
     padding-right: 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.mf-tag-pill {
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background-color: rgba(251, 191, 36, 0.16);
+    color: #fcd34d;
 }
 .mf-cell {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0 10px;
+    padding: 0 9px;
     border-left: 1px solid #334155;
 }
 .mf-lbl {
     color: #94a3b8;
-    font-size: 0.84rem;
-    margin-right: 6px;
+    font-size: 0.81rem;
+    margin-right: 5px;
     display: inline-flex;
     align-items: center;
+}
+.smart-grid {
+    display: grid;
+    grid-template-columns: 1.35fr 1fr;
+    gap: 12px;
+    margin: 10px 0 4px 0;
+}
+.smart-panel {
+    background-color: #161b26;
+    border: 1px solid #2b3448;
+    border-radius: 8px;
+    padding: 10px 13px;
+}
+.smart-title {
+    font-size: 0.84rem;
+    font-weight: 700;
+    color: #e2e8f0;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
 }
 .tip-wrap {
     position: relative;
@@ -302,7 +453,7 @@ st.markdown("""
     border-radius: 6px;
     padding: 9px 14px;
     margin: 6px 0 10px 0;
-    font-size: 0.9rem;
+    font-size: 0.89rem;
     color: #e2e8f0;
 }
 .rank-table {
@@ -331,7 +482,7 @@ st.markdown("""
 .matrix-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.84rem;
+    font-size: 0.83rem;
     background-color: #141821;
 }
 .matrix-table th {
@@ -433,9 +584,20 @@ def parse_manual_date(text: str, fallback: str) -> str:
     return fallback
 
 
-def _span_num(val: int, suffix: str = " 張") -> str:
-    color = "#ef5350" if val > 0 else ("#26a69a" if val < 0 else "#cbd5e1")
+def _span_num(val: int, suffix: str = " 張", invert_color: bool = False) -> str:
+    if val == 0:
+        return f'<span style="color:#cbd5e1; font-weight:700;">0{suffix}</span>'
+    is_bull_color = (val < 0) if invert_color else (val > 0)
+    color = "#ef5350" if is_bull_color else "#26a69a"
     return f'<span style="color:{color}; font-weight:700;">{val:+,}{suffix}</span>'
+
+
+def _span_float(val: float, suffix: str = "%", invert_color: bool = False) -> str:
+    if abs(val) < 1e-9:
+        return f'<span style="color:#cbd5e1; font-weight:700;">0.00{suffix}</span>'
+    is_bull_color = (val < 0) if invert_color else (val > 0)
+    color = "#ef5350" if is_bull_color else "#26a69a"
+    return f'<span style="color:{color}; font-weight:700;">{val:+.2f}{suffix}</span>'
 
 
 def _span_streak(streak: int) -> str:
@@ -451,23 +613,41 @@ def _span_ctrl(pct: float) -> str:
     return f'<span style="color:{color}; font-weight:700;">{pct:+.1f}%</span>'
 
 
+def _span_zscore(z_val: float | None) -> str:
+    if z_val is None:
+        return ""
+    if z_val >= STRATEGY_PARAMS["z_bull_min"]:
+        col = "#ef5350"
+    elif z_val <= STRATEGY_PARAMS["z_bear_max"]:
+        col = "#26a69a"
+    else:
+        col = "#cbd5e1"
+    return f'<span class="conc-z" style="color:{col};">Z:{z_val:+.1f}σ</span>'
+
+
 def _format_conc_card(label: str, info: dict) -> str:
     pct = info.get("pct") if isinstance(info, dict) else None
     net = info.get("net", 0) if isinstance(info, dict) else 0
+    z_val = info.get("z_score") if isinstance(info, dict) else None
+
     if pct is None:
         return (
             f'<div class="conc-box">'
-            f'  <div class="conc-box-left"><span class="conc-period">{label}</span><span class="conc-val" style="color:#94a3b8;">待更新</span></div>'
+            f'  <div class="conc-box-left"><span class="conc-period">{label}</span>'
+            f'  <span class="conc-val" style="color:#94a3b8;">待更新</span></div>'
             f'  <span class="conc-badge" style="background:#262e40; color:#94a3b8;">請點左側更新</span>'
             f'</div>'
         )
 
-    if pct >= 10.0:
-        color, badge_bg, badge_txt = "#ef5350", "rgba(239,83,80,0.18)", "🔥 高度集中"
+    is_z_bull = (z_val is not None and z_val >= STRATEGY_PARAMS["z_bull_min"])
+    is_z_bear = (z_val is not None and z_val <= STRATEGY_PARAMS["z_bear_max"])
+
+    if pct >= 10.0 or (pct > 0 and is_z_bull):
+        color, badge_bg, badge_txt = "#ef5350", "rgba(239,83,80,0.18)", "🔥 顯著集中"
     elif pct >= 3.0:
         color, badge_bg, badge_txt = "#ef5350", "rgba(239,83,80,0.14)", "📈 偏多吸籌"
-    elif pct <= -10.0:
-        color, badge_bg, badge_txt = "#26a69a", "rgba(38,166,154,0.18)", "⚠️ 嚴重發散"
+    elif pct <= -10.0 or (pct < 0 and is_z_bear):
+        color, badge_bg, badge_txt = "#26a69a", "rgba(38,166,154,0.18)", "⚠️ 顯著發散"
     elif pct <= -3.0:
         color, badge_bg, badge_txt = "#26a69a", "rgba(38,166,154,0.14)", "📉 籌碼微散"
     else:
@@ -477,22 +657,142 @@ def _format_conc_card(label: str, info: dict) -> str:
         f'<div class="conc-box">'
         f'  <div class="conc-box-left">'
         f'    <span class="conc-period">{label}（淨額 {net:+,} 張）</span>'
-        f'    <span class="conc-val" style="color:{color};">{pct:+.2f}%</span>'
+        f'    <div class="conc-val-row">'
+        f'      <span class="conc-val" style="color:{color};">{pct:+.2f}%</span>'
+        f'      {_span_zscore(z_val)}'
+        f'    </div>'
         f'  </div>'
         f'  <span class="conc-badge" style="background:{badge_bg}; color:{color};">{badge_txt}</span>'
         f'</div>'
     )
 
 
-def _render_rank_table(title: str, data_dict: dict, val_color: str, empty_msg: str) -> str:
-    rows_html = "".join([
-        f'<tr>'
-        f'  <td style="width:24px; color:#94a3b8;">#{i+1}</td>'
-        f'  <td><b>{k}</b></td>'
-        f'  <td style="text-align:right; color:{val_color}; font-weight:700;">{v:+,} 張</td>'
-        f'</tr>'
-        for i, (k, v) in enumerate(data_dict.items())
-    ]) or f'<tr><td colspan="3" style="color:#94a3b8;">{empty_msg}</td></tr>'
+def _render_aux_dashboard(
+    broker_diff_info: dict | None,
+    margin_info: dict | None,
+    sbl_info: dict | None,
+    tdcc_info: dict | None,
+) -> str:
+    # 1. 買賣家數差
+    if broker_diff_info:
+        d5 = broker_diff_info["diff_5d"]
+        d1 = broker_diff_info["diff_1d"]
+        neg_s = broker_diff_info["neg_streak"]
+        src = broker_diff_info.get("source", "")
+        diff_card = (
+            f'<div class="aux-card">'
+            f'  <div class="aux-head"><span class="aux-title">🧲 買賣家數差</span><span class="aux-src">{src}</span></div>'
+            f'  <div class="aux-main">5日 {_span_num(d5, " 家", invert_color=True)}</div>'
+            f'  <div class="aux-sub">今日 {_span_num(d1, " 家", invert_color=True)} ｜ 連負 <b>{neg_s}</b> 日<br>負值代表籌碼由散戶流向少數主力</div>'
+            f'</div>'
+        )
+    else:
+        diff_card = (
+            '<div class="aux-card">'
+            '  <div class="aux-head"><span class="aux-title">🧲 買賣家數差</span><span class="aux-src">待更新</span></div>'
+            '  <div class="aux-main" style="color:#94a3b8;">尚無資料</div>'
+            '  <div class="aux-sub">點擊左側「🔄」更新即可補齊</div>'
+            '</div>'
+        )
+
+    # 2. 融資融券與券資比
+    if margin_info:
+        m_bal = margin_info["latest_bal"]
+        m_5d = margin_info["chg_5d"]
+        m_5d_pct = margin_info["chg_5d_pct"]
+        sm_rat = margin_info["short_margin_ratio"]
+        s_bal = margin_info["short_bal"]
+        margin_card = (
+            f'<div class="aux-card">'
+            f'  <div class="aux-head"><span class="aux-title">🧹 融資浮額／券資比</span><span class="aux-src">信用交易</span></div>'
+            f'  <div class="aux-main">5日 {_span_num(m_5d, " 張", invert_color=True)} ({_span_float(m_5d_pct, "%", invert_color=True)})</div>'
+            f'  <div class="aux-sub">融資餘額 <b>{m_bal:,}</b> 張 ｜ 融券 <b>{s_bal:,}</b> 張<br>券資比 <b style="color:#fbbf24;">{sm_rat:.1f}%</b>（紅＝融資清洗偏多）</div>'
+            f'</div>'
+        )
+    else:
+        margin_card = (
+            '<div class="aux-card">'
+            '  <div class="aux-head"><span class="aux-title">🧹 融資浮額／券資比</span><span class="aux-src">待更新</span></div>'
+            '  <div class="aux-main" style="color:#94a3b8;">尚無資料</div>'
+            '  <div class="aux-sub">點擊左側「🔄」補抓信用交易資料</div>'
+            '</div>'
+        )
+
+    # 3. 借券賣出餘額
+    if sbl_info:
+        sbl_bal = sbl_info["latest_bal"]
+        sbl_5d = sbl_info["chg_5d"]
+        sbl_pct = sbl_info["chg_5d_pct"]
+        sbl_1d = sbl_info["chg_1d"]
+        sbl_card = (
+            f'<div class="aux-card">'
+            f'  <div class="aux-head"><span class="aux-title">🐻 借券賣出餘額</span><span class="aux-src">外資空方</span></div>'
+            f'  <div class="aux-main">5日 {_span_num(sbl_5d, " 張", invert_color=True)} ({_span_float(sbl_pct, "%", invert_color=True)})</div>'
+            f'  <div class="aux-sub">餘額 <b>{sbl_bal:,}</b> 張 ｜ 今日 {_span_num(sbl_1d, " 張", invert_color=True)}<br>紅＝回補軋空助力｜綠＝空單加壓</div>'
+            f'</div>'
+        )
+    else:
+        sbl_card = (
+            '<div class="aux-card">'
+            '  <div class="aux-head"><span class="aux-title">🐻 借券賣出餘額</span><span class="aux-src">待更新</span></div>'
+            '  <div class="aux-main" style="color:#94a3b8;">尚無資料</div>'
+            '  <div class="aux-sub">點擊左側「🔄」補抓 TWSE/TPEX 借券</div>'
+            '</div>'
+        )
+
+    # 4. TDCC 集保戶股權分散表
+    if tdcc_info:
+        w1000 = tdcc_info["whale_1000_pct"]
+        w1000_chg = tdcc_info.get("whale_1000_chg_1w")
+        w400 = tdcc_info["whale_400_pct"]
+        holders = tdcc_info["total_holders"]
+        h_chg = tdcc_info.get("holders_chg_1w")
+        t_dt = tdcc_info.get("date", "")
+        chg_txt = _span_float(w1000_chg, "%") if w1000_chg is not None else '<span style="color:#94a3b8;">首週</span>'
+        h_chg_txt = _span_num(h_chg, " 人", invert_color=True) if h_chg is not None else "—"
+        tdcc_card = (
+            f'<div class="aux-card">'
+            f'  <div class="aux-head"><span class="aux-title">🐋 TDCC 集保大戶</span><span class="aux-src">{t_dt}</span></div>'
+            f'  <div class="aux-main">千張 <b>{w1000:.2f}%</b>（週 {chg_txt}）</div>'
+            f'  <div class="aux-sub">400張以上 <b>{w400:.2f}%</b><br>總股東 <b>{holders:,}</b> 人（週 {h_chg_txt}）</div>'
+            f'</div>'
+        )
+    else:
+        tdcc_card = (
+            '<div class="aux-card">'
+            '  <div class="aux-head"><span class="aux-title">🐋 TDCC 集保大戶</span><span class="aux-src">每週更新</span></div>'
+            '  <div class="aux-main" style="color:#94a3b8;">尚無資料</div>'
+            '  <div class="aux-sub">點擊左側「🔄」同步集保歸戶大戶</div>'
+            '</div>'
+        )
+
+    return f'<div class="aux-grid">{diff_card}{margin_card}{sbl_card}{tdcc_card}</div>'
+
+
+def _render_rank_table(
+    title: str,
+    data_dict: dict,
+    val_color: str,
+    empty_msg: str,
+    broker_tags: dict | None = None,
+) -> str:
+    b_tags = broker_tags or {}
+    rows = []
+    for i, (k, v) in enumerate(data_dict.items()):
+        tags = b_tags.get(k, [])
+        short_tag = ""
+        if any("隔日沖" in t for t in tags):
+            short_tag += ' <span title="高頻隔日沖分點" style="color:#fbbf24;">⚡</span>'
+        if any("贏家" in t for t in tags):
+            short_tag += ' <span title="歷史高勝率贏家分點" style="color:#f59e0b;">🏆</span>'
+        rows.append(
+            f'<tr>'
+            f'  <td style="width:24px; color:#94a3b8;">#{i+1}</td>'
+            f'  <td><b>{k}</b>{short_tag}</td>'
+            f'  <td style="text-align:right; color:{val_color}; font-weight:700;">{v:+,} 張</td>'
+            f'</tr>'
+        )
+    rows_html = "".join(rows) or f'<tr><td colspan="3" style="color:#94a3b8;">{empty_msg}</td></tr>'
 
     return (
         f'<table class="rank-table">'
@@ -522,7 +822,7 @@ with st.sidebar:
         "選擇檢視範圍",
         options=["今日", "5日", "10日", "20日", "60日", "全部", "指定日期"],
         index=0,
-        horizontal=True
+        horizontal=True,
     )
 
     custom_start_str = "20260102"
@@ -538,8 +838,8 @@ with st.sidebar:
     if saved_list:
         st.markdown(
             '<div class="sidebar-help-box">'
-            '全部更新：近 3 日增量更新所有個股與集中度<br>'
-            '個股更新：全年度重抓校準（補齊新分點全年明細）'
+            '全部更新：近 3 日增量更新所有個股、融資借券與集保<br>'
+            '個股更新：全年度重抓校準（含近 60 日新主力與股本）'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -549,14 +849,14 @@ with st.sidebar:
             if st.button(
                 "🔄 全部更新",
                 key="btn_update_all",
-                help="對所有已存個股執行近 3 個交易日增量更新，並重算最新 5/10/20 日集中度",
+                help="對所有已存個股執行近 3 個交易日增量更新，同步更新集中度、融資券、借券與集保",
                 width="stretch",
                 disabled=st.session_state["sort_mode"],
             ):
                 prog = st.progress(0, text="準備批量增量更新...")
                 for idx, sid in enumerate(saved_list):
                     lbl = get_stock_display_label(sid)
-                    prog.progress((idx) / len(saved_list), text=f"正在增量更新 {lbl} ({idx+1}/{len(saved_list)})...")
+                    prog.progress(idx / len(saved_list), text=f"正在增量更新 {lbl} ({idx+1}/{len(saved_list)})...")
                     update_stock_database(sid, incremental_days=3)
                 prog.progress(1.0, text="全部增量更新完成！")
                 st.rerun()
@@ -609,7 +909,7 @@ with st.sidebar:
                     if st.button(
                         "🔄",
                         key=f"upd_{sid}",
-                        help=f"全年度重抓校準 {display_name}（從 2026/01/02 完整回溯）",
+                        help=f"全年度重抓校準 {display_name}（補齊 VWAP、近 60 日主力、融資借券與集保）",
                         width="stretch",
                     ):
                         with st.spinner(f"正在全年度重抓校準 {display_name}..."):
@@ -635,10 +935,11 @@ target_stock = st.session_state.get("active_stock", "").strip()
 if target_stock:
     price_path = os.path.join(DB_DIR, f"{target_stock}_price.csv")
     chips_path = os.path.join(DB_DIR, f"{target_stock}_chips.csv")
+    aux_path = os.path.join(DB_DIR, f"{target_stock}_aux.csv")
     meta_path = os.path.join(DB_DIR, f"{target_stock}_meta.json")
 
     if (btn_add and input_stock) or not os.path.exists(price_path):
-        with st.spinner(f"正在從 2026/01/02 抓取 {target_stock} 股價、投信、前 30 大主力與 5/10/20 日籌碼集中度..."):
+        with st.spinner(f"正在抓取 {target_stock} 股價、投信、波段分點、融資借券與集保大戶資料..."):
             ok = update_stock_database(target_stock, incremental_days=None)
             if not ok:
                 st.error(f"找不到股票代號 `{target_stock}`，請確認是否為正確的上市櫃代號（目前不支援興櫃）。")
@@ -651,6 +952,13 @@ if target_stock:
 
     df_price_full = pd.read_csv(price_path)
     df_chips_full = pd.read_csv(chips_path)
+    df_aux_full = None
+    if os.path.exists(aux_path):
+        try:
+            df_aux_full = pd.read_csv(aux_path)
+        except Exception:
+            df_aux_full = None
+
     with open(meta_path, "r", encoding="utf-8") as f:
         meta_saved = json.load(f)
 
@@ -692,7 +1000,7 @@ if target_stock:
     latest_close = float(df_price.iloc[-1]["close"])
     prior_rows = df_price_full[df_price_full["date"] < start_filter]
     base_close = float(prior_rows.iloc[-1]["close"]) if not prior_rows.empty else float(df_price.iloc[0]["close"])
-    pct_change = ((latest_close - base_close) / base_close * 100) if base_close else 0.0
+    pct_change = ((latest_close - base_close) / base_close * 100.0) if base_close else 0.0
     if pct_change > 0:
         pct_html = f'<span style="color:#ef5350; font-weight:700;">▲ {pct_change:+.2f}%</span>'
     elif pct_change < 0:
@@ -700,36 +1008,55 @@ if target_stock:
     else:
         pct_html = '<span style="color:#cbd5e1; font-weight:700;">0.00%</span>'
 
-    concentrations = meta_saved.get("concentrations", {})
+    concentrations_saved = meta_saved.get("concentrations", {})
+    tdcc_history_saved = meta_saved.get("tdcc_history", [])
+    issued_lots_saved = float(meta_saved.get("issued_lots", 0.0) or 0.0)
+
     analysis = analyze_main_force(
         df_price,
         df_chips,
         period_label,
         df_chips_full=df_chips_full,
         df_price_full=df_price_full,
-        concentrations=concentrations,
+        concentrations=concentrations_saved,
+        df_aux_full=df_aux_full,
+        tdcc_history=tdcc_history_saved,
+        issued_lots=issued_lots_saved,
     )
     broker_count = len([c for c in df_chips_full.columns if c not in ("date", "投信")])
+    concentrations = analysis.get("concentrations") or concentrations_saved
+    scenario = analysis.get("scenario", {})
+    broker_tags = analysis.get("broker_tags", {})
 
     if broker_count == 0 and meta_saved.get("debug_notes"):
         st.warning(f"⚠️ 分點明細未取得（{'；'.join(meta_saved['debug_notes'])}）")
 
-    # --- 區塊一：主力診斷結論（純券商分點口徑，不與投信重複計算） ---
+    # --- 區塊一：主力診斷結論（滾動 60 日純分點口徑 ＋ 綜合籌碼分數） ---
     updated_str = meta_saved.get("last_updated", "")
     latest_trade_date = df_price_full["date"].max()
     time_badge = f"🕒 更新時間：{updated_str}（最新交易日：{latest_trade_date}）" if updated_str else f"🕒 最新交易日：{latest_trade_date}"
 
     st.markdown(
         f'<div style="display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; gap:8px;">'
-        f'  <h4 style="margin:0;">🎯 {stock_title} 主力診斷結論（{period_label}｜已追蹤 {broker_count} 個券商分點）</h4>'
-        f'  <span style="font-size:0.85rem; color:#94a3b8;">{time_badge}</span>'
+        f'  <h4 style="margin:0;">🎯 {stock_title} 主力診斷結論（{period_label}｜追蹤 {broker_count} 分點）</h4>'
+        f'  <span style="font-size:0.84rem; color:#94a3b8;">{time_badge}</span>'
         f'</div>',
         unsafe_allow_html=True,
     )
     if meta_saved.get("github_sync"):
         st.caption(f"雲端資料庫狀態：{meta_saved['github_sync']}")
 
-    c1, c2, c3 = st.columns([2.4, 2, 1.2])
+    conv_score = int(scenario.get("conviction_score", 50))
+    if conv_score >= 70:
+        score_col, score_lbl = "#ef5350", "偏多強勢共振"
+    elif conv_score >= 55:
+        score_col, score_lbl = "#f59e0b", "略偏多觀察"
+    elif conv_score <= 35:
+        score_col, score_lbl = "#26a69a", "偏空／出貨風險"
+    else:
+        score_col, score_lbl = "#94a3b8", "中性多空拉鋸"
+
+    c1, c2, c3, c4 = st.columns([2.25, 2.0, 1.15, 1.1])
     with c1:
         sub_html = "".join([
             f'<div class="card-sub">{line}</div>'
@@ -737,24 +1064,40 @@ if target_stock:
         ])
         st.markdown(f"""
         <div class="summary-card">
-            <div class="card-label">今年以來最大券商分點主力</div>
+            <div class="card-label">近 60 日最大波段分點主力（已濾除隔日沖）</div>
             <div class="card-value">{analysis.get("main_force_html", "N/A")}</div>
             {sub_html}
         </div>
         """, unsafe_allow_html=True)
     with c2:
+        z5 = analysis.get("top3_5d_ctrl_z")
+        flt5 = analysis.get("top3_5d_float_pct")
+        extra_stat_parts = [f"近5日控盤 {analysis.get('top3_5d_ctrl_pct', 0.0):+.1f}%"]
+        if z5 is not None:
+            extra_stat_parts.append(f"Z:{z5:+.1f}σ")
+        if flt5 is not None:
+            extra_stat_parts.append(f"佔股本 {flt5:+.2f}%")
         status_sub_html = (
-            f'<div class="card-sub">{analysis["status_sub"]}</div>'
-            if analysis.get("status_sub") else ""
+            f'<div class="card-sub">{analysis.get("status_sub", "")}<br>'
+            f'<span style="color:#cbd5e1;">{" ｜ ".join(extra_stat_parts)}</span></div>'
         )
         st.markdown(f"""
         <div class="summary-card">
-            <div class="card-label">區間內今年三大分點主力狀態</div>
+            <div class="card-label">區間內三大波段主力狀態</div>
             <div class="card-value">{analysis.get("status_html", "N/A")}</div>
             {status_sub_html}
         </div>
         """, unsafe_allow_html=True)
     with c3:
+        st.markdown(f"""
+        <div class="summary-card">
+            <div class="card-label">綜合籌碼健康分數</div>
+            <div class="score-val" style="color:{score_col};">{conv_score} <span style="font-size:0.82rem; font-weight:500; color:#94a3b8;">/ 100</span></div>
+            <div class="score-bar-bg"><div class="score-bar-fill" style="width:{conv_score}%; background:{score_col};"></div></div>
+            <div class="card-sub">{score_lbl}（{scenario.get("sub_type", "")}）</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with c4:
         st.markdown(f"""
         <div class="summary-card">
             <div class="card-label">最新收盤價與區間漲跌</div>
@@ -763,16 +1106,16 @@ if target_stock:
         </div>
         """, unsafe_allow_html=True)
 
-    # --- 區塊一之二：近 5 日價量籌碼背離警報（緊接三大分點主力卡片下方、投信獨立追蹤上方） ---
+    # --- 區塊一之二：近 5 日價量籌碼背離警報（含金額防呆、Z-Score 與融資／借券驗證） ---
     div_alert = analysis.get("divergence_alert")
     if div_alert:
         css_cls = "div-alert-bull" if div_alert["type"] == "bull" else "div-alert-bear"
         div_tip_text = (
-            "觸發條件：近 5 日股價跌幅 ≥ 3%，且今年前三大券商分點主力近 5 日合計淨買超控盤率 ≥ +2.0%。"
-            "代表大資金趁急跌有效承接，常為低檔換手或止跌轉折的前兆。"
+            "觸發條件：近 5 日股價跌幅 ≥ 3%，且近 60 日三大波段主力近 5 日淨買超 ≥ 500 萬元、"
+            "控盤率 ≥ +2.0%（或 Z-Score ≥ +1.5σ）。若融資同步減少，常為高勝率低檔轉折前兆。"
             if div_alert["type"] == "bull" else
-            "觸發條件：近 5 日股價漲幅 ≥ 3%，且今年前三大券商分點主力近 5 日合計淨賣超控盤率 ≤ -2.0%。"
-            "代表大資金趁反彈有效出貨，需慎防假突破或拉高倒貨風險。"
+            "觸發條件：近 5 日股價漲幅 ≥ 3%，且近 60 日三大波段主力近 5 日淨賣超 ≥ 500 萬元、"
+            "控盤率 ≤ -2.0%（或 Z-Score ≤ -1.5σ）。若借券賣出同步增加，須嚴防假突破。"
         )
         st.markdown(
             f'<div class="{css_cls}">'
@@ -783,19 +1126,29 @@ if target_stock:
             unsafe_allow_html=True,
         )
 
-    # --- 區塊一之三：投信獨立追蹤列（身分維度獨立顯示，不與券商分點混算） ---
+    # --- 區塊一之三：投信獨立追蹤列（含持股水位與階段評估，已納入劇本共振層） ---
     trust_info = analysis.get("trust_info")
     if trust_info:
         trust_tip = (
-            "投信下單分散於元大、富邦、國泰、玉山等各大本土券商法人專戶中，若與券商分點並列加總會產生重複計算。"
-            "系統已將投信獨立於此列呈現，不計入下方券商分點排行與三大分點主力合計。"
+            "投信下單分散於各大本土券商法人專戶中，系統不將其與分點張數重複加總，"
+            "但已正式將投信連買／連賣與持股比率（佔股本 %）納入五大劇本的共振評分層。"
+            "持股 0.5%～5% 常為初升認養甜蜜期；10% 以上須留意季底結帳賣壓。"
         )
+        phase = trust_info.get("phase") or {}
+        tier_lvl = phase.get("tier_level", "info")
+        tier_col = "#ef5350" if tier_lvl == "bull" else ("#fbbf24" if tier_lvl == "warn" else "#94a3b8")
+        phase_tag = (
+            f'<span class="trust-tag" style="color:{tier_col}; border:1px solid {tier_col}55;">'
+            f'{phase.get("tier_label", "")}｜{phase.get("momentum", "")}</span>'
+            if phase else ""
+        )
+
         cost_seg = ""
         if trust_info.get("cost", 0) > 0 and trust_info.get("pnl_pct") is not None:
             p_val = trust_info["pnl_pct"]
             p_col = "#ef5350" if p_val > 0 else ("#26a69a" if p_val < 0 else "#cbd5e1")
             cost_seg = (
-                f'<span class="trust-item"><span class="trust-lbl">庫存均價</span>'
+                f'<span class="trust-item"><span class="trust-lbl">60日均價</span>'
                 f'<b style="color:#ffb74d;">{trust_info["cost"]:,.2f} 元</b> '
                 f'(<span style="color:{p_col}; font-weight:700;">{p_val:+.2f}%</span>)</span>'
             )
@@ -805,13 +1158,13 @@ if target_stock:
             f'  <div class="trust-title">'
             f'    🏦 投信獨立追蹤'
             f'    <span class="tip-wrap tip-right">ⓘ<span class="tip-box">{trust_tip}</span></span>'
-            f'    <span class="trust-tag">獨立法人維度｜不與分點重複加總</span>'
+            f'    {phase_tag}'
             f'  </div>'
             f'  <div class="trust-metrics">'
-            f'    <span class="trust-item"><span class="trust-lbl">今年累計</span>{_span_num(trust_info["ytd"])}</span>'
-            f'    <span class="trust-item"><span class="trust-lbl">本區間</span>{_span_num(trust_info["period"])}</span>'
+            f'    <span class="trust-item"><span class="trust-lbl">今年</span>{_span_num(trust_info["ytd"])}</span>'
+            f'    <span class="trust-item"><span class="trust-lbl">區間</span>{_span_num(trust_info["period"])}</span>'
             f'    <span class="trust-item"><span class="trust-lbl">今日</span>{_span_num(trust_info["d1"])}</span>'
-            f'    <span class="trust-item"><span class="trust-lbl">近 10 日</span>{_span_num(trust_info["d10"])}</span>'
+            f'    <span class="trust-item"><span class="trust-lbl">近 5 日</span>{_span_num(trust_info.get("d5", 0))}</span>'
             f'    <span class="trust-item"><span class="trust-lbl">近 20 日</span>{_span_num(trust_info["d20"])}</span>'
             f'    <span class="trust-item">{_span_streak(trust_info["streak"])}</span>'
             f'    <span class="trust-item"><span class="trust-lbl">控盤率</span>{_span_ctrl(trust_info["ctrl_pct"])}</span>'
@@ -821,23 +1174,47 @@ if target_stock:
             unsafe_allow_html=True,
         )
 
-    # --- 區塊一點五：全市場前 15 大籌碼集中度橫條 ＋ 五大劇本自動亮燈提示 ---
+    # --- 區塊一之四：四大輔助籌碼儀表板（買賣家數差、融資券、借券賣出、TDCC 集保大戶） ---
+    st.markdown(
+        _render_aux_dashboard(
+            analysis.get("broker_diff_info"),
+            analysis.get("margin_info"),
+            analysis.get("sbl_info"),
+            analysis.get("tdcc_info"),
+        ),
+        unsafe_allow_html=True,
+    )
+
+    # --- 區塊一點五：全市場前 15 大籌碼集中度（含 Z-Score）＋ 五大劇本 ＋ 六大共振徽章 ---
     conc_tip = (
         "計算公式：（該區間全市場前 15 大買超分點總張數 － 前 15 大賣超分點總張數）÷ 區間總成交量 × 100%。"
-        "正值代表籌碼向大戶集中（偏多），負值代表籌碼流向散戶（發散）。此數據直接取自 MoneyDJ 總表，涵蓋全市場前 15 大分點。"
+        "右側 Z 值為相對於過去 60 個交易日的標準差倍數（Z ≥ +1.5σ 代表該股顯著異常吸籌，可自動適應大型權值股與高當沖股特性）。"
     )
-    scenario = analysis.get("scenario", {})
     sc_type = scenario.get("type", "neutral")
     sc_cls = "scenario-bull" if sc_type == "bull" else ("scenario-bear" if sc_type == "bear" else "scenario-neutral")
     sc_action_html = f'<br><span style="color:#cbd5e1;">💡 操作應對：{scenario["action"]}</span>' if scenario.get("action") else ""
+
+    badges_html = ""
+    sc_badges = scenario.get("badges") or []
+    if sc_badges:
+        pill_list = []
+        for b in sc_badges:
+            lvl = b.get("level", "info")
+            cls_map = {"bull": "res-bull", "bear": "res-bear", "warn": "res-warn", "info": "res-info"}
+            b_cls = cls_map.get(lvl, "res-info")
+            detail_esc = str(b.get("detail", "")).replace('"', "&quot;")
+            pill_list.append(
+                f'<span class="res-badge {b_cls}" title="{detail_esc}">{b.get("label", "")}</span>'
+            )
+        badges_html = f'<div class="badge-row">{"".join(pill_list)}</div>'
 
     st.markdown(
         f'<div class="conc-panel">'
         f'  <div class="conc-header">'
         f'    <div class="conc-title">'
-        f'      📊 全市場前 15 大籌碼集中度'
+        f'      📊 全市場前 15 大籌碼集中度（含 60 日滾動 Z-Score）'
         f'      <span class="tip-wrap tip-right">ⓘ<span class="tip-box">{conc_tip}</span></span>'
-        f'      <span class="conc-sub-tag">短中線全市場視角，不限今年主力名單</span>'
+        f'      <span class="conc-sub-tag">短中線全市場視角 ＋ 自動校準股性</span>'
         f'    </div>'
         f'  </div>'
         f'  <div class="conc-grid">'
@@ -849,14 +1226,15 @@ if target_stock:
         f'    <b>{scenario.get("title", "")}</b><br>'
         f'    {scenario.get("desc", "")}'
         f'    {sc_action_html}'
+        f'    {badges_html}'
         f'  </div>'
         f'</div>',
         unsafe_allow_html=True,
     )
 
-    # --- 可收合抽屜：價 × 點 × 面 三維度交叉判讀矩陣 ---
+    # --- 可收合抽屜：價 × 點 × 面 × 共振 交叉判讀矩陣 ---
     matched_id = scenario.get("id", 0)
-    with st.expander("📖 價 × 點 × 面 交叉判讀矩陣（點擊展開 5 大實戰劇本與操作應對）", expanded=False):
+    with st.expander("📖 價 × 點 × 面 × 共振 交叉判讀矩陣（點擊展開 5 大實戰劇本與操作應對）", expanded=False):
         m_rows = []
         for item in SCENARIO_MATRIX:
             is_match = (item["id"] == matched_id)
@@ -869,8 +1247,8 @@ if target_stock:
                 f'<tr class="{row_cls}">'
                 f'  <td style="width:17%; font-weight:700;">{item["name"]}{badge}</td>'
                 f'  <td style="width:18%;">{item.get("price_cond", "")}</td>'
-                f'  <td style="width:16%;">{item.get("main_cond", "")}</td>'
-                f'  <td style="width:21%;">{item.get("conc_cond", "")}</td>'
+                f'  <td style="width:17%;">{item.get("main_cond", "")}</td>'
+                f'  <td style="width:20%;">{item.get("conc_cond", "")}</td>'
                 f'  <td style="width:28%;">{item.get("action", "")}</td>'
                 f'</tr>'
             )
@@ -880,8 +1258,8 @@ if target_stock:
                 <tr>
                     <th>盤面情境劇本</th>
                     <th>股價與均線（價）</th>
-                    <th>三大分點主力（點）</th>
-                    <th>5/10/20日集中度（面）</th>
+                    <th>60日三大波段主力（點）</th>
+                    <th>集中度與共振驗證（面）</th>
                     <th>實戰解讀與操作應對</th>
                 </tr>
             </thead>
@@ -889,24 +1267,30 @@ if target_stock:
         </table>
         """, unsafe_allow_html=True)
 
-    # --- 前三大券商分點主力明細（含本區間合計、整體控盤率與 ⓘ 解讀標準） ---
+    # --- 前三大波段券商分點主力明細（滾動 60 日，含贏家／週轉率資訊） ---
     st.write("")
     top3_names = analysis.get("top3_names", [])
     if top3_names:
         top3_net_val = analysis.get("top3_period_net", 0)
         top3_ctrl_val = analysis.get("top3_period_ctrl_pct", 0.0)
         group_ctrl_tip = (
-            "<b>控盤率涵義：</b>三大分點主力本區間合計淨買賣超張數 ÷ 本區間總成交量，用來衡量這三家大主力對本段走勢的定價主導權。<br><br>"
-            "<b>實戰解讀標準：</b><br>"
-            "• <b>絕對值 &lt; 2%：</b>影響力一般，屬正常換手或跟單。<br>"
-            "• <b>絕對值 2% ～ 5%：</b>具備明顯影響力，主力吃貨／出貨態度積極。<br>"
-            "• <b>絕對值 &gt; 5% ～ 10%：</b>高度控盤，代表這段區間的股價走勢幾乎由這批主力主導。"
+            "<b>波段主力定義：</b>改採近 60 個交易日淨買超前 3 大純券商分點，並透過週轉係數與隔日反手率自動過濾高頻隔日沖分點。<br><br>"
+            "<b>控盤率實戰標準：</b><br>"
+            "• <b>絕對值 &lt; 2%：</b>影響力一般，屬正常換手。<br>"
+            "• <b>絕對值 2% ～ 5%：</b>態度積極，或 Z-Score 達 ±1.5σ 以上。<br>"
+            "• <b>絕對值 &gt; 5%：</b>高度控盤，波段走勢幾乎由這批主力主導。"
+        )
+        cost_inline = (
+            f' <span style="color:#64748b; margin:0 6px;">｜</span>'
+            f'<span style="color:#cbd5e1;">合力成本：</span><b style="color:#ffb74d;">{analysis["top3_cost"]:,.2f} 元</b>'
+            if analysis.get("top3_cost", 0) > 0 else ""
         )
         st.markdown(
             f'<div class="top3-header-line">'
-            f'  <span>• 今年前三大券商分點主力（<b>{", ".join(top3_names)}</b>）本區間合計：{_span_num(top3_net_val)}</span>'
+            f'  <span>• 近 60 日三大波段主力（<b>{", ".join(top3_names)}</b>）本區間合計：{_span_num(top3_net_val)}</span>'
             f'  <span style="color:#64748b; margin:0 6px;">｜</span>'
-            f'  <span style="color:#cbd5e1;">控盤率：</span>{_span_ctrl(top3_ctrl_val)}'
+            f'  <span style="color:#cbd5e1;">區間控盤率：</span>{_span_ctrl(top3_ctrl_val)}'
+            f'  {cost_inline}'
             f'  <span class="tip-wrap tip-right">ⓘ<span class="tip-box">{group_ctrl_tip}</span></span>'
             f'</div>',
             unsafe_allow_html=True,
@@ -916,14 +1300,17 @@ if target_stock:
     if top3_rows:
         ctrl_tip_text = (
             "計算公式：該分點本區間淨買賣超張數 ÷ 本區間總成交量。"
-            "正值代表買盤主導、負值代表賣壓主導；單一分點絕對值超過 3%～5% 通常代表該主力對這段走勢具備高度控盤影響力。"
+            "滑鼠移到分點名稱可查看該分點的今年累計張數、週轉係數與歷史 20 日前瞻勝率。"
         )
         rows_html = []
         for r in top3_rows:
+            tag_html = "".join([f'<span class="mf-tag-pill">{t}</span>' for t in (r.get("tags") or [])[:1]])
+            wr_txt = f"20日勝率 {r['win_rate']:.1f}%（均報 {r['avg_fwd_ret']:+.1f}%）" if r.get("win_rate") is not None else "勝率樣本累積中"
+            name_title = f"今年累計 {r['ytd']:+,} 張｜60日週轉係數 {r.get('churn_ratio', 0):.1f}x｜{wr_txt}"
             rows_html.append(
                 f'<div class="mf-row">'
-                f'  <div class="mf-name">◦ {r["name"]}</div>'
-                f'  <div class="mf-cell"><span class="mf-lbl">今年累計</span>{_span_num(r["ytd"])}</div>'
+                f'  <div class="mf-name" title="{name_title}">◦ {r["name"]} {tag_html}</div>'
+                f'  <div class="mf-cell"><span class="mf-lbl">近 60 日</span>{_span_num(r["net_60d"])}</div>'
                 f'  <div class="mf-cell"><span class="mf-lbl">本區間</span>{_span_num(r["period"])}</div>'
                 f'  <div class="mf-cell"><span class="mf-lbl">今日</span>{_span_num(r["d1"])}</div>'
                 f'  <div class="mf-cell"><span class="mf-lbl">近 10 日</span>{_span_num(r["d10"])}</div>'
@@ -940,107 +1327,223 @@ if target_stock:
     if analysis.get("remark_md"):
         st.markdown(analysis["remark_md"])
 
-    # --- 四欄並排排行榜（純券商分點口徑，不含投信）：今日買賣超前 5 大（左） ＋ 今年累計買賣超前 5 大（右） ---
-    top_buyers = analysis.get("top_buyers", {})
-    top_sellers = analysis.get("top_sellers", {})
+    # --- 聰明錢雷達：🏆 高勝率贏家分點 ＋ 🚀 近 10 日新崛起波段分點 ---
+    winner_brokers = analysis.get("winner_brokers") or []
+    recent_10d_rising = analysis.get("recent_10d_rising") or {}
+    if winner_brokers or recent_10d_rising:
+        w_rows = "".join([
+            f'<tr>'
+            f'  <td><b>🏆 {w["name"]}</b></td>'
+            f'  <td style="text-align:right; color:#fbbf24; font-weight:700;">{w["win_rate"]:.0f}% ({w["buy_signals"]}次)</td>'
+            f'  <td style="text-align:right; color:#ef5350;">{w["avg_fwd_ret"]:+.1f}%</td>'
+            f'  <td style="text-align:right;">{_span_num(w["net_5d"], "")}</td>'
+            f'  <td style="text-align:right;">{_span_num(w["net_60d"], "")}</td>'
+            f'</tr>'
+            for w in winner_brokers
+        ]) or '<tr><td colspan="5" style="color:#94a3b8;">目前歷史樣本尚無同時滿足 20 日勝率 ≥ 60% 且均報 ≥ +3% 之分點</td></tr>'
+
+        r10_rows = "".join([
+            f'<tr>'
+            f'  <td style="width:24px; color:#94a3b8;">#{i+1}</td>'
+            f'  <td><b>{k}</b>'
+            f'{" 🏆" if any("贏家" in t for t in broker_tags.get(k, [])) else ""}</td>'
+            f'  <td style="text-align:right; color:#ef5350; font-weight:700;">{v:+,} 張</td>'
+            f'</tr>'
+            for i, (k, v) in enumerate(recent_10d_rising.items())
+        ]) or '<tr><td colspan="3" style="color:#94a3b8;">近 10 日無明顯波段新進買超分點</td></tr>'
+
+        st.markdown(
+            f'<div class="smart-grid">'
+            f'  <div class="smart-panel">'
+            f'    <div class="smart-title"><span>🏆 歷史高勝率「贏家分點」雷達（買後 20 日回測）</span><span style="font-size:0.74rem; color:#94a3b8;">已排除隔日沖</span></div>'
+            f'    <table class="rank-table">'
+            f'      <thead><tr><th>分點名稱</th><th style="text-align:right;">20日勝率</th><th style="text-align:right;">均報酬</th><th style="text-align:right;">近5日(張)</th><th style="text-align:right;">近60日(張)</th></tr></thead>'
+            f'      <tbody>{w_rows}</tbody>'
+            f'    </table>'
+            f'  </div>'
+            f'  <div class="smart-panel">'
+            f'    <div class="smart-title"><span>🚀 近 10 日新崛起波段分點（換手接棒追蹤）</span><span style="font-size:0.74rem; color:#94a3b8;">已排除隔日沖</span></div>'
+            f'    <table class="rank-table">'
+            f'      <thead><tr><th colspan="3">近 10 日淨買超前 5 大波段分點</th></tr></thead>'
+            f'      <tbody>{r10_rows}</tbody>'
+            f'    </table>'
+            f'  </div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    # --- 四欄並排排行榜（支援切換近 60 日波段 vs 今年累計，並標註 🏆／⚡） ---
+    top_buyers_60d = analysis.get("top_buyers", {})
+    top_sellers_60d = analysis.get("top_sellers", {})
+    ytd_buyers = analysis.get("ytd_top_buyers", {})
+    ytd_sellers = analysis.get("ytd_top_sellers", {})
     today_buyers = analysis.get("today_buyers", {})
     today_sellers = analysis.get("today_sellers", {})
 
-    if top_buyers or top_sellers or today_buyers or today_sellers:
+    if top_buyers_60d or top_sellers_60d or today_buyers or today_sellers:
         st.write("")
+        col_rank_hdr, col_rank_mode = st.columns([3.5, 1.5])
+        with col_rank_hdr:
+            st.caption("分點排行榜（🏆＝歷史贏家分點｜⚡＝高頻隔日沖熱點）")
+        with col_rank_mode:
+            rank_mode = st.radio(
+                "右側兩欄口徑",
+                options=["近 60 日波段", "今年累計"],
+                index=0,
+                horizontal=True,
+                label_visibility="collapsed",
+            )
+
+        right_buyers = top_buyers_60d if rank_mode == "近 60 日波段" else ytd_buyers
+        right_sellers = top_sellers_60d if rank_mode == "近 60 日波段" else ytd_sellers
+        right_lbl = "近 60 日" if rank_mode == "近 60 日波段" else "今年"
+
         short_dt = latest_trade_date[5:] if len(latest_trade_date) >= 10 else latest_trade_date
         col_tb, col_ts, col_yb, col_ys = st.columns(4)
         with col_tb:
             st.markdown(
-                _render_rank_table(f"🔴 今日分點買超前 5 大（{short_dt}）", today_buyers, "#ef5350", "今日無淨買超分點"),
+                _render_rank_table(f"🔴 今日分點買超前 5 大（{short_dt}）", today_buyers, "#ef5350", "今日無淨買超分點", broker_tags),
                 unsafe_allow_html=True,
             )
         with col_ts:
             st.markdown(
-                _render_rank_table(f"🟢 今日分點賣超前 5 大（{short_dt}）", today_sellers, "#26a69a", "今日無淨賣超分點"),
+                _render_rank_table(f"🟢 今日分點賣超前 5 大（{short_dt}）", today_sellers, "#26a69a", "今日無淨賣超分點", broker_tags),
                 unsafe_allow_html=True,
             )
         with col_yb:
             st.markdown(
-                _render_rank_table("🔴 今年分點買超前 5 大", top_buyers, "#ef5350", "今年無淨買超分點"),
+                _render_rank_table(f"🔴 {right_lbl}分點買超前 5 大", right_buyers, "#ef5350", f"{right_lbl}無淨買超分點", broker_tags),
                 unsafe_allow_html=True,
             )
         with col_ys:
             st.markdown(
-                _render_rank_table("🟢 今年分點賣超前 5 大", top_sellers, "#26a69a", "今年無淨賣超分點"),
+                _render_rank_table(f"🟢 {right_lbl}分點賣超前 5 大", right_sellers, "#26a69a", f"{right_lbl}無淨賣超分點", broker_tags),
                 unsafe_allow_html=True,
             )
 
     st.divider()
 
-    # --- 區塊二：完整年度股價、10MA/20MA、主力成本線 vs. 買賣超長條圖與總和統計張數折線 ---
+    # --- 區塊二：股價、10/20MA、VWAP 主力成本線 vs. 分點買賣超 ＋ 融資／借券副圖 ---
     chart_title_suffix = f"（標示區間：{period_label}）" if range_type != "全部" else f"（{period_label}）"
-    st.markdown(f"#### 📉 {stock_title} 股價、10/20MA 與主力成本線 vs. 買賣超統計{chart_title_suffix}")
+    st.markdown(f"#### 📉 {stock_title} 股價、10/20MA 與主力 VWAP 成本線 vs. 籌碼流向{chart_title_suffix}")
 
     available_brokers = [c for c in df_chips_full.columns if c != "date"]
-    default_selected = [top3_names[0]] if top3_names else available_brokers[:1]
+    default_selected = [n for n in top3_names if n in available_brokers] or available_brokers[:1]
+    winner_names = [w["name"] for w in winner_brokers if w["name"] in available_brokers]
 
     ms_key = f"ms_{target_stock}"
     if ms_key not in st.session_state:
         st.session_state[ms_key] = default_selected
+    else:
+        cleaned_sel = [b for b in st.session_state[ms_key] if b in available_brokers]
+        if cleaned_sel != st.session_state[ms_key]:
+            st.session_state[ms_key] = cleaned_sel or default_selected
 
-    col_sel, col_btn, col_ma = st.columns([3.8, 1.2, 1.0])
-    with col_btn:
+    col_sel, col_btn1, col_btn2 = st.columns([3.8, 1.15, 1.15])
+    with col_btn1:
         st.write("")
         st.write("")
-        if st.button("⚡ 帶入前三大分點", width="stretch", disabled=not bool(top3_names)):
+        if st.button("⚡ 三大波段主力", width="stretch", disabled=not bool(top3_names)):
             st.session_state[ms_key] = [n for n in top3_names if n in available_brokers]
             st.rerun()
-    with col_ma:
+    with col_btn2:
         st.write("")
         st.write("")
-        show_ma = st.checkbox("顯示 10/20MA", value=True)
+        if st.button("🏆 帶入贏家分點", width="stretch", disabled=not bool(winner_names)):
+            st.session_state[ms_key] = winner_names[:3]
+            st.rerun()
     with col_sel:
         selected_brokers = st.multiselect(
-            "選擇要觀察的券商分點或「投信」（多選時自動加總計算合力成本；若欲觀察投信建議單獨勾選）：",
+            "選擇要觀察的券商分點或「投信」（預設為近 60 日三大波段主力合力；觀察投信建議單獨勾選）：",
             options=available_brokers,
-            key=ms_key
+            key=ms_key,
+        )
+
+    c_opt1, c_opt2, c_opt3 = st.columns([1.1, 1.4, 2.0])
+    with c_opt1:
+        show_ma = st.checkbox("顯示 10/20MA", value=True)
+    with c_opt2:
+        has_aux_series = (
+            df_aux_full is not None
+            and (
+                ("margin_bal" in df_aux_full.columns and df_aux_full["margin_bal"].notna().any())
+                or ("sbl_bal" in df_aux_full.columns and df_aux_full["sbl_bal"].notna().any())
+            )
+        )
+        show_aux_chart = st.checkbox(
+            "顯示融資／借券副圖",
+            value=bool(has_aux_series),
+            disabled=not bool(has_aux_series),
+        )
+    with c_opt3:
+        cost_basis = st.radio(
+            "成本線計算基準",
+            options=["近 60 日波段成本", "今年累計成本"],
+            index=0,
+            horizontal=True,
+            label_visibility="collapsed",
         )
 
     if not selected_brokers:
         st.warning("請至少選擇一個券商分點或「投信」來繪製圖表。")
     else:
-        price_cols = [c for c in ["date", "open", "high", "low", "close"] if c in df_price_full.columns]
-        df_plot = df_price_full[price_cols].merge(df_chips_full, on="date", how="left").fillna(0)
+        price_cols = [c for c in ["date", "open", "high", "low", "close", "vwap"] if c in df_price_full.columns]
+        df_plot = df_price_full[price_cols].merge(df_chips_full, on="date", how="left").fillna(0.0)
+        if df_aux_full is not None and not df_aux_full.empty:
+            aux_cols = [c for c in ["date", "margin_bal", "sbl_bal"] if c in df_aux_full.columns]
+            if len(aux_cols) > 1:
+                df_plot = df_plot.merge(df_aux_full[aux_cols], on="date", how="left")
+
         df_plot["ma10"] = df_plot["close"].rolling(10).mean()
         df_plot["ma20"] = df_plot["close"].rolling(20).mean()
 
         daily_net = df_plot[selected_brokers].sum(axis=1)
         cum_total = daily_net.cumsum()
-        cost_series, latest_cost, latest_inv = calculate_main_force_cost(df_plot, daily_net)
+        win_days = STRATEGY_PARAMS["wave_lookback_days"] if cost_basis == "近 60 日波段成本" else None
+        cost_series, latest_cost, latest_inv = calculate_main_force_cost(df_plot, daily_net, window_days=win_days)
 
         target_label = selected_brokers[0] if len(selected_brokers) == 1 else f"所選 {len(selected_brokers)} 個分點合力"
         latest_full_close = float(df_plot.iloc[-1]["close"])
+        cost_mode_tag = "近 60 日 VWAP 成本" if win_days else "今年累計 VWAP 成本"
+
         if latest_cost > 0 and latest_inv > 0:
-            sel_pnl = (latest_full_close - latest_cost) / latest_cost * 100
+            sel_pnl = (latest_full_close - latest_cost) / latest_cost * 100.0
             pnl_color = "#ef5350" if sel_pnl > 0 else ("#26a69a" if sel_pnl < 0 else "#cbd5e1")
             st.markdown(
-                f'<div class="cost-banner">💰 <b>{target_label}</b> 目前庫存均價（主力成本）：'
+                f'<div class="cost-banner">💰 <b>{target_label}</b> {cost_mode_tag}：'
                 f'<b style="color:#ffb74d;">{latest_cost:,.2f} 元</b> ｜ '
-                f'今年剩餘庫存：<b>{int(round(latest_inv)):,} 張</b> ｜ '
+                f'區間剩餘庫存：<b>{int(round(latest_inv)):,} 張</b> ｜ '
                 f'對照最新收盤價 ({latest_full_close:.2f} 元) 帳面損益：'
                 f'<b style="color:{pnl_color};">{sel_pnl:+.2f}%</b></div>',
                 unsafe_allow_html=True,
             )
         else:
             st.markdown(
-                f'<div class="cost-banner">💰 <b>{target_label}</b> 目前剩餘庫存已歸零（無持有庫存，暫無主力成本均價）</div>',
+                f'<div class="cost-banner">💰 <b>{target_label}</b> 在「{cost_basis}」基準下剩餘庫存已歸零（無持有庫存）</div>',
                 unsafe_allow_html=True,
             )
 
-        fig = make_subplots(
-            rows=2,
-            cols=1,
-            shared_xaxes=True,
-            vertical_spacing=0.06,
-            row_heights=[0.52, 0.48],
-            specs=[[{"secondary_y": False}], [{"secondary_y": True}]]
-        )
+        use_3rows = bool(show_aux_chart and has_aux_series)
+        if use_3rows:
+            fig = make_subplots(
+                rows=3,
+                cols=1,
+                shared_xaxes=True,
+                vertical_spacing=0.05,
+                row_heights=[0.44, 0.34, 0.22],
+                specs=[[{"secondary_y": False}], [{"secondary_y": True}], [{"secondary_y": True}]],
+            )
+            chart_height = 760
+        else:
+            fig = make_subplots(
+                rows=2,
+                cols=1,
+                shared_xaxes=True,
+                vertical_spacing=0.06,
+                row_heights=[0.52, 0.48],
+                specs=[[{"secondary_y": False}], [{"secondary_y": True}]],
+            )
+            chart_height = 640
 
         # 上層：10MA 與 20MA 均線
         if show_ma:
@@ -1050,9 +1553,9 @@ if target_stock:
                     y=df_plot["ma10"],
                     name="10MA",
                     line=dict(color="rgba(56, 189, 248, 0.78)", width=1.3),
-                    hovertemplate="%{y:,.2f} 元<extra>10MA</extra>"
+                    hovertemplate="%{y:,.2f} 元<extra>10MA</extra>",
                 ),
-                row=1, col=1, secondary_y=False
+                row=1, col=1, secondary_y=False,
             )
             fig.add_trace(
                 go.Scatter(
@@ -1060,9 +1563,9 @@ if target_stock:
                     y=df_plot["ma20"],
                     name="20MA",
                     line=dict(color="rgba(192, 132, 252, 0.78)", width=1.3),
-                    hovertemplate="%{y:,.2f} 元<extra>20MA</extra>"
+                    hovertemplate="%{y:,.2f} 元<extra>20MA</extra>",
                 ),
-                row=1, col=1, secondary_y=False
+                row=1, col=1, secondary_y=False,
             )
 
         # 上層：主力成本線（亮橘虛線）
@@ -1074,9 +1577,9 @@ if target_stock:
                     name=f"{target_label} 成本線",
                     line=dict(color="#FF9100", width=2.2, dash="dash"),
                     connectgaps=False,
-                    hovertemplate="%{y:,.2f} 元<extra>主力成本均價</extra>"
+                    hovertemplate="%{y:,.2f} 元<extra>主力成本均價</extra>",
                 ),
-                row=1, col=1, secondary_y=False
+                row=1, col=1, secondary_y=False,
             )
 
         # 上層：收盤價折線（金黃色粗線置頂）
@@ -1086,15 +1589,14 @@ if target_stock:
                 y=df_plot["close"],
                 name="收盤價 (元)",
                 line=dict(color="#FFD700", width=2.6),
-                hovertemplate="%{y:,.2f} 元<extra>收盤價</extra>"
+                hovertemplate="%{y:,.2f} 元<extra>收盤價</extra>",
             ),
-            row=1, col=1, secondary_y=False
+            row=1, col=1, secondary_y=False,
         )
 
-        # 下層主軸：每日買賣超長條圖（紅買超往上、綠賣超往下）
+        # 中層主軸：每日買賣超長條圖
         bar_colors = ["#ef5350" if v >= 0 else "#26a69a" for v in daily_net]
-        bar_label = f"{selected_brokers[0]} 每日買賣超" if len(selected_brokers) == 1 else f"所選({len(selected_brokers)}個)總和每日買賣超"
-
+        bar_label = f"{selected_brokers[0]} 每日買賣超" if len(selected_brokers) == 1 else f"所選({len(selected_brokers)}個)合計每日買賣超"
         fig.add_trace(
             go.Bar(
                 x=df_plot["date"],
@@ -1102,23 +1604,52 @@ if target_stock:
                 name=f"{bar_label} (張)",
                 marker_color=bar_colors,
                 opacity=0.85,
-                hovertemplate="%{y:+,.0f} 張<extra>" + bar_label + "</extra>"
+                hovertemplate="%{y:+,.0f} 張<extra>" + bar_label + "</extra>",
             ),
-            row=2, col=1, secondary_y=False
+            row=2, col=1, secondary_y=False,
         )
 
-        # 下層副軸：統一顯示總和統計張數折線（累計買賣超，整數張數顯示）
-        line_label = f"{selected_brokers[0]} 統計張數" if len(selected_brokers) == 1 else f"所選({len(selected_brokers)}個)總和統計張數"
+        # 中層副軸：累計統計張數折線
+        line_label = f"{selected_brokers[0]} 累計張數" if len(selected_brokers) == 1 else f"所選({len(selected_brokers)}個)累計張數"
         fig.add_trace(
             go.Scatter(
                 x=df_plot["date"],
                 y=cum_total,
                 name=f"{line_label} (累計張)",
-                line=dict(color="#00E5FF", width=2.5),
-                hovertemplate="%{y:+,.0f} 張<extra>" + line_label + "</extra>"
+                line=dict(color="#00E5FF", width=2.4),
+                hovertemplate="%{y:+,.0f} 張<extra>" + line_label + "</extra>",
             ),
-            row=2, col=1, secondary_y=True
+            row=2, col=1, secondary_y=True,
         )
+
+        # 下層（選配）：融資餘額 vs 借券賣出餘額
+        if use_3rows:
+            if "margin_bal" in df_plot.columns and df_plot["margin_bal"].notna().any():
+                fig.add_trace(
+                    go.Scatter(
+                        x=df_plot["date"],
+                        y=df_plot["margin_bal"],
+                        name="融資餘額 (張)",
+                        line=dict(color="#f59e0b", width=2.0),
+                        connectgaps=True,
+                        hovertemplate="%{y:,.0f} 張<extra>融資餘額</extra>",
+                    ),
+                    row=3, col=1, secondary_y=False,
+                )
+            if "sbl_bal" in df_plot.columns and df_plot["sbl_bal"].notna().any():
+                fig.add_trace(
+                    go.Scatter(
+                        x=df_plot["date"],
+                        y=df_plot["sbl_bal"],
+                        name="借券賣出餘額 (張)",
+                        line=dict(color="#a78bfa", width=2.0, dash="dot"),
+                        connectgaps=True,
+                        hovertemplate="%{y:,.0f} 張<extra>借券賣出餘額</extra>",
+                    ),
+                    row=3, col=1, secondary_y=True,
+                )
+            fig.update_yaxes(title_text="融資餘額 (張)", row=3, col=1, secondary_y=False, showgrid=True, tickformat=",.0f")
+            fig.update_yaxes(title_text="借券賣出 (張)", row=3, col=1, secondary_y=True, showgrid=False, tickformat=",.0f")
 
         if range_type != "全部":
             if start_filter == end_filter:
@@ -1129,29 +1660,29 @@ if target_stock:
                     line_color="rgba(255, 255, 255, 0.6)",
                     annotation_text=f"統計區間 ({range_type})",
                     annotation_position="top left",
-                    annotation_font_color="#e5e7eb"
+                    annotation_font_color="#e5e7eb",
                 )
             else:
                 fig.add_vrect(
                     x0=start_filter,
                     x1=end_filter,
-                    fillcolor="rgba(255, 255, 255, 0.14)",
+                    fillcolor="rgba(255, 255, 255, 0.12)",
                     line_width=1,
                     line_dash="dash",
                     line_color="rgba(255, 255, 255, 0.45)",
                     annotation_text=f"統計區間 ({range_type})",
                     annotation_position="top left",
-                    annotation_font_color="#e5e7eb"
+                    annotation_font_color="#e5e7eb",
                 )
 
         fig.add_hline(y=0, line_width=1, line_color="rgba(255, 255, 255, 0.25)", row=2, col=1)
 
         fig.update_layout(
-            height=640,
+            height=chart_height,
             template="plotly_dark",
             hovermode="x unified",
-            legend=dict(orientation="h", yanchor="bottom", y=1.06, xanchor="left", x=0),
-            margin=dict(l=20, r=20, t=75, b=20)
+            legend=dict(orientation="h", yanchor="bottom", y=1.04, xanchor="left", x=0),
+            margin=dict(l=20, r=20, t=72, b=20),
         )
         fig.update_yaxes(title_text="股價／均線／成本 (元)", row=1, col=1, showgrid=True)
         fig.update_yaxes(title_text="每日買賣超 (張)", row=2, col=1, secondary_y=False, showgrid=True, zeroline=True, tickformat=",.0f")
