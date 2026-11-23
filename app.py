@@ -29,11 +29,16 @@ st.markdown("""
     border-radius: 10px;
     padding: 14px 16px;
     height: 100%;
+    position: relative;
+    overflow: visible;
 }
 .card-label {
     font-size: 0.83rem;
     color: #9aa4b2;
     margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
 }
 .card-value {
     font-size: 1.1rem;
@@ -84,6 +89,15 @@ st.markdown("""
     font-size: 0.9rem;
     color: #f8fafc;
 }
+.div-alert-warn {
+    background-color: rgba(245, 158, 11, 0.14);
+    border-left: 4px solid #f59e0b;
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin: 10px 0 0 0;
+    font-size: 0.9rem;
+    color: #fef3c7;
+}
 .trust-bar {
     background-color: #181d28;
     border: 1px solid #2f3b52;
@@ -109,11 +123,11 @@ st.markdown("""
 }
 .trust-tag {
     font-size: 0.74rem;
-    color: #94a3b8;
+    color: #cbd5e1;
     background-color: #232a3b;
-    padding: 2px 7px;
+    padding: 2px 8px;
     border-radius: 4px;
-    font-weight: 500;
+    font-weight: 600;
 }
 .trust-metrics {
     display: flex;
@@ -250,6 +264,13 @@ st.markdown("""
     border-radius: 4px;
     background-color: #252d3f;
     font-variant-numeric: tabular-nums;
+}
+.conc-z-pending {
+    font-size: 0.71rem;
+    color: #64748b;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background-color: rgba(100, 116, 139, 0.14);
 }
 .conc-badge {
     font-size: 0.77rem;
@@ -405,7 +426,7 @@ st.markdown("""
     display: inline-flex;
     align-items: center;
     cursor: help;
-    margin-left: 5px;
+    margin-left: 4px;
     color: #94a3b8;
     font-size: 0.85rem;
     font-weight: 400;
@@ -417,21 +438,24 @@ st.markdown("""
     visibility: hidden;
     opacity: 0;
     position: absolute;
-    z-index: 9999;
-    width: 330px;
+    z-index: 99999;
+    width: 340px;
     background-color: #0f172a;
     color: #e2e8f0;
     border: 1px solid #475569;
-    border-radius: 6px;
-    padding: 9px 12px;
-    font-size: 0.8rem;
+    border-radius: 7px;
+    padding: 10px 12px;
+    font-size: 0.79rem;
     font-weight: 400;
     line-height: 1.55;
     white-space: normal;
     text-align: left;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.65);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.72);
     transition: opacity 0.15s ease;
     pointer-events: none;
+}
+.tip-box-wide {
+    width: 420px;
 }
 .tip-wrap:hover .tip-box {
     visibility: visible;
@@ -446,6 +470,35 @@ st.markdown("""
     right: 140%;
     top: 50%;
     transform: translateY(-50%);
+}
+.tip-down .tip-box {
+    left: -10px;
+    top: 145%;
+}
+.tip-down-left .tip-box {
+    right: -14px;
+    top: 145%;
+}
+.tip-mini-tbl {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 6px;
+    font-size: 0.76rem;
+}
+.tip-mini-tbl th {
+    background-color: #1e293b;
+    color: #cbd5e1;
+    padding: 4px 6px;
+    text-align: left;
+    border-bottom: 1px solid #334155;
+    white-space: nowrap;
+}
+.tip-mini-tbl td {
+    padding: 5px 6px;
+    border-bottom: 1px solid #1e293b;
+    color: #e2e8f0;
+    vertical-align: top;
+    line-height: 1.4;
 }
 .cost-banner {
     background-color: #1a2230;
@@ -613,8 +666,10 @@ def _span_ctrl(pct: float) -> str:
     return f'<span style="color:{color}; font-weight:700;">{pct:+.1f}%</span>'
 
 
-def _span_zscore(z_val: float | None) -> str:
+def _span_zscore(z_val: float | None, z_samples: int = 0) -> str:
     if z_val is None:
+        if z_samples > 0:
+            return f'<span class="conc-z-pending" title="需累積滿 15 個交易日同口徑官方集中度快照才會啟用 Z-Score">Z累積 {z_samples}/15日</span>'
         return ""
     if z_val >= STRATEGY_PARAMS["z_bull_min"]:
         col = "#ef5350"
@@ -629,6 +684,7 @@ def _format_conc_card(label: str, info: dict) -> str:
     pct = info.get("pct") if isinstance(info, dict) else None
     net = info.get("net", 0) if isinstance(info, dict) else 0
     z_val = info.get("z_score") if isinstance(info, dict) else None
+    z_samples = int(info.get("z_samples", 0)) if isinstance(info, dict) else 0
 
     if pct is None:
         return (
@@ -659,7 +715,7 @@ def _format_conc_card(label: str, info: dict) -> str:
         f'    <span class="conc-period">{label}（淨額 {net:+,} 張）</span>'
         f'    <div class="conc-val-row">'
         f'      <span class="conc-val" style="color:{color};">{pct:+.2f}%</span>'
-        f'      {_span_zscore(z_val)}'
+        f'      {_span_zscore(z_val, z_samples)}'
         f'    </div>'
         f'  </div>'
         f'  <span class="conc-badge" style="background:{badge_bg}; color:{color};">{badge_txt}</span>'
@@ -1056,6 +1112,30 @@ if target_stock:
     else:
         score_col, score_lbl = "#94a3b8", "中性多空拉鋸"
 
+    # Z-Score 說明浮窗內容（放置於卡片二標題旁）
+    z_tip_html = (
+        "<b>Z（Z-Score 標準分數）意義：</b><br>"
+        "衡量近 5 日控盤力道相對於該股過去 60 個交易日常態的偏離倍數。<br><br>"
+        "• <b>Z = 0：</b>剛好等於過去 60 日的平均水準。<br>"
+        "• <b>-1.0σ ～ +1.0σ：</b>日常正常波動區間（涵蓋約 68% 交易日）。例如近 5 日控盤 +2.3% ｜ Z:+0.7σ，代表雖有買超，但對該股過去 60 天慣性來說只是「稍微偏多一點」，尚未達到暴力吸籌的異常水準。<br>"
+        "• <b>≥ +1.5σ 或 ≤ -1.5σ：</b>統計上的顯著異常區（約最極端的前／後 6.7%），用來幫大型權值股或高當沖股自動校準敏感度。"
+    )
+
+    # 綜合籌碼健康分數說明浮窗內容（放置於卡片三標題旁）
+    score_tip_html = (
+        "<b>綜合籌碼健康分數（0～100 分）</b><br>"
+        "以五大劇本為基準分，結合近 5 日投信、家數差、融資、借券、集保週變動、隔日沖與均線／深套趨勢加減計算：<br>"
+        '<table class="tip-mini-tbl">'
+        '  <thead><tr><th>分數區間</th><th>燈號狀態</th><th>實戰好壞與含義</th></tr></thead>'
+        '  <tbody>'
+        '    <tr><td style="white-space:nowrap;"><b>70 ～ 100 分</b></td><td style="color:#ef5350; font-weight:700; white-space:nowrap;">偏多強勢共振（紅）</td><td><b>極佳。</b>多頭劇本成立且有多項輔助籌碼同步驗證，屬高勝率結構。</td></tr>'
+        '    <tr><td style="white-space:nowrap;"><b>55 ～ 69 分</b></td><td style="color:#f59e0b; font-weight:700; white-space:nowrap;">略偏多觀察（橘）</td><td><b>中上。</b>有偏多訊號或試單條件，但共振尚未齊全（或混有短線雜訊）。</td></tr>'
+        '    <tr><td style="white-space:nowrap;"><b>36 ～ 54 分</b></td><td style="color:#94a3b8; font-weight:700; white-space:nowrap;">中性多空拉鋸（灰）</td><td><b>普通／觀望。</b>多空籌碼互相抵銷，方向不明確。</td></tr>'
+        '    <tr><td style="white-space:nowrap;"><b>0 ～ 35 分</b></td><td style="color:#26a69a; font-weight:700; white-space:nowrap;">偏空／出貨風險（綠）</td><td><b>差／警戒。</b>觸發空方劇本或籌碼嚴重發散，應避開或逢彈減碼。</td></tr>'
+        '  </tbody>'
+        '</table>'
+    )
+
     c1, c2, c3, c4 = st.columns([2.25, 2.0, 1.15, 1.1])
     with c1:
         sub_html = "".join([
@@ -1083,7 +1163,10 @@ if target_stock:
         )
         st.markdown(f"""
         <div class="summary-card">
-            <div class="card-label">區間內三大波段主力狀態</div>
+            <div class="card-label">
+                <span>區間內三大波段主力狀態</span>
+                <span class="tip-wrap tip-down">ⓘ<span class="tip-box">{z_tip_html}</span></span>
+            </div>
             <div class="card-value">{analysis.get("status_html", "N/A")}</div>
             {status_sub_html}
         </div>
@@ -1091,7 +1174,10 @@ if target_stock:
     with c3:
         st.markdown(f"""
         <div class="summary-card">
-            <div class="card-label">綜合籌碼健康分數</div>
+            <div class="card-label">
+                <span>綜合籌碼健康分數</span>
+                <span class="tip-wrap tip-down-left">ⓘ<span class="tip-box tip-box-wide">{score_tip_html}</span></span>
+            </div>
             <div class="score-val" style="color:{score_col};">{conv_score} <span style="font-size:0.82rem; font-weight:500; color:#94a3b8;">/ 100</span></div>
             <div class="score-bar-bg"><div class="score-bar-fill" style="width:{conv_score}%; background:{score_col};"></div></div>
             <div class="card-sub">{score_lbl}（{scenario.get("sub_type", "")}）</div>
@@ -1106,17 +1192,28 @@ if target_stock:
         </div>
         """, unsafe_allow_html=True)
 
-    # --- 區塊一之二：近 5 日價量籌碼背離警報（含金額防呆、Z-Score 與融資／借券驗證） ---
+    # --- 區塊一之二：近 5 日價量籌碼背離警報（含紅／綠／黃防接刀三態樣式） ---
     div_alert = analysis.get("divergence_alert")
     if div_alert:
-        css_cls = "div-alert-bull" if div_alert["type"] == "bull" else "div-alert-bear"
-        div_tip_text = (
-            "觸發條件：近 5 日股價跌幅 ≥ 3%，且近 60 日三大波段主力近 5 日淨買超 ≥ 500 萬元、"
-            "控盤率 ≥ +2.0%（或 Z-Score ≥ +1.5σ）。若融資同步減少，常為高勝率低檔轉折前兆。"
-            if div_alert["type"] == "bull" else
-            "觸發條件：近 5 日股價漲幅 ≥ 3%，且近 60 日三大波段主力近 5 日淨賣超 ≥ 500 萬元、"
-            "控盤率 ≤ -2.0%（或 Z-Score ≤ -1.5σ）。若借券賣出同步增加，須嚴防假突破。"
-        )
+        alert_type = div_alert.get("type", "bull")
+        if alert_type == "bull":
+            css_cls = "div-alert-bull"
+            div_tip_text = (
+                "觸發條件：近 5 日股價跌幅 ≥ 3%，近 60 日三大波段主力近 5 日淨買超 ≥ 500 萬元、"
+                "控盤率 ≥ +2.0%（或 Z ≥ +1.5σ），且全市場 5 日集中度未嚴重發散、投信未連續大賣。"
+            )
+        elif alert_type == "warn":
+            css_cls = "div-alert-warn"
+            div_tip_text = (
+                "防接落刀濾網觸發：三大波段主力雖逆勢買超，但全市場 5 日集中度 ≤ -3% 或投信連賣 ≥ 3 日，"
+                "外圍大資金賣壓仍重，系統已自動降級為黃色警示，提醒勿盲目接刀。"
+            )
+        else:
+            css_cls = "div-alert-bear"
+            div_tip_text = (
+                "觸發條件：近 5 日股價漲幅 ≥ 3%，且近 60 日三大波段主力近 5 日淨賣超 ≥ 500 萬元、"
+                "控盤率 ≤ -2.0%（或 Z ≤ -1.5σ）。若借券賣出同步增加，須嚴防假突破。"
+            )
         st.markdown(
             f'<div class="{css_cls}">'
             f'  <b>{div_alert["title"]}</b>'
@@ -1126,21 +1223,40 @@ if target_stock:
             unsafe_allow_html=True,
         )
 
-    # --- 區塊一之三：投信獨立追蹤列（含持股水位與階段評估，已納入劇本共振層） ---
+    # --- 區塊一之三：投信獨立追蹤列（水位與買賣動向拆為雙膠囊，買紅／賣綠嚴格分色） ---
     trust_info = analysis.get("trust_info")
     if trust_info:
         trust_tip = (
             "投信下單分散於各大本土券商法人專戶中，系統不將其與分點張數重複加總，"
             "但已正式將投信連買／連賣與持股比率（佔股本 %）納入五大劇本的共振評分層。"
-            "持股 0.5%～5% 常為初升認養甜蜜期；10% 以上須留意季底結帳賣壓。"
+            "動向標籤嚴格以買超紅、賣超綠呈現；持股水位 0.5%～5% 且偏買時為初升認養甜蜜期，10% 以上須留意結帳賣壓。"
         )
         phase = trust_info.get("phase") or {}
         tier_lvl = phase.get("tier_level", "info")
-        tier_col = "#ef5350" if tier_lvl == "bull" else ("#fbbf24" if tier_lvl == "warn" else "#94a3b8")
-        phase_tag = (
-            f'<span class="trust-tag" style="color:{tier_col}; border:1px solid {tier_col}55;">'
-            f'{phase.get("tier_label", "")}｜{phase.get("momentum", "")}</span>'
-            if phase else ""
+        mom_lvl = phase.get("momentum_level", "info")
+
+        tier_style_map = {
+            "bull": ("#fca5a5", "rgba(239,83,80,0.14)", "rgba(239,83,80,0.45)"),
+            "warn": ("#fcd34d", "rgba(245,158,11,0.15)", "rgba(245,158,11,0.45)"),
+            "info": ("#cbd5e1", "#232a3b", "#334155"),
+        }
+        mom_style_map = {
+            "bull": ("#ef5350", "rgba(239,83,80,0.16)", "rgba(239,83,80,0.55)"),
+            "bear": ("#26a69a", "rgba(38,166,154,0.16)", "rgba(38,166,154,0.55)"),
+            "info": ("#94a3b8", "#232a3b", "#334155"),
+        }
+        t_col, t_bg, t_bd = tier_style_map.get(tier_lvl, tier_style_map["info"])
+        m_col, m_bg, m_bd = mom_style_map.get(mom_lvl, mom_style_map["info"])
+
+        tier_pill = (
+            f'<span class="trust-tag" style="color:{t_col}; background:{t_bg}; border:1px solid {t_bd};">'
+            f'{phase.get("tier_label", "")}</span>'
+            if phase.get("tier_label") else ""
+        )
+        mom_pill = (
+            f'<span class="trust-tag" style="color:{m_col}; background:{m_bg}; border:1px solid {m_bd};">'
+            f'{phase.get("momentum", "")}</span>'
+            if phase.get("momentum") else ""
         )
 
         cost_seg = ""
@@ -1158,7 +1274,7 @@ if target_stock:
             f'  <div class="trust-title">'
             f'    🏦 投信獨立追蹤'
             f'    <span class="tip-wrap tip-right">ⓘ<span class="tip-box">{trust_tip}</span></span>'
-            f'    {phase_tag}'
+            f'    {tier_pill}{mom_pill}'
             f'  </div>'
             f'  <div class="trust-metrics">'
             f'    <span class="trust-item"><span class="trust-lbl">今年</span>{_span_num(trust_info["ytd"])}</span>'
@@ -1185,10 +1301,10 @@ if target_stock:
         unsafe_allow_html=True,
     )
 
-    # --- 區塊一點五：全市場前 15 大籌碼集中度（含 Z-Score）＋ 五大劇本 ＋ 六大共振徽章 ---
+    # --- 區塊一點五：全市場前 15 大籌碼集中度 ＋ 五大劇本 ＋ 六大共振徽章 ---
     conc_tip = (
         "計算公式：（該區間全市場前 15 大買超分點總張數 － 前 15 大賣超分點總張數）÷ 區間總成交量 × 100%。"
-        "右側 Z 值為相對於過去 60 個交易日的標準差倍數（Z ≥ +1.5σ 代表該股顯著異常吸籌，可自動適應大型權值股與高當沖股特性）。"
+        "為確保統計口徑完全一致，系統每日自動保存官方快照，累積滿 15 個交易日後即啟用 60 日滾動 Z-Score。"
     )
     sc_type = scenario.get("type", "neutral")
     sc_cls = "scenario-bull" if sc_type == "bull" else ("scenario-bear" if sc_type == "bear" else "scenario-neutral")
@@ -1212,9 +1328,9 @@ if target_stock:
         f'<div class="conc-panel">'
         f'  <div class="conc-header">'
         f'    <div class="conc-title">'
-        f'      📊 全市場前 15 大籌碼集中度（含 60 日滾動 Z-Score）'
+        f'      📊 全市場前 15 大籌碼集中度'
         f'      <span class="tip-wrap tip-right">ⓘ<span class="tip-box">{conc_tip}</span></span>'
-        f'      <span class="conc-sub-tag">短中線全市場視角 ＋ 自動校準股性</span>'
+        f'      <span class="conc-sub-tag">短中線全市場視角（純官方口徑）</span>'
         f'    </div>'
         f'  </div>'
         f'  <div class="conc-grid">'
@@ -1274,7 +1390,7 @@ if target_stock:
         top3_net_val = analysis.get("top3_period_net", 0)
         top3_ctrl_val = analysis.get("top3_period_ctrl_pct", 0.0)
         group_ctrl_tip = (
-            "<b>波段主力定義：</b>改採近 60 個交易日淨買超前 3 大純券商分點，並透過週轉係數與隔日反手率自動過濾高頻隔日沖分點。<br><br>"
+            "<b>波段主力定義：</b>採近 60 個交易日淨買超前 3 大純券商分點，並透過週轉係數與隔日反手率自動過濾高頻隔日沖分點。<br><br>"
             "<b>控盤率實戰標準：</b><br>"
             "• <b>絕對值 &lt; 2%：</b>影響力一般，屬正常換手。<br>"
             "• <b>絕對值 2% ～ 5%：</b>態度積極，或 Z-Score 達 ±1.5σ 以上。<br>"
