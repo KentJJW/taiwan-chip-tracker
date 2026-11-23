@@ -92,6 +92,24 @@ st.markdown("""
     font-size: 0.82rem;
     margin-right: 4px;
 }
+.div-alert-bull {
+    background-color: rgba(239, 83, 80, 0.12);
+    border-left: 4px solid #ef5350;
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin: 10px 0 0 0;
+    font-size: 0.9rem;
+    color: #f8fafc;
+}
+.div-alert-bear {
+    background-color: rgba(38, 166, 154, 0.12);
+    border-left: 4px solid #26a69a;
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin: 10px 0 0 0;
+    font-size: 0.9rem;
+    color: #f8fafc;
+}
 .conc-panel {
     background-color: #161a23;
     border: 1px solid #2d3548;
@@ -188,24 +206,6 @@ st.markdown("""
     font-size: 0.85rem;
     color: #cbd5e1;
     line-height: 1.45;
-}
-.div-alert-bull {
-    background-color: rgba(239, 83, 80, 0.12);
-    border-left: 4px solid #ef5350;
-    border-radius: 6px;
-    padding: 10px 14px;
-    margin: 8px 0 4px 0;
-    font-size: 0.9rem;
-    color: #f8fafc;
-}
-.div-alert-bear {
-    background-color: rgba(38, 166, 154, 0.12);
-    border-left: 4px solid #26a69a;
-    border-radius: 6px;
-    padding: 10px 14px;
-    margin: 8px 0 4px 0;
-    font-size: 0.9rem;
-    color: #f8fafc;
 }
 .mf-list {
     margin: 2px 0 8px 22px;
@@ -792,6 +792,26 @@ if target_stock:
             unsafe_allow_html=True,
         )
 
+    # --- 區塊一之三：近 5 日價量籌碼背離警報（三大分點主力轉折雷達，置於集中度上方） ---
+    div_alert = analysis.get("divergence_alert")
+    if div_alert:
+        css_cls = "div-alert-bull" if div_alert["type"] == "bull" else "div-alert-bear"
+        div_tip_text = (
+            "觸發條件：近 5 日股價跌幅 ≥ 3%，且今年前三大券商分點主力近 5 日合計淨買超控盤率 ≥ +2.0%。"
+            "代表大資金趁急跌有效承接，常為低檔換手或止跌轉折的前兆。"
+            if div_alert["type"] == "bull" else
+            "觸發條件：近 5 日股價漲幅 ≥ 3%，且今年前三大券商分點主力近 5 日合計淨賣超控盤率 ≤ -2.0%。"
+            "代表大資金趁反彈有效出貨，需慎防假突破或拉高倒貨風險。"
+        )
+        st.markdown(
+            f'<div class="{css_cls}">'
+            f'  <b>{div_alert["title"]}</b>'
+            f'  <span class="tip-wrap tip-right">ⓘ<span class="tip-box">{div_tip_text}</span></span>'
+            f'  <br>{div_alert["desc"]}'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
     # --- 區塊一點五：全市場前 15 大籌碼集中度橫條 ＋ 五大劇本自動亮燈提示 ---
     conc_tip = (
         "計算公式：（該區間全市場前 15 大買超分點總張數 － 前 15 大賣超分點總張數）÷ 區間總成交量 × 100%。"
@@ -859,26 +879,6 @@ if target_stock:
             <tbody>{"".join(m_rows)}</tbody>
         </table>
         """, unsafe_allow_html=True)
-
-    # --- 近 5 日價量籌碼背離警報 ---
-    div_alert = analysis.get("divergence_alert")
-    if div_alert:
-        css_cls = "div-alert-bull" if div_alert["type"] == "bull" else "div-alert-bear"
-        div_tip_text = (
-            "觸發條件：近 5 日股價跌幅 ≥ 3%，且今年前三大券商分點主力近 5 日合計淨買超控盤率 ≥ +2.0%。"
-            "代表大資金趁急跌有效承接，常為低檔換手或止跌轉折的前兆。"
-            if div_alert["type"] == "bull" else
-            "觸發條件：近 5 日股價漲幅 ≥ 3%，且今年前三大券商分點主力近 5 日合計淨賣超控盤率 ≤ -2.0%。"
-            "代表大資金趁反彈有效出貨，需慎防假突破或拉高倒貨風險。"
-        )
-        st.markdown(
-            f'<div class="{css_cls}">'
-            f'  <b>{div_alert["title"]}</b>'
-            f'  <span class="tip-wrap tip-right">ⓘ<span class="tip-box">{div_tip_text}</span></span>'
-            f'  <br>{div_alert["desc"]}'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
 
     # --- 前三大券商分點主力明細 ---
     st.write("")
