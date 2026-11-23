@@ -1,63 +1,63 @@
 {
-  "main_force_html": "投信（今年 <span style=\"color:#ef5350; font-weight:700;\">+1,116 張</span>）",
+  "main_force_html": "投信（今年 <span style=\"color:#ef5350; font-weight:700;\">+932 張</span>）",
   "main_force_sub_lines": [
-    "今年累計買超 <span style=\"color:#ef5350; font-weight:700;\">+4,112 張</span> ／ 賣超 <span style=\"color:#26a69a; font-weight:700;\">-2,996 張</span>（淨額 <span style=\"color:#ef5350; font-weight:700;\">+1,116 張</span>）",
-    "目前庫存均價：<b style='color:#ffb74d;'>16,066.29 元</b>（帳面損益 <span style=\"color:#26a69a; font-weight:700;\">-51.08%</span>）"
+    "今年累計買超 <span style=\"color:#ef5350; font-weight:700;\">+4,112 張</span> ／ 賣超 <span style=\"color:#26a69a; font-weight:700;\">-3,180 張</span>（淨額 <span style=\"color:#ef5350; font-weight:700;\">+932 張</span>）",
+    "目前庫存均價：<b style='color:#ffb74d;'>16,066.29 元</b>（帳面損益 <span style=\"color:#26a69a; font-weight:700;\">-48.28%</span>）"
   ],
-  "status_html": "🟢 區間內今年三大主力吃貨中（<span style=\"color:#ef5350; font-weight:700;\">+2,097 張</span>）",
+  "status_html": "🟢 區間內今年三大主力吃貨中（<span style=\"color:#ef5350; font-weight:700;\">+1,913 張</span>）",
   "status_sub": "三大主力名單：投信, 台灣摩根士丹利, 新加坡商瑞銀",
   "divergence_alert": null,
   "scenario": {
     "id": 0,
     "type": "neutral",
     "title": "⚪ 當前狀態：籌碼中性整理（尚未觸發五大關鍵劇本）",
-    "desc": "目前三大主力近 5 日淨額 +17 張，全市場 5 日集中度 -3.4%，處於多空均衡或橫盤整理階段。",
-    "action": "持續觀察 5 日集中度是否突破 ±5% 或出現主力連續買賣超表態。"
+    "desc": "收盤價 8,310.00 元（10MA 10,372.00 ／ 20MA 12,504.00），三大主力近 5 日淨額 -73 張（控盤率 -2.6%），全市場 5 日集中度 -0.8%，處於多空均衡或橫盤整理階段。",
+    "action": "持續觀察收盤價與 10MA/20MA 位置、5 日集中度是否突破 ±5% 或三大主力控盤率表態。"
   },
   "top3_names": [
     "投信",
     "台灣摩根士丹利",
     "新加坡商瑞銀"
   ],
-  "top3_header_md": "- 今年前三大主力（**投信, 台灣摩根士丹利, 新加坡商瑞銀**）本區間合計：:red[**+2,097 張**]（近 20 日合計：:red[**+298 張**]）",
+  "top3_header_md": "- 今年前三大主力（**投信, 台灣摩根士丹利, 新加坡商瑞銀**）本區間合計：:red[**+1,913 張**]（近 20 日合計：:red[**+114 張**]）",
   "top3_rows": [
     {
       "name": "投信",
-      "ytd": 1116,
-      "period": 1116,
-      "d1": -37,
-      "d10": -416,
-      "d20": 27,
-      "streak": -5,
-      "ctrl_pct": 1.6
+      "ytd": 932,
+      "period": 932,
+      "d1": -184,
+      "d10": -574,
+      "d20": -157,
+      "streak": -6,
+      "ctrl_pct": 1.3
     },
     {
       "name": "台灣摩根士丹利",
       "ytd": 608,
       "period": 608,
-      "d1": -20,
-      "d10": -41,
+      "d1": 0,
+      "d10": -40,
       "d20": -38,
-      "streak": -2,
+      "streak": 0,
       "ctrl_pct": 0.9
     },
     {
       "name": "新加坡商瑞銀",
       "ytd": 373,
       "period": 373,
-      "d1": 232,
-      "d10": 252,
+      "d1": 0,
+      "d10": 191,
       "d20": 309,
-      "streak": 3,
+      "streak": 0,
       "ctrl_pct": 0.5
     }
   ],
-  "remark_md": "- 💡 備註：本檢視區間買超第一名為 **投信**（:red[**+1,116 張**]） ｜ 賣超第一名為 **港商麥格理**（:green[**-715 張**]）",
+  "remark_md": "- 💡 備註：本檢視區間買超第一名為 **投信**（:red[**+932 張**]） ｜ 賣超第一名為 **港商麥格理**（:green[**-715 張**]）",
   "top_buyers": {
-    "投信": 1116,
+    "投信": 932,
     "台灣摩根士丹利": 608,
     "新加坡商瑞銀": 373,
-    "美商高盛": 248,
+    "美商高盛": 253,
     "凱基-台北": 239
   },
   "top_sellers": {
@@ -65,32 +65,36 @@
     "永豐金-匯立": -446,
     "香港上海匯豐": -415,
     "美林": -342,
-    "國泰證券": -251
+    "國泰證券": -261
+  },
+  "today_buyers": {},
+  "today_sellers": {
+    "投信": -184
   },
   "stock_id": "5274",
   "stock_name": "信驊",
-  "broker_count": 41,
+  "broker_count": 44,
   "concentrations": {
     "d5": {
-      "pct": -3.43,
-      "net": -78,
-      "buy15": 575,
-      "sell15": 653
+      "pct": -0.83,
+      "net": -23,
+      "buy15": 593,
+      "sell15": 616
     },
     "d10": {
-      "pct": -2.44,
-      "net": -130,
-      "buy15": 724,
-      "sell15": 854
+      "pct": -1.68,
+      "net": -88,
+      "buy15": 632,
+      "sell15": 720
     },
     "d20": {
-      "pct": -4.67,
+      "pct": -4.32,
       "net": -418,
       "buy15": 907,
       "sell15": 1325
     }
   },
-  "last_updated": "2026-11-21 10:41",
+  "last_updated": "2026-11-23 17:09",
   "debug_notes": [],
   "github_sync": "✅ 已同步至 GitHub database/"
 }
