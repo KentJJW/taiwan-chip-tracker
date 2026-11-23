@@ -579,7 +579,8 @@ def analyze_main_force(
             "divergence_alert": None,
             "scenario": {"id": 0, "type": "neutral", "title": "⚪ 無資料", "desc": "", "action": ""},
             "top3_names": [],
-            "top3_header_md": "",
+            "top3_period_net": 0,
+            "top3_period_ctrl_pct": 0.0,
             "top3_rows": [],
             "remark_md": "",
             "trust_info": None,
@@ -631,7 +632,8 @@ def analyze_main_force(
             "divergence_alert": None,
             "scenario": {"id": 0, "type": "neutral", "title": "⚪ 無分點資料", "desc": "", "action": ""},
             "top3_names": [],
-            "top3_header_md": "",
+            "top3_period_net": 0,
+            "top3_period_ctrl_pct": 0.0,
             "top3_rows": [],
             "remark_md": "",
             "trust_info": trust_info,
@@ -665,7 +667,8 @@ def analyze_main_force(
             "divergence_alert": None,
             "scenario": {"id": 5, "type": "bear", "title": "🟢 當前劇本：全年空方主導", "desc": "今年以來主要券商分點累計皆為淨賣超。", "action": "避開空頭排列個股。"},
             "top3_names": [],
-            "top3_header_md": "",
+            "top3_period_net": 0,
+            "top3_period_ctrl_pct": 0.0,
             "top3_rows": [],
             "remark_md": "",
             "trust_info": trust_info,
@@ -701,8 +704,8 @@ def analyze_main_force(
     # 卡片二：區間內今年三大券商分點主力狀態
     top3_names = list(top_buyers_ytd.head(3).index)
     top3_period_net = int(period_sum[top3_names].sum())
+    top3_period_ctrl_pct = round((top3_period_net / period_vol * 100), 1) if period_vol > 0 else 0.0
     top3_5d = int(recent_5[top3_names].sum())
-    top3_20d = int(recent_20[top3_names].sum())
     threshold = 50 if len(df_price) <= 1 else 300
 
     if primary_player in DAY_TRADE_BROKERS and abs(primary_ytd_net) < 500:
@@ -769,7 +772,8 @@ def analyze_main_force(
         "divergence_alert": divergence_alert,
         "scenario": scenario,
         "top3_names": top3_names,
-        "top3_header_md": f"- 今年前三大券商分點主力（**{', '.join(top3_names)}**）本區間合計：{_fmt_md_num(top3_period_net)}（近 20 日合計：{_fmt_md_num(top3_20d)}）",
+        "top3_period_net": top3_period_net,
+        "top3_period_ctrl_pct": top3_period_ctrl_pct,
         "top3_rows": top3_rows,
         "remark_md": f"- 💡 備註：本檢視區間分點買超第一名為 {top_buy_text} ｜ 分點賣超第一名為 {top_sell_text}",
         "trust_info": trust_info,
