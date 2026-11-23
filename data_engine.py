@@ -4,6 +4,7 @@ import ssl
 import json
 import time
 import base64
+import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse, parse_qs
 from datetime import datetime, timedelta
@@ -15,8 +16,9 @@ import yfinance as yf
 from bs4 import BeautifulSoup
 from strategy import SCENARIO_MATRIX, evaluate_chip_scenario, evaluate_divergence_alert  # noqa: F401
 
-# 關閉 verify=False 產生的大量 InsecureRequestWarning 日誌洗版
+# 關閉 verify=False 警告與 yfinance 內部的 Failed download 終端機洗版
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
 DB_DIR = "database"
 os.makedirs(DB_DIR, exist_ok=True)
@@ -176,22 +178,137 @@ def calculate_main_force_cost(df_price: pd.DataFrame, daily_net: pd.Series) -> t
     return pd.Series(cost_list, index=df_price.index), latest_cost, inv
 
 
-def fetch_price_history(stock_id: str, start_date: str, end_date: str) -> pd.DataFrame:
-    """抓取指定區間每日股價 (自動判斷上市 .TW 或上櫃 .TWO)"""
-    end_dt = (datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
-    for suffix in [".TW", ".TWO"]:
-        ticker = f"{stock_id}{suffix}"
-        df = yf.download(ticker, start=start_date, end=end_dt, progress=False, auto_adjust=False)
+def _fetch_twse_tpex_price(stock_id: str, start_date: str, end_date: str, preferred_suffix: str = None) -> tuple[pd.DataFrame, str]:
+    """備援股價來源：向證交所 (TWSE) 或櫃買中心 (TPEX) 抓取每日開高低收與成交量(張)"""
+    session = _create_session()
+    dt_start = datetime.strptime(start_date, "%Y-%m-%d")
+    dt_end = datetime.strptime(end_date, "%Y-%m-%d")
+
+    months = []
+    cur = datetime(dt_start.year, dt_start.month, 1)
+    end_m = datetime(dt_end.year, dt_end.month, 1)
+    while cur <= end_m:
+        months.append((cur.year, cur.month))
+        cur = datetime(cur.year + 1, 1, 1) if cur.month == 12 else datetime(cur.year, cur.month + 1, 1)
+
+    def _to_float(v):
+        s = str(v).replace(",", "").replace("+", "").strip()
+        if s in ("", "--", "-"):
+            return None
+        try:
+            return float(s)
+        except ValueError:
+            return None
+
+    def _try_twse() -> pd.DataFrame:
+        rows = []
+        for y, m in months:
+            ymd = f"{y:04d}{m:02d}01"
+            url = f"https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?date={ymd}&stockNo={stock_id}&response=json"
+            try:
+                resp = session.get(url, timeout=8, verify=False)
+                if resp.status_code != 200:
+                    continue
+                data = resp.json()
+                if data.get("stat") != "OK" or not data.get("data"):
+                    continue
+                for item in data["data"]:
+                    if len(item) < 7:
+                        continue
+                    ad_date = _parse_dj_date(str(item[0]))
+                    if not ad_date or not (start_date <= ad_date <= end_date):
+                        continue
+                    vol_shares = _to_float(item[1])
+                    op, hi, lo, cl = _to_float(item[3]), _to_float(item[4]), _to_float(item[5]), _to_float(item[6])
+                    if cl is not None:
+                        rows.append({
+                            "date": ad_date,
+                            "open": op if op is not None else cl,
+                            "high": hi if hi is not None else cl,
+                            "low": lo if lo is not None else cl,
+                            "close": cl,
+                            "volume": round(vol_shares / 1000.0) if vol_shares is not None else 0.0,
+                        })
+            except Exception:
+                continue
+        if rows:
+            return pd.DataFrame(rows).drop_duplicates(subset=["date"]).sort_values("date").reset_index(drop=True)
+        return pd.DataFrame()
+
+    def _try_tpex() -> pd.DataFrame:
+        rows = []
+        for y, m in months:
+            roc_ym = f"{y - 1911:03d}/{m:02d}"
+            url = f"https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?l=zh-tw&d={roc_ym}&stkno={stock_id}"
+            try:
+                resp = session.get(url, timeout=8, verify=False)
+                if resp.status_code != 200:
+                    continue
+                data = resp.json()
+                for item in (data.get("aaData") or []):
+                    if len(item) < 7:
+                        continue
+                    ad_date = _parse_dj_date(str(item[0]))
+                    if not ad_date or not (start_date <= ad_date <= end_date):
+                        continue
+                    vol_k = _to_float(item[1])
+                    op, hi, lo, cl = _to_float(item[3]), _to_float(item[4]), _to_float(item[5]), _to_float(item[6])
+                    if cl is not None:
+                        rows.append({
+                            "date": ad_date,
+                            "open": op if op is not None else cl,
+                            "high": hi if hi is not None else cl,
+                            "low": lo if lo is not None else cl,
+                            "close": cl,
+                            "volume": round(vol_k) if vol_k is not None else 0.0,
+                        })
+            except Exception:
+                continue
+        if rows:
+            return pd.DataFrame(rows).drop_duplicates(subset=["date"]).sort_values("date").reset_index(drop=True)
+        return pd.DataFrame()
+
+    order = [".TWO", ".TW"] if preferred_suffix == ".TWO" else [".TW", ".TWO"]
+    for suf in order:
+        df = _try_twse() if suf == ".TW" else _try_tpex()
         if not df.empty:
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
-            df = df.reset_index()
-            df["date"] = pd.to_datetime(df["Date"]).dt.strftime("%Y-%m-%d")
-            df = df[["date", "Open", "High", "Low", "Close", "Volume"]].copy()
-            df.columns = ["date", "open", "high", "low", "close", "volume"]
-            df["volume"] = (df["volume"] / 1000).round(0)
-            return df[df["date"] >= start_date].dropna(subset=["close"])
-    return pd.DataFrame()
+            return df, suf
+
+    return pd.DataFrame(), ""
+
+
+def fetch_price_history(stock_id: str, start_date: str, end_date: str, preferred_suffix: str = None) -> tuple[pd.DataFrame, str]:
+    """
+    抓取指定區間每日股價並回傳 (DataFrame, 成功後綴 '.TW' 或 '.TWO')：
+    - 若已傳入 preferred_suffix（自 _meta.json 讀取），優先使用該後綴，避免無效重試。
+    - yfinance 失敗時自動改抓 TWSE / TPEX 官方資料。
+    """
+    end_dt = (datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+    if preferred_suffix in (".TW", ".TWO"):
+        other = ".TWO" if preferred_suffix == ".TW" else ".TW"
+        suffix_candidates = [preferred_suffix, other]
+    else:
+        suffix_candidates = [".TW", ".TWO"]
+
+    for suffix in suffix_candidates:
+        ticker = f"{stock_id}{suffix}"
+        try:
+            df = yf.download(ticker, start=start_date, end=end_dt, progress=False, auto_adjust=False)
+            if not df.empty:
+                if isinstance(df.columns, pd.MultiIndex):
+                    df.columns = df.columns.get_level_values(0)
+                df = df.reset_index()
+                df["date"] = pd.to_datetime(df["Date"]).dt.strftime("%Y-%m-%d")
+                df = df[["date", "Open", "High", "Low", "Close", "Volume"]].copy()
+                df.columns = ["date", "open", "high", "low", "close", "volume"]
+                df["volume"] = (df["volume"] / 1000).round(0)
+                df_out = df[df["date"] >= start_date].dropna(subset=["close"])
+                if not df_out.empty:
+                    return df_out, suffix
+        except Exception:
+            continue
+
+    return _fetch_twse_tpex_price(stock_id, start_date, end_date, preferred_suffix)
 
 
 def fetch_stock_name(session: requests.Session = None, stock_id: str = "", mirror: str = None) -> str:
@@ -754,6 +871,7 @@ def delete_stock_database(stock_id: str) -> tuple[bool, str]:
 def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
     """
     更新指定個股資料並存檔至 database/：
+    - 自動讀取並記住該檔股票的上市(.TW)／上櫃(.TWO)後綴存進 _meta.json。
     - incremental_days=None（手動單檔全量校準）：聯集「全年度前 30 大波段主力」與「近 3 個交易日前 20 大活躍分點」，回溯全年明細。
     - incremental_days=3（全部更新／GitHub Actions 排程）：僅抓最近 3 個交易日並合併進既有資料庫。
     """
@@ -767,6 +885,16 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
     price_path = os.path.join(DB_DIR, price_file)
     chips_path = os.path.join(DB_DIR, chips_file)
     meta_path = os.path.join(DB_DIR, meta_file)
+
+    # 先讀取既有 _meta.json 內的中文名稱與已知上市櫃後綴 (.TW / .TWO)
+    saved_meta = {}
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                saved_meta = json.load(f)
+        except Exception:
+            saved_meta = {}
+    preferred_suffix = saved_meta.get("ticker_suffix") if isinstance(saved_meta, dict) else None
 
     is_incremental = (
         incremental_days is not None
@@ -783,14 +911,14 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
 
     if is_incremental:
         lookback_start = (now_tw - timedelta(days=12)).strftime("%Y-%m-%d")
-        df_price_recent = fetch_price_history(stock_id, lookback_start, end_date)
+        df_price_recent, matched_suffix = fetch_price_history(stock_id, lookback_start, end_date, preferred_suffix)
         if df_price_recent.empty:
             return False
         df_price_recent = df_price_recent.tail(incremental_days).copy()
         fetch_start = df_price_recent["date"].min()
     else:
         fetch_start = START_DATE_FIXED
-        df_price_recent = fetch_price_history(stock_id, fetch_start, end_date)
+        df_price_recent, matched_suffix = fetch_price_history(stock_id, fetch_start, end_date, preferred_suffix)
         if df_price_recent.empty:
             return False
 
@@ -808,13 +936,7 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
             debug_notes.append(f"投信異常: {trust_err}")
 
     # 2. 抓中文股票名稱
-    stock_name = ""
-    if is_incremental and os.path.exists(meta_path):
-        try:
-            with open(meta_path, "r", encoding="utf-8") as f:
-                stock_name = str(json.load(f).get("stock_name", "")).strip()
-        except Exception:
-            pass
+    stock_name = str(saved_meta.get("stock_name", "")).strip() if isinstance(saved_meta, dict) else ""
     if not stock_name:
         stock_name = fetch_stock_name(session, stock_id, active_mirror)
 
@@ -886,7 +1008,7 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
         if ok1:
             _, sync_msg = _sync_file_to_github(chips_path, f"database/{chips_file}")
 
-    # 8. 產出基礎摘要存檔
+    # 8. 產出基礎摘要存檔（包含已記憶的上市櫃後綴 ticker_suffix）
     meta = analyze_main_force(
         df_price,
         df_chips,
@@ -897,6 +1019,7 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
     )
     meta["stock_id"] = stock_id
     meta["stock_name"] = stock_name
+    meta["ticker_suffix"] = matched_suffix or preferred_suffix or ""
     meta["broker_count"] = total_brokers
     meta["concentrations"] = concentrations
     meta["last_updated"] = now_tw.strftime("%Y-%m-%d %H:%M")
