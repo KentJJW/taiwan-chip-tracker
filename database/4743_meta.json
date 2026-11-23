@@ -73,6 +73,12 @@
   "stock_name": "合一",
   "broker_count": 59,
   "concentrations": {
+    "d10": {
+      "pct": -0.59,
+      "net": -183,
+      "buy15": 3431,
+      "sell15": 3614
+    },
     "d20": {
       "pct": 1.81,
       "net": 810,
@@ -84,15 +90,9 @@
       "net": -3050,
       "buy15": 1503,
       "sell15": 4553
-    },
-    "d10": {
-      "pct": -0.59,
-      "net": -183,
-      "buy15": 3431,
-      "sell15": 3614
     }
   },
-  "last_updated": "2026-11-23 17:09",
+  "last_updated": "2026-11-23 17:12",
   "debug_notes": [],
   "github_sync": "✅ 已同步至 GitHub database/"
 }
