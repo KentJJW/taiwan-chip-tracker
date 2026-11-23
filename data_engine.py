@@ -562,13 +562,15 @@ def analyze_main_force(
     concentrations: dict = None,
 ) -> dict:
     """
-    1. 錨定 2026/01/02 至今全年度累計買超排行決定「波段大主力」。
-    2. 計算最大主力的累計買超、累計賣超、淨總數與目前庫存均價（成本）。
-    3. 計算前三大主力各分點的連買／連賣天數、區間控盤率 (%)，以及今日／今年前五大買賣超排行。
-    4. 呼叫 strategy.py 判定背離警報與五大實戰劇本。
+    方案 A（分點與投信徹底分流，消除重複計算）：
+    1. 「今年最大主力」、「今年三大主力」與「四張買賣超排行榜」僅計算【純券商分點】（排除投信）。
+    2. 「投信」獨立產出 trust_info（含今年累計、區間、今日、近10/20日、連買賣、控盤率與庫存均價），於專屬橫幅獨立呈現。
+    3. 呼叫 strategy.py 判定背離警報與五大實戰劇本。
     """
-    broker_cols = [c for c in df_chips.columns if c != "date"]
-    if not broker_cols or df_price.empty:
+    all_cols = [c for c in df_chips.columns if c != "date"]
+    pure_broker_cols = [c for c in all_cols if c != "投信"]
+
+    if df_price.empty or (not pure_broker_cols and "投信" not in all_cols):
         return {
             "main_force_html": "無分點資料",
             "main_force_sub_lines": [],
@@ -580,6 +582,7 @@ def analyze_main_force(
             "top3_header_md": "",
             "top3_rows": [],
             "remark_md": "",
+            "trust_info": None,
             "top_buyers": {},
             "top_sellers": {},
             "today_buyers": {},
@@ -588,54 +591,100 @@ def analyze_main_force(
 
     full_df = df_chips_full if df_chips_full is not None else df_chips
     full_price = df_price_full if df_price_full is not None else df_price
-
-    # 1. 全年度（2026/01/02 至今）累計排行 -> 決定波段大主力
-    total_ytd = full_df[broker_cols].sum().sort_values(ascending=False)
-    top_buyers_ytd = total_ytd[total_ytd > 0].head(5)
-    top_sellers_ytd = total_ytd[total_ytd < 0].tail(5).sort_values(ascending=True)
-
-    # 2. 選定檢視區間與近期交易日統計（含今日買賣超前 5 大）
-    period_sum = df_chips[broker_cols].sum()
     period_vol = float(df_price["volume"].sum()) if "volume" in df_price.columns else 0.0
-    recent_1 = full_df.tail(1)[broker_cols].sum()
-    recent_1_sorted = recent_1.sort_values(ascending=False)
-    today_buyers = recent_1_sorted[recent_1_sorted > 0].head(5)
-    today_sellers = recent_1_sorted[recent_1_sorted < 0].tail(5).sort_values(ascending=True)
+    latest_close_full = float(full_price.iloc[-1]["close"])
 
-    recent_5 = full_df.tail(5)[broker_cols].sum()
-    recent_10 = full_df.tail(10)[broker_cols].sum()
-    recent_20 = full_df.tail(20)[broker_cols].sum()
+    # --- 獨立計算「投信」完整數據（不混入分點排名） ---
+    trust_info = None
+    if "投信" in full_df.columns:
+        t_ytd = int(full_df["投信"].sum())
+        t_period = int(df_chips["投信"].sum()) if "投信" in df_chips.columns else 0
+        t_d1 = int(full_df.tail(1)["投信"].sum())
+        t_d10 = int(full_df.tail(10)["投信"].sum())
+        t_d20 = int(full_df.tail(20)["投信"].sum())
+        t_streak = _calc_streak(full_df["投信"])
+        t_ctrl = round((t_period / period_vol * 100), 1) if period_vol > 0 else 0.0
 
-    if top_buyers_ytd.empty:
+        merged_trust = full_price.merge(full_df[["date", "投信"]], on="date", how="left").fillna({"投信": 0.0})
+        _, t_cost, t_inv = calculate_main_force_cost(merged_trust, merged_trust["投信"])
+        t_pnl = round((latest_close_full - t_cost) / t_cost * 100, 2) if (t_cost > 0 and t_inv > 0) else None
+
+        trust_info = {
+            "ytd": t_ytd,
+            "period": t_period,
+            "d1": t_d1,
+            "d10": t_d10,
+            "d20": t_d20,
+            "streak": t_streak,
+            "ctrl_pct": t_ctrl,
+            "cost": t_cost if (t_cost > 0 and t_inv > 0) else 0.0,
+            "inv": int(round(t_inv)) if t_inv > 0 else 0,
+            "pnl_pct": t_pnl,
+        }
+
+    if not pure_broker_cols:
         return {
-            "main_force_html": "無波段買超主力（全年度偏空）",
-            "main_force_sub_lines": ["今年以來主要分點與投信累計皆為淨賣超"],
-            "status_html": "🔴 全年空方主導／出貨格局",
+            "main_force_html": "尚無券商分點資料",
+            "main_force_sub_lines": [],
+            "status_html": "⚪ 無法判定",
             "status_sub": "",
             "divergence_alert": None,
-            "scenario": {"id": 5, "type": "bear", "title": "🟢 當前劇本：全年空方主導", "desc": "今年以來主要分點累計皆為淨賣超。", "action": "避開空頭排列個股。"},
+            "scenario": {"id": 0, "type": "neutral", "title": "⚪ 無分點資料", "desc": "", "action": ""},
             "top3_names": [],
             "top3_header_md": "",
             "top3_rows": [],
             "remark_md": "",
+            "trust_info": trust_info,
+            "top_buyers": {},
+            "top_sellers": {},
+            "today_buyers": {},
+            "today_sellers": {},
+        }
+
+    # --- 以下皆僅使用 pure_broker_cols（純券商分點，無投信重疊） ---
+    total_ytd = full_df[pure_broker_cols].sum().sort_values(ascending=False)
+    top_buyers_ytd = total_ytd[total_ytd > 0].head(5)
+    top_sellers_ytd = total_ytd[total_ytd < 0].tail(5).sort_values(ascending=True)
+
+    period_sum = df_chips[pure_broker_cols].sum()
+    recent_1 = full_df.tail(1)[pure_broker_cols].sum()
+    recent_1_sorted = recent_1.sort_values(ascending=False)
+    today_buyers = recent_1_sorted[recent_1_sorted > 0].head(5)
+    today_sellers = recent_1_sorted[recent_1_sorted < 0].tail(5).sort_values(ascending=True)
+
+    recent_5 = full_df.tail(5)[pure_broker_cols].sum()
+    recent_10 = full_df.tail(10)[pure_broker_cols].sum()
+    recent_20 = full_df.tail(20)[pure_broker_cols].sum()
+
+    if top_buyers_ytd.empty:
+        return {
+            "main_force_html": "無波段買超分點主力（全年度偏空）",
+            "main_force_sub_lines": ["今年以來追蹤券商分點累計皆為淨賣超"],
+            "status_html": "🔴 全年分點空方主導／出貨格局",
+            "status_sub": "",
+            "divergence_alert": None,
+            "scenario": {"id": 5, "type": "bear", "title": "🟢 當前劇本：全年空方主導", "desc": "今年以來主要券商分點累計皆為淨賣超。", "action": "避開空頭排列個股。"},
+            "top3_names": [],
+            "top3_header_md": "",
+            "top3_rows": [],
+            "remark_md": "",
+            "trust_info": trust_info,
             "top_buyers": {},
             "top_sellers": {k: int(v) for k, v in top_sellers_ytd.items()},
             "today_buyers": {k: int(v) for k, v in today_buyers.items()},
             "today_sellers": {k: int(v) for k, v in today_sellers.items()},
         }
 
-    # 鎖定年度最大主力
+    # 鎖定年度最大券商分點主力
     primary_player = top_buyers_ytd.index[0]
     primary_ytd_net = int(top_buyers_ytd.iloc[0])
 
-    # 計算最大主力今年以來的累計買超、賣超與目前庫存均價（主力成本）
     primary_series_ytd = full_df[primary_player]
     primary_buy_total = int(primary_series_ytd[primary_series_ytd > 0].sum())
     primary_sell_total = int(primary_series_ytd[primary_series_ytd < 0].sum())
 
     merged_for_cost = full_price.merge(full_df[["date", primary_player]], on="date", how="left").fillna({primary_player: 0.0})
     _, primary_cost, primary_inv = calculate_main_force_cost(merged_for_cost, merged_for_cost[primary_player])
-    latest_close_full = float(full_price.iloc[-1]["close"])
     latest_ma10 = round(float(full_price["close"].tail(10).mean()), 2)
     latest_ma20 = round(float(full_price["close"].tail(20).mean()), 2)
 
@@ -649,7 +698,7 @@ def analyze_main_force(
             f"目前庫存均價：<b style='color:#ffb74d;'>{primary_cost:,.2f} 元</b>（帳面損益 {_fmt_html_pct(pnl_pct)}）"
         )
 
-    # 卡片二：區間內今年三大主力狀態
+    # 卡片二：區間內今年三大券商分點主力狀態
     top3_names = list(top_buyers_ytd.head(3).index)
     top3_period_net = int(period_sum[top3_names].sum())
     top3_5d = int(recent_5[top3_names].sum())
@@ -659,15 +708,15 @@ def analyze_main_force(
     if primary_player in DAY_TRADE_BROKERS and abs(primary_ytd_net) < 500:
         status_html = "🟡 隔日沖短線客主導（慎防倒貨）"
     elif top3_period_net > threshold:
-        status_html = f"🟢 區間內今年三大主力吃貨中（{_fmt_html_num(top3_period_net)}）"
+        status_html = f"🟢 區間內三大分點主力吃貨中（{_fmt_html_num(top3_period_net)}）"
     elif top3_period_net < -threshold:
-        status_html = f"🔴 區間內今年三大主力出貨中（{_fmt_html_num(top3_period_net)}）"
+        status_html = f"🔴 區間內三大分點主力出貨中（{_fmt_html_num(top3_period_net)}）"
     else:
-        status_html = f"🔵 區間內今年三大主力鎖碼觀望（{_fmt_html_num(top3_period_net)}）"
+        status_html = f"🔵 區間內三大分點主力鎖碼觀望（{_fmt_html_num(top3_period_net)}）"
 
-    status_sub = f"三大主力名單：{', '.join(top3_names)}"
+    status_sub = f"三大分點名單：{', '.join(top3_names)}"
 
-    # 近 5 日漲跌幅與三大主力控盤率 (%)
+    # 近 5 日漲跌幅與三大分點控盤率 (%)
     price_5d_pct = 0.0
     vol_5d = float(full_price.tail(5)["volume"].sum()) if "volume" in full_price.columns else 0.0
     top3_5d_ctrl_pct = round((top3_5d / vol_5d * 100), 2) if vol_5d > 0 else 0.0
@@ -690,7 +739,7 @@ def analyze_main_force(
         conc=concentrations or {},
     )
 
-    # 前三大主力各分點明細（含連買／連賣天數、區間控盤率 %）
+    # 前三大分點主力明細
     top3_rows = []
     for name in top3_names:
         b_period = int(period_sum.get(name, 0))
@@ -707,7 +756,7 @@ def analyze_main_force(
             "ctrl_pct": round(ctrl_pct, 1),
         })
 
-    # 備註：同時顯示本檢視區間「買超第一名」與「賣超第一名」
+    # 備註：本檢視區間純券商分點買超／賣超第一名
     sorted_period = period_sum.sort_values(ascending=False)
     top_buy_text = f"**{sorted_period.index[0]}**（{_fmt_md_num(int(sorted_period.iloc[0]))}）" if sorted_period.iloc[0] > 0 else "無"
     top_sell_text = f"**{sorted_period.index[-1]}**（{_fmt_md_num(int(sorted_period.iloc[-1]))}）" if sorted_period.iloc[-1] < 0 else "無"
@@ -720,9 +769,10 @@ def analyze_main_force(
         "divergence_alert": divergence_alert,
         "scenario": scenario,
         "top3_names": top3_names,
-        "top3_header_md": f"- 今年前三大主力（**{', '.join(top3_names)}**）本區間合計：{_fmt_md_num(top3_period_net)}（近 20 日合計：{_fmt_md_num(top3_20d)}）",
+        "top3_header_md": f"- 今年前三大券商分點主力（**{', '.join(top3_names)}**）本區間合計：{_fmt_md_num(top3_period_net)}（近 20 日合計：{_fmt_md_num(top3_20d)}）",
         "top3_rows": top3_rows,
-        "remark_md": f"- 💡 備註：本檢視區間買超第一名為 {top_buy_text} ｜ 賣超第一名為 {top_sell_text}",
+        "remark_md": f"- 💡 備註：本檢視區間分點買超第一名為 {top_buy_text} ｜ 分點賣超第一名為 {top_sell_text}",
+        "trust_info": trust_info,
         "top_buyers": {k: int(v) for k, v in top_buyers_ytd.items()},
         "top_sellers": {k: int(v) for k, v in top_sellers_ytd.items()},
         "today_buyers": {k: int(v) for k, v in today_buyers.items()},
@@ -886,7 +936,6 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
     chips_path = os.path.join(DB_DIR, chips_file)
     meta_path = os.path.join(DB_DIR, meta_file)
 
-    # 先讀取既有 _meta.json 內的中文名稱與已知上市櫃後綴 (.TW / .TWO)
     saved_meta = {}
     if os.path.exists(meta_path):
         try:
@@ -945,7 +994,7 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
     if broker_err:
         debug_notes.append(f"分點清單異常: {broker_err}")
 
-    # 全量模式額外聯集「近 3 個交易日前 20 大活躍分點」，確保突然建倉或突發倒貨的分點完整納入
+    # 全量模式額外聯集「近 3 個交易日前 20 大活躍分點」
     if not is_incremental and len(df_price_recent) >= 3:
         recent_3d_start = df_price_recent.tail(3)["date"].min()
         recent_brokers, _, _ = fetch_top_brokers(session, stock_id, recent_3d_start, end_date, active_mirror, limit=20)
@@ -995,7 +1044,7 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
     # 6. 抓取近 5 / 10 / 20 日全市場前 15 大精準籌碼集中度
     concentrations = fetch_rolling_concentrations(stock_id, df_price, active_mirror)
 
-    # 7. 寫入本地 CSV；若在 GitHub Actions 內執行則交由 workflow 統一 git push，避免衝突
+    # 7. 寫入本地 CSV；若在 GitHub Actions 內執行則交由 workflow 統一 git push
     df_price.to_csv(price_path, index=False, encoding="utf-8-sig")
     df_chips.to_csv(chips_path, index=False, encoding="utf-8-sig")
 
@@ -1008,7 +1057,7 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
         if ok1:
             _, sync_msg = _sync_file_to_github(chips_path, f"database/{chips_file}")
 
-    # 8. 產出基礎摘要存檔（包含已記憶的上市櫃後綴 ticker_suffix）
+    # 8. 產出基礎摘要存檔
     meta = analyze_main_force(
         df_price,
         df_chips,
