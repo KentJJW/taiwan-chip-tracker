@@ -83,8 +83,15 @@
   },
   "stock_id": "2454",
   "stock_name": "聯發科",
+  "ticker_suffix": ".TW",
   "broker_count": 49,
   "concentrations": {
+    "d20": {
+      "pct": -5.63,
+      "net": -14862,
+      "buy15": 22131,
+      "sell15": 36993
+    },
     "d10": {
       "pct": 1.32,
       "net": 1957,
@@ -96,15 +103,9 @@
       "net": 255,
       "buy15": 10919,
       "sell15": 10664
-    },
-    "d20": {
-      "pct": -5.63,
-      "net": -14862,
-      "buy15": 22131,
-      "sell15": 36993
     }
   },
-  "last_updated": "2026-11-23 20:08",
+  "last_updated": "2026-11-23 20:15",
   "debug_notes": [],
-  "github_sync": "✅ 已同步至 GitHub database/"
+  "github_sync": "✅ GitHub Actions 自動增量同步（近 3 日）"
 }

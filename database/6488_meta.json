@@ -83,6 +83,7 @@
   },
   "stock_id": "6488",
   "stock_name": "環球晶",
+  "ticker_suffix": ".TWO",
   "broker_count": 55,
   "concentrations": {
     "d20": {
@@ -91,20 +92,20 @@
       "buy15": 11569,
       "sell15": 24827
     },
-    "d10": {
-      "pct": -1.74,
-      "net": -1973,
-      "buy15": 9029,
-      "sell15": 11002
-    },
     "d5": {
       "pct": -6.28,
       "net": -3035,
       "buy15": 4322,
       "sell15": 7357
+    },
+    "d10": {
+      "pct": -1.74,
+      "net": -1973,
+      "buy15": 9029,
+      "sell15": 11002
     }
   },
-  "last_updated": "2026-11-23 20:07",
+  "last_updated": "2026-11-23 20:15",
   "debug_notes": [],
-  "github_sync": "✅ 已同步至 GitHub database/"
+  "github_sync": "✅ GitHub Actions 自動增量同步（近 3 日）"
 }

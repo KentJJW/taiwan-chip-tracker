@@ -83,19 +83,20 @@
   },
   "stock_id": "5274",
   "stock_name": "信驊",
+  "ticker_suffix": ".TWO",
   "broker_count": 46,
   "concentrations": {
-    "d5": {
-      "pct": -2.03,
-      "net": -56,
-      "buy15": 727,
-      "sell15": 783
-    },
     "d10": {
       "pct": -2.1,
       "net": -110,
       "buy15": 733,
       "sell15": 843
+    },
+    "d5": {
+      "pct": -2.03,
+      "net": -56,
+      "buy15": 727,
+      "sell15": 783
     },
     "d20": {
       "pct": -4.92,
@@ -104,7 +105,7 @@
       "sell15": 1431
     }
   },
-  "last_updated": "2026-11-23 20:07",
+  "last_updated": "2026-11-23 20:15",
   "debug_notes": [],
-  "github_sync": "✅ 已同步至 GitHub database/"
+  "github_sync": "✅ GitHub Actions 自動增量同步（近 3 日）"
 }

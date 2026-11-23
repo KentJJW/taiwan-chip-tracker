@@ -83,14 +83,9 @@
   },
   "stock_id": "4743",
   "stock_name": "合一",
+  "ticker_suffix": ".TWO",
   "broker_count": 64,
   "concentrations": {
-    "d10": {
-      "pct": -0.73,
-      "net": -225,
-      "buy15": 3539,
-      "sell15": 3764
-    },
     "d20": {
       "pct": 1.71,
       "net": 769,
@@ -102,9 +97,15 @@
       "net": -2973,
       "buy15": 1616,
       "sell15": 4589
+    },
+    "d10": {
+      "pct": -0.73,
+      "net": -225,
+      "buy15": 3539,
+      "sell15": 3764
     }
   },
-  "last_updated": "2026-11-23 20:08",
+  "last_updated": "2026-11-23 20:15",
   "debug_notes": [],
-  "github_sync": "✅ 已同步至 GitHub database/"
+  "github_sync": "✅ GitHub Actions 自動增量同步（近 3 日）"
 }
