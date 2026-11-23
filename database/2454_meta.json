@@ -75,17 +75,17 @@
   "stock_name": "聯發科",
   "broker_count": 46,
   "concentrations": {
-    "d5": {
-      "pct": -1.58,
-      "net": -1309,
-      "buy15": 7872,
-      "sell15": 9181
-    },
     "d10": {
       "pct": 0.35,
       "net": 523,
       "buy15": 10954,
       "sell15": 10431
+    },
+    "d5": {
+      "pct": -1.58,
+      "net": -1309,
+      "buy15": 7872,
+      "sell15": 9181
     },
     "d20": {
       "pct": -6.28,
@@ -94,7 +94,7 @@
       "sell15": 35743
     }
   },
-  "last_updated": "2026-11-23 17:09",
+  "last_updated": "2026-11-23 17:12",
   "debug_notes": [],
   "github_sync": "✅ 已同步至 GitHub database/"
 }
