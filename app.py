@@ -47,6 +47,24 @@ st.markdown("""
     margin-top: 6px;
     line-height: 1.45;
 }
+.div-alert-bull {
+    background-color: rgba(239, 83, 80, 0.12);
+    border-left: 4px solid #ef5350;
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin: 10px 0 0 0;
+    font-size: 0.9rem;
+    color: #f8fafc;
+}
+.div-alert-bear {
+    background-color: rgba(38, 166, 154, 0.12);
+    border-left: 4px solid #26a69a;
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin: 10px 0 0 0;
+    font-size: 0.9rem;
+    color: #f8fafc;
+}
 .trust-bar {
     background-color: #181d28;
     border: 1px solid #2f3b52;
@@ -91,24 +109,6 @@ st.markdown("""
     color: #94a3b8;
     font-size: 0.82rem;
     margin-right: 4px;
-}
-.div-alert-bull {
-    background-color: rgba(239, 83, 80, 0.12);
-    border-left: 4px solid #ef5350;
-    border-radius: 6px;
-    padding: 10px 14px;
-    margin: 10px 0 0 0;
-    font-size: 0.9rem;
-    color: #f8fafc;
-}
-.div-alert-bear {
-    background-color: rgba(38, 166, 154, 0.12);
-    border-left: 4px solid #26a69a;
-    border-radius: 6px;
-    padding: 10px 14px;
-    margin: 10px 0 0 0;
-    font-size: 0.9rem;
-    color: #f8fafc;
 }
 .conc-panel {
     background-color: #161a23;
@@ -207,6 +207,15 @@ st.markdown("""
     color: #cbd5e1;
     line-height: 1.45;
 }
+.top3-header-line {
+    font-size: 0.96rem;
+    color: #f1f5f9;
+    margin: 4px 0 6px 4px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+}
 .mf-list {
     margin: 2px 0 8px 22px;
     overflow: visible;
@@ -258,18 +267,18 @@ st.markdown("""
     opacity: 0;
     position: absolute;
     z-index: 9999;
-    width: 300px;
+    width: 330px;
     background-color: #0f172a;
     color: #e2e8f0;
     border: 1px solid #475569;
     border-radius: 6px;
-    padding: 8px 11px;
+    padding: 9px 12px;
     font-size: 0.8rem;
     font-weight: 400;
-    line-height: 1.5;
+    line-height: 1.55;
     white-space: normal;
     text-align: left;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.65);
     transition: opacity 0.15s ease;
     pointer-events: none;
 }
@@ -754,7 +763,27 @@ if target_stock:
         </div>
         """, unsafe_allow_html=True)
 
-    # --- 區塊一之二：投信獨立追蹤列（身分維度獨立顯示，不與券商分點混算） ---
+    # --- 區塊一之二：近 5 日價量籌碼背離警報（緊接三大分點主力卡片下方、投信獨立追蹤上方） ---
+    div_alert = analysis.get("divergence_alert")
+    if div_alert:
+        css_cls = "div-alert-bull" if div_alert["type"] == "bull" else "div-alert-bear"
+        div_tip_text = (
+            "觸發條件：近 5 日股價跌幅 ≥ 3%，且今年前三大券商分點主力近 5 日合計淨買超控盤率 ≥ +2.0%。"
+            "代表大資金趁急跌有效承接，常為低檔換手或止跌轉折的前兆。"
+            if div_alert["type"] == "bull" else
+            "觸發條件：近 5 日股價漲幅 ≥ 3%，且今年前三大券商分點主力近 5 日合計淨賣超控盤率 ≤ -2.0%。"
+            "代表大資金趁反彈有效出貨，需慎防假突破或拉高倒貨風險。"
+        )
+        st.markdown(
+            f'<div class="{css_cls}">'
+            f'  <b>{div_alert["title"]}</b>'
+            f'  <span class="tip-wrap tip-right">ⓘ<span class="tip-box">{div_tip_text}</span></span>'
+            f'  <br>{div_alert["desc"]}'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    # --- 區塊一之三：投信獨立追蹤列（身分維度獨立顯示，不與券商分點混算） ---
     trust_info = analysis.get("trust_info")
     if trust_info:
         trust_tip = (
@@ -788,26 +817,6 @@ if target_stock:
             f'    <span class="trust-item"><span class="trust-lbl">控盤率</span>{_span_ctrl(trust_info["ctrl_pct"])}</span>'
             f'    {cost_seg}'
             f'  </div>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-
-    # --- 區塊一之三：近 5 日價量籌碼背離警報（三大分點主力轉折雷達，置於集中度上方） ---
-    div_alert = analysis.get("divergence_alert")
-    if div_alert:
-        css_cls = "div-alert-bull" if div_alert["type"] == "bull" else "div-alert-bear"
-        div_tip_text = (
-            "觸發條件：近 5 日股價跌幅 ≥ 3%，且今年前三大券商分點主力近 5 日合計淨買超控盤率 ≥ +2.0%。"
-            "代表大資金趁急跌有效承接，常為低檔換手或止跌轉折的前兆。"
-            if div_alert["type"] == "bull" else
-            "觸發條件：近 5 日股價漲幅 ≥ 3%，且今年前三大券商分點主力近 5 日合計淨賣超控盤率 ≤ -2.0%。"
-            "代表大資金趁反彈有效出貨，需慎防假突破或拉高倒貨風險。"
-        )
-        st.markdown(
-            f'<div class="{css_cls}">'
-            f'  <b>{div_alert["title"]}</b>'
-            f'  <span class="tip-wrap tip-right">ⓘ<span class="tip-box">{div_tip_text}</span></span>'
-            f'  <br>{div_alert["desc"]}'
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -880,16 +889,34 @@ if target_stock:
         </table>
         """, unsafe_allow_html=True)
 
-    # --- 前三大券商分點主力明細 ---
+    # --- 前三大券商分點主力明細（含本區間合計、整體控盤率與 ⓘ 解讀標準） ---
     st.write("")
-    if analysis.get("top3_header_md"):
-        st.markdown(analysis["top3_header_md"])
+    top3_names = analysis.get("top3_names", [])
+    if top3_names:
+        top3_net_val = analysis.get("top3_period_net", 0)
+        top3_ctrl_val = analysis.get("top3_period_ctrl_pct", 0.0)
+        group_ctrl_tip = (
+            "<b>控盤率涵義：</b>三大分點主力本區間合計淨買賣超張數 ÷ 本區間總成交量，用來衡量這三家大主力對本段走勢的定價主導權。<br><br>"
+            "<b>實戰解讀標準：</b><br>"
+            "• <b>絕對值 &lt; 2%：</b>影響力一般，屬正常換手或跟單。<br>"
+            "• <b>絕對值 2% ～ 5%：</b>具備明顯影響力，主力吃貨／出貨態度積極。<br>"
+            "• <b>絕對值 &gt; 5% ～ 10%：</b>高度控盤，代表這段區間的股價走勢幾乎由這批主力主導。"
+        )
+        st.markdown(
+            f'<div class="top3-header-line">'
+            f'  <span>• 今年前三大券商分點主力（<b>{", ".join(top3_names)}</b>）本區間合計：{_span_num(top3_net_val)}</span>'
+            f'  <span style="color:#64748b; margin:0 6px;">｜</span>'
+            f'  <span style="color:#cbd5e1;">控盤率：</span>{_span_ctrl(top3_ctrl_val)}'
+            f'  <span class="tip-wrap tip-right">ⓘ<span class="tip-box">{group_ctrl_tip}</span></span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
 
     top3_rows = analysis.get("top3_rows", [])
     if top3_rows:
         ctrl_tip_text = (
             "計算公式：該分點本區間淨買賣超張數 ÷ 本區間總成交量。"
-            "正值代表買盤主導、負值代表賣壓主導；絕對值超過 10% 通常代表該主力對這段走勢具備高度控盤影響力。"
+            "正值代表買盤主導、負值代表賣壓主導；單一分點絕對值超過 3%～5% 通常代表該主力對這段走勢具備高度控盤影響力。"
         )
         rows_html = []
         for r in top3_rows:
@@ -951,7 +978,6 @@ if target_stock:
     st.markdown(f"#### 📉 {stock_title} 股價、10/20MA 與主力成本線 vs. 買賣超統計{chart_title_suffix}")
 
     available_brokers = [c for c in df_chips_full.columns if c != "date"]
-    top3_names = analysis.get("top3_names", [])
     default_selected = [top3_names[0]] if top3_names else available_brokers[:1]
 
     ms_key = f"ms_{target_stock}"
