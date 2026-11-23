@@ -1,5 +1,16 @@
+"""
+data_engine.py — 台股多維度籌碼資料引擎
+支援：
+1. 股價（含 VWAP 均價）、前 30 大波段分點＋近 3 日活躍分點、5/10/20 日全市場集中度
+2. 投信買賣超與估計持股水位、融資融券與券資比、TWSE/TPEX 借券賣出餘額（含批量快取）
+3. TDCC 集保戶股權分散表（千張／400張大戶與總股東人數）、買賣家數差
+4. 滾動 60 日波段主力篩選、隔日沖過濾、贏家分點勝率與 60 日滾動 Z-Score 分析
+"""
+from __future__ import annotations
+
 import os
 import re
+import io
 import ssl
 import json
 import time
@@ -8,15 +19,28 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse, parse_qs
 from datetime import datetime, timedelta
+
 import urllib3
 import requests
 from requests.adapters import HTTPAdapter
+import numpy as np
 import pandas as pd
 import yfinance as yf
 from bs4 import BeautifulSoup
-from strategy import SCENARIO_MATRIX, evaluate_chip_scenario, evaluate_divergence_alert  # noqa: F401
 
-# 關閉 verify=False 警告與 yfinance 內部的 Failed download 終端機洗版
+from strategy import (
+    DAY_TRADE_BROKERS,  # noqa: F401
+    STRATEGY_PARAMS,
+    SCENARIO_MATRIX,  # noqa: F401
+    compute_rolling_zscore,
+    profile_brokers,
+    select_wave_main_forces,
+    evaluate_trust_phase,
+    evaluate_chip_scenario,
+    evaluate_divergence_alert,
+)
+
+# 關閉 verify=False 警告與 yfinance 終端機洗版
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
@@ -35,10 +59,9 @@ DJ_MIRRORS = [
     "https://5850web.moneydj.com",
 ]
 
-DAY_TRADE_BROKERS = {
-    "凱基-台北", "元大-土城永寧", "富邦-嘉義", "群益金鼎-大安",
-    "國票-敦北法人", "統一-內湖", "永豐金-松山", "兆豐-大同"
-}
+# 單次執行期記憶體快取（避免批量更新多檔股票時重複打 TWSE / TPEX / TDCC 全市場端點）
+_SBL_DAILY_CACHE: dict[tuple[str, str], dict[str, float]] = {}
+_TDCC_LATEST_CACHE: dict[str, dict] = {}
 
 
 class LegacySSLAdapter(HTTPAdapter):
@@ -56,15 +79,27 @@ def _create_session() -> requests.Session:
     session = requests.Session()
     session.mount("https://", LegacySSLAdapter())
     session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        ),
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
     })
     return session
 
 
-def _fetch_dj_html(session: requests.Session, path_with_query: str, preferred_mirror: str = None, timeout: int = 6):
-    mirrors = [preferred_mirror] + [m for m in DJ_MIRRORS if m != preferred_mirror] if preferred_mirror else DJ_MIRRORS
+def _fetch_dj_html(
+    session: requests.Session,
+    path_with_query: str,
+    preferred_mirror: str = None,
+    timeout: int = 6,
+):
+    mirrors = (
+        [preferred_mirror] + [m for m in DJ_MIRRORS if m != preferred_mirror]
+        if preferred_mirror
+        else DJ_MIRRORS
+    )
     errors = []
     for base_url in mirrors:
         url = f"{base_url}{path_with_query}"
@@ -104,6 +139,16 @@ def _get_tw_now() -> datetime:
         return datetime.utcnow() + timedelta(hours=8)
 
 
+def _to_float_safe(v) -> float | None:
+    s = str(v).replace(",", "").replace("+", "").replace("%", "").strip()
+    if s in ("", "--", "-", "N/A", "nan", "None"):
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
 def _fmt_html_num(val: int, suffix: str = " 張") -> str:
     if val > 0:
         return f'<span style="color:#ef5350; font-weight:700;">{val:+,}{suffix}</span>'
@@ -129,7 +174,7 @@ def _fmt_md_num(val: int, suffix: str = " 張") -> str:
 
 
 def _calc_streak(series: pd.Series) -> int:
-    vals = series.tolist()
+    vals = pd.to_numeric(series, errors="coerce").fillna(0.0).tolist()
     if not vals or vals[-1] == 0:
         return 0
     sign = 1 if vals[-1] > 0 else -1
@@ -139,47 +184,80 @@ def _calc_streak(series: pd.Series) -> int:
             streak += 1
         else:
             break
-    return streak * sign
+    return int(streak * sign)
 
 
-def calculate_main_force_cost(df_price: pd.DataFrame, daily_net: pd.Series) -> tuple[pd.Series, float, float]:
-    """移動加權平均成本法（目前庫存均價）"""
+# =====================================================================
+# 一、 主力成本計算（支援 VWAP 真實均價與滾動視窗）
+# =====================================================================
+def calculate_main_force_cost(
+    df_price: pd.DataFrame,
+    daily_net: pd.Series,
+    window_days: int | None = None,
+) -> tuple[pd.Series, float, float]:
+    """
+    移動加權平均成本法（目前庫存均價）：
+    - 優先使用當日真實成交均價 (vwap)，缺值時退回 (O+H+L+C)/4 或 close。
+    - 若傳入 window_days（例如 60），僅以最近 N 個交易日起算庫存成本，降低年初截斷誤差。
+    """
+    if df_price.empty:
+        return pd.Series(dtype=float), 0.0, 0.0
+
     price_cols = [c for c in ["open", "high", "low", "close"] if c in df_price.columns]
-    if price_cols:
-        avg_prices = df_price[price_cols].mean(axis=1).fillna(df_price["close"])
+    ohlc_avg = df_price[price_cols].mean(axis=1).fillna(df_price["close"]) if price_cols else df_price["close"]
+
+    if "vwap" in df_price.columns:
+        vwap_s = pd.to_numeric(df_price["vwap"], errors="coerce")
+        avg_prices = vwap_s.where(vwap_s > 0, ohlc_avg)
     else:
-        avg_prices = df_price["close"]
+        avg_prices = ohlc_avg
+
+    start_idx = max(0, len(df_price) - window_days) if (window_days and window_days > 0) else 0
 
     inv = 0.0
     avg_cost = 0.0
     cost_list = []
 
-    for p, net in zip(avg_prices, daily_net):
+    for i, (p, net) in enumerate(zip(avg_prices, daily_net)):
+        if i < start_idx:
+            cost_list.append(None)
+            continue
+
         if pd.isna(p) or pd.isna(net):
             cost_list.append(round(avg_cost, 2) if inv > 0 and avg_cost > 0 else None)
             continue
 
-        if net > 0:
+        net_f = float(net)
+        p_f = float(p)
+        if net_f > 0:
             if inv <= 0:
-                inv = float(net)
-                avg_cost = float(p)
+                inv = net_f
+                avg_cost = p_f
             else:
-                avg_cost = (inv * avg_cost + float(net) * float(p)) / (inv + float(net))
-                inv += float(net)
-        elif net < 0:
-            inv += float(net)
+                avg_cost = (inv * avg_cost + net_f * p_f) / (inv + net_f)
+                inv += net_f
+        elif net_f < 0:
+            inv += net_f
             if inv <= 0:
                 inv = 0.0
                 avg_cost = 0.0
 
         cost_list.append(round(avg_cost, 2) if inv > 0 and avg_cost > 0 else None)
 
-    latest_cost = round(avg_cost, 2) if inv > 0 and avg_cost > 0 else 0.0
-    return pd.Series(cost_list, index=df_price.index), latest_cost, inv
+    latest_cost = round(float(avg_cost), 2) if inv > 0 and avg_cost > 0 else 0.0
+    return pd.Series(cost_list, index=df_price.index), latest_cost, float(inv)
 
 
-def _fetch_twse_tpex_price(stock_id: str, start_date: str, end_date: str, preferred_suffix: str = None) -> tuple[pd.DataFrame, str]:
-    """備援股價來源：向證交所 (TWSE) 或櫃買中心 (TPEX) 抓取每日開高低收與成交量(張)"""
+# =====================================================================
+# 二、 股價（含 VWAP）、股本（發行張數）與中文名稱抓取
+# =====================================================================
+def _fetch_twse_tpex_price(
+    stock_id: str,
+    start_date: str,
+    end_date: str,
+    preferred_suffix: str = None,
+) -> tuple[pd.DataFrame, str]:
+    """向證交所 (TWSE) 或櫃買中心 (TPEX) 抓取每日 OHLC、成交量(張) 與真實成交均價 (VWAP)"""
     session = _create_session()
     dt_start = datetime.strptime(start_date, "%Y-%m-%d")
     dt_end = datetime.strptime(end_date, "%Y-%m-%d")
@@ -190,15 +268,6 @@ def _fetch_twse_tpex_price(stock_id: str, start_date: str, end_date: str, prefer
     while cur <= end_m:
         months.append((cur.year, cur.month))
         cur = datetime(cur.year + 1, 1, 1) if cur.month == 12 else datetime(cur.year, cur.month + 1, 1)
-
-    def _to_float(v):
-        s = str(v).replace(",", "").replace("+", "").strip()
-        if s in ("", "--", "-"):
-            return None
-        try:
-            return float(s)
-        except ValueError:
-            return None
 
     def _try_twse() -> pd.DataFrame:
         rows = []
@@ -218,9 +287,18 @@ def _fetch_twse_tpex_price(stock_id: str, start_date: str, end_date: str, prefer
                     ad_date = _parse_dj_date(str(item[0]))
                     if not ad_date or not (start_date <= ad_date <= end_date):
                         continue
-                    vol_shares = _to_float(item[1])
-                    op, hi, lo, cl = _to_float(item[3]), _to_float(item[4]), _to_float(item[5]), _to_float(item[6])
+                    vol_shares = _to_float_safe(item[1])
+                    turnover_ntd = _to_float_safe(item[2])
+                    op = _to_float_safe(item[3])
+                    hi = _to_float_safe(item[4])
+                    lo = _to_float_safe(item[5])
+                    cl = _to_float_safe(item[6])
                     if cl is not None:
+                        vwap = (
+                            round(turnover_ntd / vol_shares, 2)
+                            if (turnover_ntd and vol_shares and vol_shares > 0)
+                            else round(((op or cl) + (hi or cl) + (lo or cl) + cl) / 4.0, 2)
+                        )
                         rows.append({
                             "date": ad_date,
                             "open": op if op is not None else cl,
@@ -228,6 +306,7 @@ def _fetch_twse_tpex_price(stock_id: str, start_date: str, end_date: str, prefer
                             "low": lo if lo is not None else cl,
                             "close": cl,
                             "volume": round(vol_shares / 1000.0) if vol_shares is not None else 0.0,
+                            "vwap": vwap,
                         })
             except Exception:
                 continue
@@ -251,9 +330,18 @@ def _fetch_twse_tpex_price(stock_id: str, start_date: str, end_date: str, prefer
                     ad_date = _parse_dj_date(str(item[0]))
                     if not ad_date or not (start_date <= ad_date <= end_date):
                         continue
-                    vol_k = _to_float(item[1])
-                    op, hi, lo, cl = _to_float(item[3]), _to_float(item[4]), _to_float(item[5]), _to_float(item[6])
+                    vol_k = _to_float_safe(item[1])
+                    turnover_k = _to_float_safe(item[2])
+                    op = _to_float_safe(item[3])
+                    hi = _to_float_safe(item[4])
+                    lo = _to_float_safe(item[5])
+                    cl = _to_float_safe(item[6])
                     if cl is not None:
+                        vwap = (
+                            round(turnover_k / vol_k, 2)
+                            if (turnover_k and vol_k and vol_k > 0)
+                            else round(((op or cl) + (hi or cl) + (lo or cl) + cl) / 4.0, 2)
+                        )
                         rows.append({
                             "date": ad_date,
                             "open": op if op is not None else cl,
@@ -261,6 +349,7 @@ def _fetch_twse_tpex_price(stock_id: str, start_date: str, end_date: str, prefer
                             "low": lo if lo is not None else cl,
                             "close": cl,
                             "volume": round(vol_k) if vol_k is not None else 0.0,
+                            "vwap": vwap,
                         })
             except Exception:
                 continue
@@ -277,12 +366,23 @@ def _fetch_twse_tpex_price(stock_id: str, start_date: str, end_date: str, prefer
     return pd.DataFrame(), ""
 
 
-def fetch_price_history(stock_id: str, start_date: str, end_date: str, preferred_suffix: str = None) -> tuple[pd.DataFrame, str]:
+def fetch_price_history(
+    stock_id: str,
+    start_date: str,
+    end_date: str,
+    preferred_suffix: str = None,
+) -> tuple[pd.DataFrame, str]:
     """
     抓取指定區間每日股價並回傳 (DataFrame, 成功後綴 '.TW' 或 '.TWO')：
-    - 若已傳入 preferred_suffix（自 _meta.json 讀取），優先使用該後綴，避免無效重試。
-    - yfinance 失敗時自動改抓 TWSE / TPEX 官方資料。
+    - 短天期（<= 35 日）優先向 TWSE/TPEX 取得含真實 VWAP 的官方日行情。
+    - 長天期或官方失敗時使用 yfinance 並估算 (O+H+L+C)/4 作為 vwap。
     """
+    dt_span = (datetime.strptime(end_date, "%Y-%m-%d") - datetime.strptime(start_date, "%Y-%m-%d")).days
+    if dt_span <= 35:
+        df_off, suf_off = _fetch_twse_tpex_price(stock_id, start_date, end_date, preferred_suffix)
+        if not df_off.empty:
+            return df_off, suf_off
+
     end_dt = (datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
     if preferred_suffix in (".TW", ".TWO"):
         other = ".TWO" if preferred_suffix == ".TW" else ".TW"
@@ -301,7 +401,8 @@ def fetch_price_history(stock_id: str, start_date: str, end_date: str, preferred
                 df["date"] = pd.to_datetime(df["Date"]).dt.strftime("%Y-%m-%d")
                 df = df[["date", "Open", "High", "Low", "Close", "Volume"]].copy()
                 df.columns = ["date", "open", "high", "low", "close", "volume"]
-                df["volume"] = (df["volume"] / 1000).round(0)
+                df["volume"] = (df["volume"] / 1000.0).round(0)
+                df["vwap"] = df[["open", "high", "low", "close"]].mean(axis=1).round(2)
                 df_out = df[df["date"] >= start_date].dropna(subset=["close"])
                 if not df_out.empty:
                     return df_out, suffix
@@ -311,6 +412,43 @@ def fetch_price_history(stock_id: str, start_date: str, end_date: str, preferred
     return _fetch_twse_tpex_price(stock_id, start_date, end_date, preferred_suffix)
 
 
+def fetch_issued_lots(
+    session: requests.Session,
+    stock_id: str,
+    suffix: str = ".TW",
+    mirror: str = None,
+) -> float:
+    """
+    取得公司在外發行總張數（張 = 總股數 / 1000），用於計算：
+    1. 投信持股比率 (%)
+    2. 三大主力近 5 日淨買超佔流通股本比率 (%)
+    """
+    # 方法一：yfinance fast_info（最準確，不受面額非 10 元個股影響）
+    try:
+        tkr = yf.Ticker(f"{stock_id}{suffix or '.TW'}")
+        shares = tkr.fast_info.get("shares")
+        if shares and float(shares) > 10000:
+            return round(float(shares) / 1000.0, 2)
+    except Exception:
+        pass
+
+    # 方法二：MoneyDJ 基本資料頁 zca.djhtm 解析『股本(億)』（1 億元面額 10 元 = 10,000 張）
+    try:
+        html, _, _ = _fetch_dj_html(session, f"/z/zc/zca/zca.djhtm?a={stock_id}", mirror, timeout=5)
+        if html:
+            soup = BeautifulSoup(html, "html.parser")
+            tds = [td.get_text(strip=True) for td in soup.find_all("td")]
+            for i, txt in enumerate(tds):
+                if "股本(億" in txt and i + 1 < len(tds):
+                    cap_yi = _to_float_safe(tds[i + 1])
+                    if cap_yi and cap_yi > 0:
+                        return round(cap_yi * 10000.0, 2)
+    except Exception:
+        pass
+
+    return 0.0
+
+
 def fetch_stock_name(session: requests.Session = None, stock_id: str = "", mirror: str = None) -> str:
     """多來源擷取台股中文名稱"""
     stock_id = stock_id.strip()
@@ -318,14 +456,12 @@ def fetch_stock_name(session: requests.Session = None, stock_id: str = "", mirro
         return ""
 
     sess = session or _create_session()
-
     try:
         html, _, _ = _fetch_dj_html(sess, f"/z/zc/zco/zco.djhtm?a={stock_id}", mirror, timeout=5)
         if html:
             m_js = re.search(rf"GenLink2stk\([^,]*{re.escape(stock_id)}[^,]*,\s*['\"]([^'\"]+)['\"]\)", html)
             if m_js:
                 return m_js.group(1).strip()
-
             m_paren = re.search(rf"([\u4e00-\u9fffA-Za-z0-9\-]{{2,10}})\s*[\(（]{re.escape(stock_id)}[\)）]", html)
             if m_paren:
                 return m_paren.group(1).strip()
@@ -347,13 +483,24 @@ def fetch_stock_name(session: requests.Session = None, stock_id: str = "", mirro
     return ""
 
 
-def fetch_investment_trust_history(session: requests.Session, stock_id: str, start_date: str, end_date: str, mirror: str = None):
-    """抓取「投信」每日淨買賣超(張)"""
+# =====================================================================
+# 三、 投信（買賣超＋估計持股）、融資融券、借券賣出、家數差、TDCC 集保
+# =====================================================================
+def fetch_investment_trust_history(
+    session: requests.Session,
+    stock_id: str,
+    start_date: str,
+    end_date: str,
+    mirror: str = None,
+):
+    """抓取「投信」每日淨買賣超(張) 與 投信估計持股(張)（同一頁零額外請求）"""
     s_fmt = _format_dj_date(start_date)
     e_fmt = _format_dj_date(end_date)
-    html, ok_mirror, err = _fetch_dj_html(session, f"/z/zc/zcl/zcl.djhtm?a={stock_id}&c={s_fmt}&d={e_fmt}", mirror)
+    html, ok_mirror, err = _fetch_dj_html(
+        session, f"/z/zc/zcl/zcl.djhtm?a={stock_id}&c={s_fmt}&d={e_fmt}", mirror
+    )
     if not html:
-        return pd.DataFrame(columns=["date", "投信"]), mirror, err
+        return pd.DataFrame(columns=["date", "投信", "trust_holding"]), mirror, err
 
     soup = BeautifulSoup(html, "html.parser")
     records = []
@@ -362,22 +509,319 @@ def fetch_investment_trust_history(session: requests.Session, stock_id: str, sta
         if len(tds) >= 4:
             ad_date = _parse_dj_date(tds[0])
             if ad_date and start_date <= ad_date <= end_date:
-                try:
-                    records.append({"date": ad_date, "投信": float(tds[2])})
-                except ValueError:
-                    continue
+                net_val = _to_float_safe(tds[2])
+                hold_val = _to_float_safe(tds[6]) if len(tds) >= 7 else None
+                if net_val is not None:
+                    records.append({
+                        "date": ad_date,
+                        "投信": net_val,
+                        "trust_holding": hold_val if hold_val is not None else np.nan,
+                    })
 
     if not records:
-        return pd.DataFrame(columns=["date", "投信"]), ok_mirror, "投信表格無資料"
-    df = pd.DataFrame(records).groupby("date", as_index=False)["投信"].sum()
+        return pd.DataFrame(columns=["date", "投信", "trust_holding"]), ok_mirror, "投信表格無資料"
+
+    df = (
+        pd.DataFrame(records)
+        .groupby("date", as_index=False)
+        .agg({"投信": "sum", "trust_holding": "last"})
+    )
     return df, ok_mirror, ""
 
 
+def fetch_margin_history(
+    session: requests.Session,
+    stock_id: str,
+    start_date: str,
+    end_date: str,
+    mirror: str = None,
+) -> pd.DataFrame:
+    """從 MoneyDJ zcn.djhtm 抓取每日融資餘額、融資增減、融券餘額、融券增減與券資比(%)"""
+    s_fmt = _format_dj_date(start_date)
+    e_fmt = _format_dj_date(end_date)
+    html, _, _ = _fetch_dj_html(
+        session, f"/z/zc/zcn/zcn.djhtm?a={stock_id}&c={s_fmt}&d={e_fmt}", mirror, timeout=6
+    )
+    cols = ["date", "margin_bal", "margin_chg", "short_bal", "short_chg", "short_margin_ratio"]
+    if not html:
+        return pd.DataFrame(columns=cols)
+
+    soup = BeautifulSoup(html, "html.parser")
+    records = []
+    for tr in soup.find_all("tr"):
+        tds = [td.get_text(strip=True) for td in tr.find_all("td")]
+        if len(tds) >= 14:
+            ad_date = _parse_dj_date(tds[0])
+            if ad_date and start_date <= ad_date <= end_date:
+                m_bal = _to_float_safe(tds[4])
+                m_chg = _to_float_safe(tds[5])
+                s_bal = _to_float_safe(tds[11])
+                s_chg = _to_float_safe(tds[12])
+                sm_rat = _to_float_safe(tds[13])
+                if m_bal is not None:
+                    records.append({
+                        "date": ad_date,
+                        "margin_bal": m_bal,
+                        "margin_chg": m_chg if m_chg is not None else 0.0,
+                        "short_bal": s_bal if s_bal is not None else 0.0,
+                        "short_chg": s_chg if s_chg is not None else 0.0,
+                        "short_margin_ratio": sm_rat if sm_rat is not None else 0.0,
+                    })
+
+    if not records:
+        return pd.DataFrame(columns=cols)
+
+    return pd.DataFrame(records).drop_duplicates(subset=["date"]).sort_values("date").reset_index(drop=True)
+
+
+def _fetch_sbl_day_market(session: requests.Session, market: str, ad_date: str) -> dict[str, float]:
+    """抓取單一交易日全市場（TWSE 或 TPEX）各股借券賣出當日餘額(張)，結果自動快取"""
+    cache_key = (market, ad_date)
+    if cache_key in _SBL_DAILY_CACHE:
+        return _SBL_DAILY_CACHE[cache_key]
+
+    result: dict[str, float] = {}
+    dt = datetime.strptime(ad_date, "%Y-%m-%d")
+
+    if market == ".TW":
+        ymd = dt.strftime("%Y%m%d")
+        url = f"https://www.twse.com.tw/rwd/zh/marginTrading/TWT93U?date={ymd}&response=json"
+        try:
+            resp = session.get(url, timeout=8, verify=False)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("stat") == "OK" and data.get("data"):
+                    fields = data.get("fields") or []
+                    # 定位「借券賣出當日餘額」欄位（通常為第 2 個不含「前日」的「餘額」欄，索引 12）
+                    bal_indices = [
+                        idx for idx, f in enumerate(fields)
+                        if ("餘額" in str(f) and "前日" not in str(f))
+                    ]
+                    sbl_idx = bal_indices[1] if len(bal_indices) >= 2 else 12
+                    for row in data["data"]:
+                        if len(row) > sbl_idx:
+                            sid = str(row[0]).strip()
+                            shares = _to_float_safe(row[sbl_idx])
+                            if sid and shares is not None:
+                                result[sid] = round(shares / 1000.0, 2)
+        except Exception:
+            pass
+    else:
+        # 櫃買中心新版與舊版端點雙重支援
+        ad_slash = dt.strftime("%Y/%m/%d")
+        roc_slash = f"{dt.year - 1911:03d}/{dt.month:02d}/{dt.day:02d}"
+        urls = [
+            f"https://www.tpex.org.tw/www/zh-tw/margin/sbl?date={ad_slash}&response=json",
+            f"https://www.tpex.org.tw/web/stock/margin_trading/margin_sbl/margin_sbl_result.php?l=zh-tw&d={roc_slash}",
+        ]
+        for url in urls:
+            try:
+                resp = session.get(url, timeout=8, verify=False)
+                if resp.status_code != 200:
+                    continue
+                data = resp.json()
+                rows = []
+                if isinstance(data.get("tables"), list) and data["tables"]:
+                    rows = data["tables"][0].get("data") or []
+                elif data.get("aaData"):
+                    rows = data.get("aaData") or []
+                for row in rows:
+                    if len(row) >= 13:
+                        sid = str(row[0]).strip()
+                        shares = _to_float_safe(row[12])
+                        if sid and shares is not None:
+                            result[sid] = round(shares / 1000.0, 2)
+                if result:
+                    break
+            except Exception:
+                continue
+
+    _SBL_DAILY_CACHE[cache_key] = result
+    return result
+
+
+def fetch_sbl_history(
+    session: requests.Session,
+    stock_id: str,
+    dates: list[str],
+    market_suffix: str = ".TW",
+) -> pd.DataFrame:
+    """抓取指定交易日清單的個股借券賣出餘額(張)與日增減"""
+    cols = ["date", "sbl_bal", "sbl_chg"]
+    if not dates:
+        return pd.DataFrame(columns=cols)
+
+    # 只抓取最近 8 個交易日即可精準算出近 5 日借券變化，避免首次建檔發送過多請求
+    target_dates = sorted(set(dates))[-8:]
+    market = ".TWO" if market_suffix == ".TWO" else ".TW"
+
+    records = []
+    for d in target_dates:
+        day_map = _fetch_sbl_day_market(session, market, d)
+        if stock_id in day_map:
+            records.append({"date": d, "sbl_bal": day_map[stock_id]})
+
+    if not records:
+        return pd.DataFrame(columns=cols)
+
+    df = pd.DataFrame(records).sort_values("date").reset_index(drop=True)
+    df["sbl_chg"] = df["sbl_bal"].diff().fillna(0.0).round(2)
+    return df
+
+
+def fetch_market_broker_diff(session: requests.Session, stock_id: str) -> pd.DataFrame:
+    """
+    嘗試從 HiStock 取得全市場每日『買賣家數差』；
+    若遇網路阻擋則回傳空表，由 analyze_main_force 自動退回追蹤分點家數差，不影響主流程。
+    """
+    cols = ["date", "broker_diff_mkt"]
+    try:
+        url = f"https://histock.tw/stock/brokertr.aspx?no={stock_id}"
+        resp = session.get(url, timeout=4, verify=False)
+        if resp.status_code != 200 or len(resp.text) < 500:
+            return pd.DataFrame(columns=cols)
+        soup = BeautifulSoup(resp.text, "html.parser")
+        records = []
+        for table in soup.find_all("table"):
+            headers = [th.get_text(strip=True) for th in table.find_all("th")]
+            diff_idx = None
+            for idx, h in enumerate(headers):
+                if "家數差" in h:
+                    diff_idx = idx
+                    break
+            if diff_idx is None:
+                continue
+            for tr in table.find_all("tr")[1:]:
+                tds = [td.get_text(strip=True) for td in tr.find_all("td")]
+                if len(tds) > diff_idx:
+                    ad_date = _parse_dj_date(tds[0])
+                    val = _to_float_safe(tds[diff_idx])
+                    if ad_date and val is not None:
+                        records.append({"date": ad_date, "broker_diff_mkt": val})
+            if records:
+                break
+        if records:
+            return pd.DataFrame(records).drop_duplicates(subset=["date"]).sort_values("date").reset_index(drop=True)
+    except Exception:
+        pass
+    return pd.DataFrame(columns=cols)
+
+
+def _load_tdcc_latest_opendata(session: requests.Session) -> dict[str, dict]:
+    """下載集保中心官方 OpenData 最新一週全市場股權分散表（單次執行期快取）"""
+    if _TDCC_LATEST_CACHE:
+        return _TDCC_LATEST_CACHE
+
+    url = "https://smart.tdcc.com.tw/opendata/getOD.ashx?id=1-5"
+    try:
+        resp = session.get(url, timeout=15, verify=False)
+        if resp.status_code != 200 or len(resp.content) < 5000:
+            return {}
+        text = resp.content.decode("utf-8-sig", errors="ignore")
+        df = pd.read_csv(io.StringIO(text), dtype=str)
+        if df.shape[1] < 6:
+            return {}
+
+        c_date, c_sid, c_lvl, c_ppl, _, c_pct = df.columns[:6]
+        df[c_sid] = df[c_sid].str.strip()
+        df[c_lvl] = pd.to_numeric(df[c_lvl], errors="coerce")
+        df[c_ppl] = pd.to_numeric(df[c_ppl].str.replace(",", ""), errors="coerce").fillna(0)
+        df[c_pct] = pd.to_numeric(df[c_pct].str.replace(",", ""), errors="coerce").fillna(0.0)
+
+        for sid, grp in df.groupby(c_sid):
+            raw_dt = str(grp[c_date].iloc[0]).strip()
+            ad_date = (
+                f"{raw_dt[:4]}-{raw_dt[4:6]}-{raw_dt[6:8]}"
+                if len(raw_dt) == 8 and raw_dt.isdigit()
+                else raw_dt
+            )
+            w1000 = float(grp.loc[grp[c_lvl] == 15, c_pct].sum())
+            w400 = float(grp.loc[grp[c_lvl].isin([12, 13, 14, 15]), c_pct].sum())
+            tot_rows = grp.loc[grp[c_lvl] == 17, c_ppl]
+            holders = int(tot_rows.iloc[0]) if not tot_rows.empty else int(grp.loc[grp[c_lvl] <= 15, c_ppl].sum())
+            _TDCC_LATEST_CACHE[sid] = {
+                "date": ad_date,
+                "whale_1000_pct": round(w1000, 2),
+                "whale_400_pct": round(w400, 2),
+                "total_holders": holders,
+            }
+    except Exception:
+        pass
+
+    return _TDCC_LATEST_CACHE
+
+
+def fetch_tdcc_weekly_history(
+    session: requests.Session,
+    stock_id: str,
+    existing_history: list | None = None,
+) -> list[dict]:
+    """
+    取得近 12 週 TDCC 集保戶股權分散表（千張／400張大戶持股比與總股東人數）：
+    1. 優先以 FinMind 公開端點一次補齊多週歷史（首次建檔即有週變動）。
+    2. 再以集保中心官方 OpenData CSV 補齊最新一週，確保無 API 限額時依然可用。
+    """
+    merged: dict[str, dict] = {}
+    for item in (existing_history or []):
+        if isinstance(item, dict) and item.get("date"):
+            merged[str(item["date"])] = item
+
+    # 1. FinMind 免費公開 API（拉取近 90 天週資料）
+    try:
+        start_90 = (_get_tw_now() - timedelta(days=95)).strftime("%Y-%m-%d")
+        fm_url = (
+            "https://api.finmindtrade.com/api/v4/data"
+            f"?dataset=TaiwanStockHoldingSharesPer&data_id={stock_id}&start_date={start_90}"
+        )
+        resp = session.get(fm_url, timeout=8, verify=False)
+        if resp.status_code == 200:
+            payload = resp.json()
+            rows = payload.get("data") or []
+            if rows:
+                df_fm = pd.DataFrame(rows)
+                if {"date", "HoldingSharesLevel", "people", "percent"}.issubset(df_fm.columns):
+                    for dt_str, grp in df_fm.groupby("date"):
+                        lvls = grp["HoldingSharesLevel"].astype(str).str.strip()
+                        ppl = pd.to_numeric(grp["people"], errors="coerce").fillna(0)
+                        pct = pd.to_numeric(grp["percent"], errors="coerce").fillna(0.0)
+
+                        w1000 = float(pct[lvls.str.contains("more than 1,000,001", case=False, na=False)].sum())
+                        w400_mask = (
+                            lvls.str.contains("400,001-600,000", na=False)
+                            | lvls.str.contains("600,001-800,000", na=False)
+                            | lvls.str.contains("800,001-1,000,000", na=False)
+                            | lvls.str.contains("more than 1,000,001", case=False, na=False)
+                        )
+                        w400 = float(pct[w400_mask].sum())
+                        tot_mask = lvls.str.lower() == "total"
+                        holders = int(ppl[tot_mask].iloc[0]) if tot_mask.any() else int(ppl[~tot_mask].sum())
+
+                        merged[str(dt_str)] = {
+                            "date": str(dt_str),
+                            "whale_1000_pct": round(w1000, 2),
+                            "whale_400_pct": round(w400, 2),
+                            "total_holders": holders,
+                        }
+    except Exception:
+        pass
+
+    # 2. 官方集保 OpenData 最新一週校準
+    od_map = _load_tdcc_latest_opendata(session)
+    if stock_id in od_map:
+        latest_item = od_map[stock_id]
+        merged[latest_item["date"]] = latest_item
+
+    ordered = [merged[k] for k in sorted(merged.keys())][-12:]
+    return ordered
+
+
+# =====================================================================
+# 四、 券商分點明細與全市場前 15 大集中度抓取
+# =====================================================================
 def _extract_brokers_from_html(html: str) -> list:
     """從 zco.djhtm 解析所有買賣超分點連結"""
     soup = BeautifulSoup(html, "html.parser")
     brokers = {}
-
     for a_tag in soup.find_all("a", href=True):
         href = a_tag["href"].strip()
         if "zco0" in href.lower():
@@ -389,7 +833,6 @@ def _extract_brokers_from_html(html: str) -> list:
             key = f"{bhid}_{b_hex}"
             if name and (bhid or b_hex) and key not in brokers:
                 brokers[key] = {"bhid": bhid, "b": b_hex, "name": name}
-
     return list(brokers.values())
 
 
@@ -403,15 +846,13 @@ def _parse_zco_totals(html: str) -> tuple[float, float]:
         tds = [td.get_text(strip=True).replace(",", "").replace("+", "") for td in tr.find_all("td")]
         for i, text in enumerate(tds):
             if "合計買超" in text and i + 1 < len(tds):
-                try:
-                    buy_total = abs(float(tds[i + 1]))
-                except ValueError:
-                    pass
+                v = _to_float_safe(tds[i + 1])
+                if v is not None:
+                    buy_total = abs(v)
             elif "合計賣超" in text and i + 1 < len(tds):
-                try:
-                    sell_total = abs(float(tds[i + 1]))
-                except ValueError:
-                    pass
+                v = _to_float_safe(tds[i + 1])
+                if v is not None:
+                    sell_total = abs(v)
 
     if buy_total is not None and sell_total is not None:
         return buy_total, sell_total
@@ -424,30 +865,36 @@ def _parse_zco_totals(html: str) -> tuple[float, float]:
             left_a = tds[0].find("a", href=True)
             right_a = tds[5].find("a", href=True)
             if left_a and "zco0" in left_a["href"].lower():
-                try:
-                    b_sum += abs(float(tds[3].get_text(strip=True).replace(",", "").replace("+", "")))
-                except ValueError:
-                    pass
+                v = _to_float_safe(tds[3].get_text(strip=True))
+                if v is not None:
+                    b_sum += abs(v)
             if right_a and "zco0" in right_a["href"].lower():
-                try:
-                    s_sum += abs(float(tds[8].get_text(strip=True).replace(",", "").replace("+", "")))
-                except ValueError:
-                    pass
+                v = _to_float_safe(tds[8].get_text(strip=True))
+                if v is not None:
+                    s_sum += abs(v)
     return b_sum, s_sum
 
 
-def fetch_period_concentration(stock_id: str, start_date: str, end_date: str, period_vol: float, mirror: str = None) -> dict:
+def fetch_period_concentration(
+    stock_id: str,
+    start_date: str,
+    end_date: str,
+    period_vol: float,
+    mirror: str = None,
+) -> dict:
     """抓取指定區間的官方前 15 大買賣超合計張數，計算精準籌碼集中度 (%)"""
     session = _create_session()
     s_fmt = _format_dj_date(start_date)
     e_fmt = _format_dj_date(end_date)
-    html, _, _ = _fetch_dj_html(session, f"/z/zc/zco/zco.djhtm?a={stock_id}&e={s_fmt}&f={e_fmt}", mirror, timeout=6)
+    html, _, _ = _fetch_dj_html(
+        session, f"/z/zc/zco/zco.djhtm?a={stock_id}&e={s_fmt}&f={e_fmt}", mirror, timeout=6
+    )
     if not html or period_vol <= 0:
         return {"pct": None, "net": 0, "buy15": 0, "sell15": 0}
 
     buy15, sell15 = _parse_zco_totals(html)
     net_15 = buy15 - sell15
-    pct = round((net_15 / period_vol) * 100, 2)
+    pct = round((net_15 / period_vol) * 100.0, 2)
     return {
         "pct": pct,
         "net": int(round(net_15)),
@@ -487,14 +934,21 @@ def fetch_rolling_concentrations(stock_id: str, df_price: pd.DataFrame, mirror: 
     return results
 
 
-def fetch_top_brokers(session: requests.Session, stock_id: str, start_date: str, end_date: str, mirror: str = None, limit: int = 30):
+def fetch_top_brokers(
+    session: requests.Session,
+    stock_id: str,
+    start_date: str,
+    end_date: str,
+    mirror: str = None,
+    limit: int = 30,
+):
     """抓取區間買超與賣超關鍵券商分點"""
     s_fmt = _format_dj_date(start_date)
     e_fmt = _format_dj_date(end_date)
 
     candidate_paths = [
         f"/z/zc/zco/zco.djhtm?a={stock_id}&e={s_fmt}&f={e_fmt}",
-        f"/z/zc/zco/zco.djhtm?a={stock_id}&d=240",
+        f"/z/zc/zco/zco.djhtm?a={stock_id}&d=60",
         f"/z/zc/zco/zco.djhtm?a={stock_id}",
     ]
 
@@ -512,7 +966,13 @@ def fetch_top_brokers(session: requests.Session, stock_id: str, start_date: str,
     return [], mirror, last_err
 
 
-def fetch_broker_daily_history(stock_id: str, broker_info: dict, start_date: str, end_date: str, mirror: str) -> pd.DataFrame:
+def fetch_broker_daily_history(
+    stock_id: str,
+    broker_info: dict,
+    start_date: str,
+    end_date: str,
+    mirror: str,
+) -> pd.DataFrame:
     """抓取單一券商分點每日買賣超明細(張)（使用獨立 Session 支援多執行緒併發）"""
     session = _create_session()
     bhid = broker_info["bhid"]
@@ -523,7 +983,9 @@ def fetch_broker_daily_history(stock_id: str, broker_info: dict, start_date: str
 
     candidate_paths = []
     if bhid and b_hex:
-        candidate_paths.append(f"/z/zc/zco/zco0/zco0.djhtm?A={stock_id}&BHID={bhid}&b={b_hex}&C=1&D={s_fmt}&E={e_fmt}")
+        candidate_paths.append(
+            f"/z/zc/zco/zco0/zco0.djhtm?A={stock_id}&BHID={bhid}&b={b_hex}&C=1&D={s_fmt}&E={e_fmt}"
+        )
         candidate_paths.append(f"/z/zc/zco/zco0/zco0.djhtm?a={stock_id}&b={b_hex}&BHID={bhid}")
     if b_hex:
         candidate_paths.append(f"/z/zc/zco/zco0/zco0.djhtm?a={stock_id}&b={b_hex}")
@@ -542,10 +1004,9 @@ def fetch_broker_daily_history(stock_id: str, broker_info: dict, start_date: str
             if len(tds) >= 5:
                 ad_date = _parse_dj_date(tds[0])
                 if ad_date and start_date <= ad_date <= end_date:
-                    try:
-                        records.append({"date": ad_date, broker_name: float(tds[-1])})
-                    except ValueError:
-                        continue
+                    val = _to_float_safe(tds[-1])
+                    if val is not None:
+                        records.append({"date": ad_date, broker_name: val})
 
         if records:
             return pd.DataFrame(records).groupby("date", as_index=False)[broker_name].sum()
@@ -553,6 +1014,186 @@ def fetch_broker_daily_history(stock_id: str, broker_info: dict, start_date: str
     return pd.DataFrame(columns=["date", broker_name])
 
 
+# =====================================================================
+# 五、 輔助指標整理與滾動 Z-Score 計算
+# =====================================================================
+def _compute_proxy_concentration_zscores(
+    df_price_full: pd.DataFrame,
+    df_chips_full: pd.DataFrame,
+    pure_broker_cols: list[str],
+    concentrations: dict,
+    df_aux_full: pd.DataFrame | None = None,
+) -> dict:
+    """
+    為 5/10/20 日籌碼集中度補上 60 日滾動 Z-Score：
+    - 若 _aux.csv 已累積 >= 15 日官方 5 日集中度，直接使用官方歷史序列。
+    - 否則以已追蹤分點池的滾動前 15 大集中度序列作為分佈基準，並以最新官方值校準。
+    """
+    out = {}
+    for k in ("d5", "d10", "d20"):
+        raw = concentrations.get(k, {}) if isinstance(concentrations, dict) else {}
+        out[k] = dict(raw) if isinstance(raw, dict) else {"pct": None, "net": 0, "buy15": 0, "sell15": 0}
+        out[k].setdefault("z_score", None)
+
+    if df_price_full.empty or not pure_broker_cols:
+        return out
+
+    df_m = df_price_full[["date", "volume"]].merge(df_chips_full[["date"] + pure_broker_cols], on="date", how="left").fillna(0.0)
+    vol_s = pd.to_numeric(df_m["volume"], errors="coerce").fillna(0.0)
+    z_win = STRATEGY_PARAMS["zscore_window"]
+
+    for key, n_days in (("d5", 5), ("d10", 10), ("d20", 20)):
+        latest_official = out[key].get("pct")
+        if latest_official is None:
+            continue
+
+        # 優先檢查是否有足夠長度的官方 5 日歷史快照
+        if key == "d5" and df_aux_full is not None and "conc_5d_official" in df_aux_full.columns:
+            off_s = pd.to_numeric(df_aux_full["conc_5d_official"], errors="coerce").dropna()
+            if len(off_s) >= 15:
+                out[key]["z_score"] = compute_rolling_zscore(off_s, window=z_win)
+                continue
+
+        # 以追蹤分點池建立滾動 N 日集中度分佈，並以最新官方集中度定錨末端
+        roll_brokers = df_m[pure_broker_cols].rolling(n_days).sum()
+        roll_vol = vol_s.rolling(n_days).sum()
+
+        proxy_vals = []
+        for idx in range(len(df_m)):
+            rv = float(roll_vol.iloc[idx]) if not pd.isna(roll_vol.iloc[idx]) else 0.0
+            if idx < n_days - 1 or rv <= 0:
+                proxy_vals.append(np.nan)
+                continue
+            row_vals = roll_brokers.iloc[idx].to_numpy(dtype=float)
+            pos = np.sort(row_vals[row_vals > 0])[::-1][:15].sum()
+            neg = np.sort(np.abs(row_vals[row_vals < 0]))[::-1][:15].sum()
+            proxy_vals.append((pos - neg) / rv * 100.0)
+
+        proxy_s = pd.Series(proxy_vals).dropna()
+        if len(proxy_s) >= 15:
+            # 末端替換為最新官方值，避免代理口徑與官方值方向落差
+            proxy_s = proxy_s.copy()
+            proxy_s.iloc[-1] = float(latest_official)
+            out[key]["z_score"] = compute_rolling_zscore(proxy_s, window=z_win)
+
+    return out
+
+
+def _extract_aux_metrics(
+    df_price_full: pd.DataFrame,
+    df_chips_full: pd.DataFrame,
+    pure_broker_cols: list[str],
+    df_aux_full: pd.DataFrame | None,
+    tdcc_history: list | None,
+) -> tuple[dict | None, dict | None, dict | None, dict | None]:
+    """整理買賣家數差、融資券、借券賣出、TDCC 集保四大輔助指標摘要"""
+    broker_diff_info = None
+    margin_info = None
+    sbl_info = None
+    tdcc_info = None
+
+    # 1. 買賣家數差（優先全市場，無則退回追蹤分點）
+    diff_series = None
+    diff_source = ""
+    if df_aux_full is not None and "broker_diff_mkt" in df_aux_full.columns:
+        s_mkt = pd.to_numeric(df_aux_full["broker_diff_mkt"], errors="coerce").dropna()
+        if len(s_mkt) >= 3:
+            diff_series = s_mkt
+            diff_source = "全市場"
+
+    if diff_series is None and pure_broker_cols and not df_chips_full.empty:
+        sub_mat = df_chips_full[pure_broker_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0)
+        buy_cnt = (sub_mat > 0).sum(axis=1)
+        sell_cnt = (sub_mat < 0).sum(axis=1)
+        diff_series = (buy_cnt - sell_cnt).astype(float)
+        diff_source = f"追蹤{len(pure_broker_cols)}分點"
+
+    if diff_series is not None and not diff_series.empty:
+        d1 = int(round(float(diff_series.iloc[-1])))
+        d5 = int(round(float(diff_series.tail(5).sum())))
+        neg_streak = 0
+        for v in reversed(diff_series.tolist()):
+            if v < 0:
+                neg_streak += 1
+            else:
+                break
+        broker_diff_info = {
+            "diff_1d": d1,
+            "diff_5d": d5,
+            "neg_streak": int(neg_streak),
+            "source": diff_source,
+        }
+
+    # 2. 融資融券與券資比
+    if df_aux_full is not None and "margin_bal" in df_aux_full.columns:
+        df_m = df_aux_full.dropna(subset=["margin_bal"]).copy()
+        if not df_m.empty:
+            latest_bal = float(df_m["margin_bal"].iloc[-1])
+            chg_1d = float(df_m["margin_chg"].iloc[-1]) if "margin_chg" in df_m.columns and not pd.isna(df_m["margin_chg"].iloc[-1]) else 0.0
+            base_bal = float(df_m["margin_bal"].iloc[-6]) if len(df_m) >= 6 else float(df_m["margin_bal"].iloc[0])
+            chg_5d = latest_bal - base_bal
+            chg_5d_pct = round((chg_5d / base_bal * 100.0), 2) if base_bal > 0 else 0.0
+
+            short_bal = float(df_m["short_bal"].iloc[-1]) if "short_bal" in df_m.columns and not pd.isna(df_m["short_bal"].iloc[-1]) else 0.0
+            short_base = float(df_m["short_bal"].iloc[-6]) if ("short_bal" in df_m.columns and len(df_m) >= 6) else short_bal
+            short_chg_5d = short_bal - short_base
+            sm_ratio = (
+                float(df_m["short_margin_ratio"].iloc[-1])
+                if "short_margin_ratio" in df_m.columns and not pd.isna(df_m["short_margin_ratio"].iloc[-1])
+                else (round(short_bal / latest_bal * 100.0, 2) if latest_bal > 0 else 0.0)
+            )
+            margin_info = {
+                "latest_bal": int(round(latest_bal)),
+                "chg_1d": int(round(chg_1d)),
+                "chg_5d": int(round(chg_5d)),
+                "chg_5d_pct": float(chg_5d_pct),
+                "short_bal": int(round(short_bal)),
+                "short_chg_5d": int(round(short_chg_5d)),
+                "short_margin_ratio": round(float(sm_ratio), 2),
+            }
+
+    # 3. 借券賣出餘額
+    if df_aux_full is not None and "sbl_bal" in df_aux_full.columns:
+        df_s = df_aux_full.dropna(subset=["sbl_bal"]).copy()
+        if not df_s.empty:
+            latest_sbl = float(df_s["sbl_bal"].iloc[-1])
+            chg_1d = float(df_s["sbl_chg"].iloc[-1]) if "sbl_chg" in df_s.columns and not pd.isna(df_s["sbl_chg"].iloc[-1]) else 0.0
+            base_sbl = float(df_s["sbl_bal"].iloc[-6]) if len(df_s) >= 6 else float(df_s["sbl_bal"].iloc[0])
+            chg_5d = latest_sbl - base_sbl
+            chg_5d_pct = round((chg_5d / base_sbl * 100.0), 2) if base_sbl > 0 else (100.0 if chg_5d > 0 else 0.0)
+            sbl_info = {
+                "latest_bal": int(round(latest_sbl)),
+                "chg_1d": int(round(chg_1d)),
+                "chg_5d": int(round(chg_5d)),
+                "chg_5d_pct": float(chg_5d_pct),
+            }
+
+    # 4. TDCC 集保戶股權分散表
+    if tdcc_history and isinstance(tdcc_history, list):
+        valid_tdcc = [x for x in tdcc_history if isinstance(x, dict) and x.get("date")]
+        valid_tdcc.sort(key=lambda x: x["date"])
+        if valid_tdcc:
+            cur = valid_tdcc[-1]
+            prev = valid_tdcc[-2] if len(valid_tdcc) >= 2 else None
+            w1000 = float(cur.get("whale_1000_pct", 0.0))
+            w400 = float(cur.get("whale_400_pct", 0.0))
+            holders = int(cur.get("total_holders", 0))
+            tdcc_info = {
+                "date": str(cur["date"]),
+                "whale_1000_pct": round(w1000, 2),
+                "whale_1000_chg_1w": round(w1000 - float(prev.get("whale_1000_pct", 0.0)), 2) if prev else None,
+                "whale_400_pct": round(w400, 2),
+                "whale_400_chg_1w": round(w400 - float(prev.get("whale_400_pct", 0.0)), 2) if prev else None,
+                "total_holders": holders,
+                "holders_chg_1w": int(holders - int(prev.get("total_holders", 0))) if prev else None,
+            }
+
+    return broker_diff_info, margin_info, sbl_info, tdcc_info
+
+
+# =====================================================================
+# 六、 核心籌碼診斷分析引擎（滾動 60 日主力＋六大指標共振）
+# =====================================================================
 def analyze_main_force(
     df_price: pd.DataFrame,
     df_chips: pd.DataFrame,
@@ -560,95 +1201,145 @@ def analyze_main_force(
     df_chips_full: pd.DataFrame = None,
     df_price_full: pd.DataFrame = None,
     concentrations: dict = None,
+    df_aux_full: pd.DataFrame = None,
+    tdcc_history: list = None,
+    issued_lots: float = 0.0,
 ) -> dict:
     """
-    方案 A（分點與投信徹底分流，消除重複計算）：
-    1. 「今年最大主力」、「今年三大主力」與「四張買賣超排行榜」僅計算【純券商分點】（排除投信）。
-    2. 「投信」獨立產出 trust_info（含今年累計、區間、今日、近10/20日、連買賣、控盤率與庫存均價），於專屬橫幅獨立呈現。
-    3. 呼叫 strategy.py 判定背離警報與五大實戰劇本。
+    全維度籌碼診斷引擎：
+    1. 以滾動 60 日淨買超（自動排除高頻隔日沖）鎖定波段前三大主力，取代容易滯後的 YTD 排名。
+    2. 投信維持獨立維度（不與分點重複加總），但補上持股水位(%)與階段評估，並正式納入劇本共振。
+    3. 整合 60 日滾動 Z-Score、金額防呆、三大主力合計 VWAP 成本、贏家分點勝率、
+       買賣家數差、融資券、借券賣出與 TDCC 集保大戶，產出綜合分數與劇本診斷。
     """
+    p = STRATEGY_PARAMS
     all_cols = [c for c in df_chips.columns if c != "date"]
     pure_broker_cols = [c for c in all_cols if c != "投信"]
 
+    empty_resp = {
+        "main_force_html": "無分點資料",
+        "main_force_sub_lines": [],
+        "status_html": "⚪ 無法判定",
+        "status_sub": "",
+        "divergence_alert": None,
+        "scenario": {
+            "id": 0, "type": "neutral", "sub_type": "無資料",
+            "title": "⚪ 無資料", "desc": "", "action": "",
+            "badges": [], "conviction_score": 50,
+        },
+        "top3_names": [],
+        "top3_period_net": 0,
+        "top3_period_ctrl_pct": 0.0,
+        "top3_5d_ctrl_pct": 0.0,
+        "top3_5d_ctrl_z": None,
+        "top3_5d_float_pct": None,
+        "top3_cost": 0.0,
+        "top3_inv": 0,
+        "top3_pnl_pct": None,
+        "top3_rows": [],
+        "filtered_day_traders": [],
+        "day_trade_info": {"is_heavy_day_trade": False, "dt_vol_pct": 0.0, "dt_top15_pct": 0.0, "dt_buyers": [], "dt_net_today": 0},
+        "winner_brokers": [],
+        "recent_10d_rising": {},
+        "broker_tags": {},
+        "remark_md": "",
+        "trust_info": None,
+        "broker_diff_info": None,
+        "margin_info": None,
+        "sbl_info": None,
+        "tdcc_info": None,
+        "concentrations": concentrations or {},
+        "vol_ratio_5_20": None,
+        "issued_lots": float(issued_lots or 0.0),
+        "top_buyers": {},
+        "top_sellers": {},
+        "ytd_top_buyers": {},
+        "ytd_top_sellers": {},
+        "today_buyers": {},
+        "today_sellers": {},
+    }
+
     if df_price.empty or (not pure_broker_cols and "投信" not in all_cols):
-        return {
-            "main_force_html": "無分點資料",
-            "main_force_sub_lines": [],
-            "status_html": "⚪ 無法判定",
-            "status_sub": "",
-            "divergence_alert": None,
-            "scenario": {"id": 0, "type": "neutral", "title": "⚪ 無資料", "desc": "", "action": ""},
-            "top3_names": [],
-            "top3_period_net": 0,
-            "top3_period_ctrl_pct": 0.0,
-            "top3_rows": [],
-            "remark_md": "",
-            "trust_info": None,
-            "top_buyers": {},
-            "top_sellers": {},
-            "today_buyers": {},
-            "today_sellers": {},
-        }
+        return empty_resp
 
     full_df = df_chips_full if df_chips_full is not None else df_chips
     full_price = df_price_full if df_price_full is not None else df_price
     period_vol = float(df_price["volume"].sum()) if "volume" in df_price.columns else 0.0
     latest_close_full = float(full_price.iloc[-1]["close"])
+    wave_days = p["wave_lookback_days"]
 
-    # --- 獨立計算「投信」完整數據（不混入分點排名） ---
+    # --- 1. 獨立計算「投信」完整數據（含持股水位與階段判定） ---
     trust_info = None
     if "投信" in full_df.columns:
-        t_ytd = int(full_df["投信"].sum())
-        t_period = int(df_chips["投信"].sum()) if "投信" in df_chips.columns else 0
-        t_d1 = int(full_df.tail(1)["投信"].sum())
-        t_d10 = int(full_df.tail(10)["投信"].sum())
-        t_d20 = int(full_df.tail(20)["投信"].sum())
+        t_ytd = int(round(float(full_df["投信"].sum())))
+        t_period = int(round(float(df_chips["投信"].sum()))) if "投信" in df_chips.columns else 0
+        t_d1 = int(round(float(full_df.tail(1)["投信"].sum())))
+        t_d5 = int(round(float(full_df.tail(5)["投信"].sum())))
+        t_d10 = int(round(float(full_df.tail(10)["投信"].sum())))
+        t_d20 = int(round(float(full_df.tail(20)["投信"].sum())))
         t_streak = _calc_streak(full_df["投信"])
-        t_ctrl = round((t_period / period_vol * 100), 1) if period_vol > 0 else 0.0
+        t_ctrl = round((t_period / period_vol * 100.0), 1) if period_vol > 0 else 0.0
 
         merged_trust = full_price.merge(full_df[["date", "投信"]], on="date", how="left").fillna({"投信": 0.0})
-        _, t_cost, t_inv = calculate_main_force_cost(merged_trust, merged_trust["投信"])
-        t_pnl = round((latest_close_full - t_cost) / t_cost * 100, 2) if (t_cost > 0 and t_inv > 0) else None
+        _, t_cost, t_inv = calculate_main_force_cost(merged_trust, merged_trust["投信"], window_days=wave_days)
+        if t_cost <= 0:
+            _, t_cost, t_inv = calculate_main_force_cost(merged_trust, merged_trust["投信"])
+        t_pnl = round((latest_close_full - t_cost) / t_cost * 100.0, 2) if (t_cost > 0 and t_inv > 0) else None
+
+        # 計算投信持股比率（佔發行股本 %）
+        t_holding_lots = None
+        t_holding_pct = None
+        if df_aux_full is not None and "trust_holding" in df_aux_full.columns:
+            th_s = pd.to_numeric(df_aux_full["trust_holding"], errors="coerce").dropna()
+            if not th_s.empty:
+                t_holding_lots = int(round(float(th_s.iloc[-1])))
+                if issued_lots and issued_lots > 0:
+                    t_holding_pct = round((t_holding_lots / float(issued_lots)) * 100.0, 2)
 
         trust_info = {
             "ytd": t_ytd,
             "period": t_period,
             "d1": t_d1,
+            "d5": t_d5,
             "d10": t_d10,
             "d20": t_d20,
             "streak": t_streak,
             "ctrl_pct": t_ctrl,
-            "cost": t_cost if (t_cost > 0 and t_inv > 0) else 0.0,
+            "cost": round(float(t_cost), 2) if (t_cost > 0 and t_inv > 0) else 0.0,
             "inv": int(round(t_inv)) if t_inv > 0 else 0,
             "pnl_pct": t_pnl,
+            "holding_lots": t_holding_lots,
+            "holding_pct": t_holding_pct,
         }
+        trust_info["phase"] = evaluate_trust_phase(trust_info)
+
+    # --- 2. 整理四大輔助籌碼（家數差、融資券、借券、集保） ---
+    broker_diff_info, margin_info, sbl_info, tdcc_info = _extract_aux_metrics(
+        full_price, full_df, pure_broker_cols, df_aux_full, tdcc_history
+    )
 
     if not pure_broker_cols:
-        return {
-            "main_force_html": "尚無券商分點資料",
-            "main_force_sub_lines": [],
-            "status_html": "⚪ 無法判定",
-            "status_sub": "",
-            "divergence_alert": None,
-            "scenario": {"id": 0, "type": "neutral", "title": "⚪ 無分點資料", "desc": "", "action": ""},
-            "top3_names": [],
-            "top3_period_net": 0,
-            "top3_period_ctrl_pct": 0.0,
-            "top3_rows": [],
-            "remark_md": "",
-            "trust_info": trust_info,
-            "top_buyers": {},
-            "top_sellers": {},
-            "today_buyers": {},
-            "today_sellers": {},
-        }
+        empty_resp["trust_info"] = trust_info
+        empty_resp["broker_diff_info"] = broker_diff_info
+        empty_resp["margin_info"] = margin_info
+        empty_resp["sbl_info"] = sbl_info
+        empty_resp["tdcc_info"] = tdcc_info
+        return empty_resp
 
-    # --- 以下皆僅使用 pure_broker_cols（純券商分點，無投信重疊） ---
+    # --- 3. 分點行為畫像：隔日沖辨識、贏家分點勝率、滾動 60 日波段主力 ---
+    broker_profiles = profile_brokers(full_price, full_df, lookback_days=wave_days)
+    top3_names, filtered_dt = select_wave_main_forces(broker_profiles, top_n=3, exclude_day_traders=True)
+
+    # 為所有集中度補上 60 日滾動 Z-Score
+    conc_with_z = _compute_proxy_concentration_zscores(
+        full_price, full_df, pure_broker_cols, concentrations or {}, df_aux_full
+    )
+
+    # 統計各視窗排名
     total_ytd = full_df[pure_broker_cols].sum().sort_values(ascending=False)
-    top_buyers_ytd = total_ytd[total_ytd > 0].head(5)
-    top_sellers_ytd = total_ytd[total_ytd < 0].tail(5).sort_values(ascending=True)
-
+    total_60d = full_df.tail(wave_days)[pure_broker_cols].sum().sort_values(ascending=False)
     period_sum = df_chips[pure_broker_cols].sum()
+
     recent_1 = full_df.tail(1)[pure_broker_cols].sum()
     recent_1_sorted = recent_1.sort_values(ascending=False)
     today_buyers = recent_1_sorted[recent_1_sorted > 0].head(5)
@@ -658,111 +1349,269 @@ def analyze_main_force(
     recent_10 = full_df.tail(10)[pure_broker_cols].sum()
     recent_20 = full_df.tail(20)[pure_broker_cols].sum()
 
-    if top_buyers_ytd.empty:
-        return {
-            "main_force_html": "無波段買超分點主力（全年度偏空）",
-            "main_force_sub_lines": ["今年以來追蹤券商分點累計皆為淨賣超"],
-            "status_html": "🔴 全年分點空方主導／出貨格局",
-            "status_sub": "",
-            "divergence_alert": None,
-            "scenario": {"id": 5, "type": "bear", "title": "🟢 當前劇本：全年空方主導", "desc": "今年以來主要券商分點累計皆為淨賣超。", "action": "避開空頭排列個股。"},
-            "top3_names": [],
-            "top3_period_net": 0,
-            "top3_period_ctrl_pct": 0.0,
-            "top3_rows": [],
-            "remark_md": "",
+    # 近 60 日買賣超前 5 大（波段） & 今年累計買賣超前 5 大
+    top_buyers_60d = total_60d[total_60d > 0].head(5)
+    top_sellers_60d = total_60d[total_60d < 0].tail(5).sort_values(ascending=True)
+    ytd_buyers = total_ytd[total_ytd > 0].head(5)
+    ytd_sellers = total_ytd[total_ytd < 0].tail(5).sort_values(ascending=True)
+
+    # 近 10 日新崛起波段分點（排除隔日沖，用於情境 2 換手接棒追蹤）
+    rising_10d_sorted = recent_10.sort_values(ascending=False)
+    recent_10d_rising = {
+        k: int(round(float(v)))
+        for k, v in rising_10d_sorted.items()
+        if v > 0 and not broker_profiles.get(k, {}).get("is_day_trader", False)
+    }
+    recent_10d_rising = dict(list(recent_10d_rising.items())[:5])
+
+    # 贏家分點清單（依勝率與近 60 日淨買超排序）
+    winner_brokers = sorted(
+        [
+            {
+                "name": info["name"],
+                "win_rate": info["win_rate"],
+                "avg_fwd_ret": info["avg_fwd_ret"],
+                "buy_signals": info["buy_signals"],
+                "net_60d": info["net_60d"],
+                "net_5d": info["net_5d"],
+                "net_1d": info["net_1d"],
+            }
+            for info in broker_profiles.values()
+            if info["is_winner"]
+        ],
+        key=lambda x: (x["net_5d"] > 0, x["win_rate"] or 0.0, x["net_60d"]),
+        reverse=True,
+    )[:5]
+
+    broker_tags = {
+        name: info["tags"]
+        for name, info in broker_profiles.items()
+        if info.get("tags")
+    }
+
+    # --- 4. 偵測最新交易日隔日沖集中度風險 ---
+    latest_vol = float(full_price.iloc[-1]["volume"]) if "volume" in full_price.columns else 0.0
+    dt_today_buyers = []
+    dt_today_net = 0.0
+    for b_name, b_val in today_buyers.items():
+        if broker_profiles.get(b_name, {}).get("is_day_trader", False) and b_val > 0:
+            dt_today_buyers.append(b_name)
+            dt_today_net += float(b_val)
+
+    dt_vol_pct = round((dt_today_net / latest_vol * 100.0), 1) if latest_vol > 0 else 0.0
+    pos_today_top15 = float(recent_1_sorted[recent_1_sorted > 0].head(15).sum())
+    dt_top15_pct = round((dt_today_net / pos_today_top15 * 100.0), 1) if pos_today_top15 > 0 else 0.0
+    is_heavy_dt = bool(
+        dt_today_buyers
+        and (
+            dt_vol_pct >= p["dt_today_vol_warn_pct"]
+            or (dt_top15_pct >= p["dt_today_top15_warn_pct"] and dt_vol_pct >= 2.0)
+        )
+    )
+    day_trade_info = {
+        "is_heavy_day_trade": is_heavy_dt,
+        "dt_vol_pct": dt_vol_pct,
+        "dt_top15_pct": dt_top15_pct,
+        "dt_buyers": dt_today_buyers,
+        "dt_net_today": int(round(dt_today_net)),
+    }
+
+    # 若近 60 日無任何淨買超波段分點（全空頭格局）
+    if not top3_names:
+        empty_resp.update({
+            "main_force_html": "無波段買超分點主力（近 60 日偏空）",
+            "main_force_sub_lines": ["近 60 個交易日追蹤券商分點累計皆為淨賣超"],
+            "status_html": "🟢 近 60 日分點空方主導／出貨格局",
+            "scenario": {
+                "id": 5, "type": "bear", "sub_type": "全線偏空",
+                "title": "🟢 當前劇本：近 60 日空方主導",
+                "desc": "近 60 個交易日主要券商分點累計皆為淨賣超。",
+                "action": "避開空頭排列與無主力承接個股。",
+                "badges": [], "conviction_score": 15,
+            },
+            "filtered_day_traders": filtered_dt,
+            "day_trade_info": day_trade_info,
+            "winner_brokers": winner_brokers,
+            "recent_10d_rising": recent_10d_rising,
+            "broker_tags": broker_tags,
             "trust_info": trust_info,
-            "top_buyers": {},
-            "top_sellers": {k: int(v) for k, v in top_sellers_ytd.items()},
-            "today_buyers": {k: int(v) for k, v in today_buyers.items()},
-            "today_sellers": {k: int(v) for k, v in today_sellers.items()},
-        }
+            "broker_diff_info": broker_diff_info,
+            "margin_info": margin_info,
+            "sbl_info": sbl_info,
+            "tdcc_info": tdcc_info,
+            "concentrations": conc_with_z,
+            "top_sellers": {k: int(round(float(v))) for k, v in top_sellers_60d.items()},
+            "ytd_top_buyers": {k: int(round(float(v))) for k, v in ytd_buyers.items()},
+            "ytd_top_sellers": {k: int(round(float(v))) for k, v in ytd_sellers.items()},
+            "today_buyers": {k: int(round(float(v))) for k, v in today_buyers.items()},
+            "today_sellers": {k: int(round(float(v))) for k, v in today_sellers.items()},
+        })
+        return empty_resp
 
-    # 鎖定年度最大券商分點主力
-    primary_player = top_buyers_ytd.index[0]
-    primary_ytd_net = int(top_buyers_ytd.iloc[0])
+    # --- 5. 計算近 60 日波段前三大主力合計成本（VWAP）與第一大主力資訊 ---
+    primary_player = top3_names[0]
+    primary_60d_net = int(round(float(total_60d.get(primary_player, 0.0))))
+    primary_ytd_net = int(round(float(total_ytd.get(primary_player, 0.0))))
 
-    primary_series_ytd = full_df[primary_player]
-    primary_buy_total = int(primary_series_ytd[primary_series_ytd > 0].sum())
-    primary_sell_total = int(primary_series_ytd[primary_series_ytd < 0].sum())
+    merged_all = full_price.merge(full_df[["date"] + top3_names], on="date", how="left").fillna(0.0)
+    top3_daily_net = merged_all[top3_names].sum(axis=1)
+    _, top3_cost, top3_inv = calculate_main_force_cost(merged_all, top3_daily_net, window_days=wave_days)
+    if top3_cost <= 0:
+        _, top3_cost, top3_inv = calculate_main_force_cost(merged_all, top3_daily_net)
 
-    merged_for_cost = full_price.merge(full_df[["date", primary_player]], on="date", how="left").fillna({primary_player: 0.0})
-    _, primary_cost, primary_inv = calculate_main_force_cost(merged_for_cost, merged_for_cost[primary_player])
+    _, primary_cost, primary_inv = calculate_main_force_cost(
+        merged_all, merged_all[primary_player], window_days=wave_days
+    )
+    if primary_cost <= 0:
+        _, primary_cost, primary_inv = calculate_main_force_cost(merged_all, merged_all[primary_player])
+
+    top3_pnl_pct = (
+        round((latest_close_full - top3_cost) / top3_cost * 100.0, 2)
+        if (top3_cost > 0 and top3_inv > 0)
+        else None
+    )
+
     latest_ma10 = round(float(full_price["close"].tail(10).mean()), 2)
     latest_ma20 = round(float(full_price["close"].tail(20).mean()), 2)
 
-    main_force_html = f"{primary_player}（今年 {_fmt_html_num(primary_ytd_net)}）"
+    # 5日 / 20日 均量比（供情境 4 真洗盤檢核）
+    vol_ratio_5_20 = None
+    if "volume" in full_price.columns and len(full_price) >= 10:
+        v5 = float(full_price["volume"].tail(5).mean())
+        v20 = float(full_price["volume"].tail(20).mean())
+        if v20 > 0:
+            vol_ratio_5_20 = round(v5 / v20, 2)
+
+    p_tags = " ".join(broker_profiles.get(primary_player, {}).get("tags", []))
+    p_tag_html = f' <span style="font-size:0.78rem; color:#fbbf24;">{p_tags}</span>' if p_tags else ""
+    main_force_html = f"{primary_player}{p_tag_html}（近60日 {_fmt_html_num(primary_60d_net)}）"
+
     main_force_sub_lines = [
-        f"今年累計買超 {_fmt_html_num(primary_buy_total)} ／ 賣超 {_fmt_html_num(primary_sell_total)}（淨額 {_fmt_html_num(primary_ytd_net)}）"
+        f"今年累計 {_fmt_html_num(primary_ytd_net)}"
+        + (f" ｜ 單一均價 <b>{primary_cost:,.2f} 元</b>" if primary_cost > 0 else "")
     ]
-    if primary_cost > 0 and primary_inv > 0:
-        pnl_pct = (latest_close_full - primary_cost) / primary_cost * 100
+    if top3_cost > 0 and top3_inv > 0 and top3_pnl_pct is not None:
         main_force_sub_lines.append(
-            f"目前庫存均價：<b style='color:#ffb74d;'>{primary_cost:,.2f} 元</b>（帳面損益 {_fmt_html_pct(pnl_pct)}）"
+            f"三大主力合計成本：<b style='color:#ffb74d;'>{top3_cost:,.2f} 元</b>（帳面 {_fmt_html_pct(top3_pnl_pct)}）"
+        )
+    if filtered_dt:
+        main_force_sub_lines.append(
+            f"<span style='color:#94a3b8;'>⚡ 已自動過濾短沖：{', '.join(filtered_dt[:3])}</span>"
         )
 
-    # 卡片二：區間內今年三大券商分點主力狀態
-    top3_names = list(top_buyers_ytd.head(3).index)
-    top3_period_net = int(period_sum[top3_names].sum())
-    top3_period_ctrl_pct = round((top3_period_net / period_vol * 100), 1) if period_vol > 0 else 0.0
-    top3_5d = int(recent_5[top3_names].sum())
-    threshold = 50 if len(df_price) <= 1 else 300
+    # --- 6. 近 5 日控盤率、金額防呆、佔股本比率與 60 日滾動 Z-Score ---
+    top3_period_net = int(round(float(period_sum[top3_names].sum())))
+    top3_period_ctrl_pct = round((top3_period_net / period_vol * 100.0), 1) if period_vol > 0 else 0.0
+    top3_5d = int(round(float(recent_5[top3_names].sum())))
 
-    if primary_player in DAY_TRADE_BROKERS and abs(primary_ytd_net) < 500:
-        status_html = "🟡 隔日沖短線客主導（慎防倒貨）"
-    elif top3_period_net > threshold:
-        status_html = f"🟢 區間內三大分點主力吃貨中（{_fmt_html_num(top3_period_net)}）"
-    elif top3_period_net < -threshold:
-        status_html = f"🔴 區間內三大分點主力出貨中（{_fmt_html_num(top3_period_net)}）"
-    else:
-        status_html = f"🔵 區間內三大分點主力鎖碼觀望（{_fmt_html_num(top3_period_net)}）"
+    # 近 5 日成交金額估算 (NTD)
+    last5_merged = merged_all.tail(5)
+    p_col = "vwap" if "vwap" in last5_merged.columns else "close"
+    last5_prices = pd.to_numeric(last5_merged[p_col], errors="coerce").fillna(latest_close_full)
+    top3_5d_amount_ntd = float((last5_merged[top3_names].sum(axis=1) * last5_prices * 1000.0).sum())
 
-    status_sub = f"三大分點名單：{', '.join(top3_names)}"
-
-    # 近 5 日漲跌幅與三大分點控盤率 (%)
-    price_5d_pct = 0.0
     vol_5d = float(full_price.tail(5)["volume"].sum()) if "volume" in full_price.columns else 0.0
-    top3_5d_ctrl_pct = round((top3_5d / vol_5d * 100), 2) if vol_5d > 0 else 0.0
+    top3_5d_ctrl_pct = round((top3_5d / vol_5d * 100.0), 2) if vol_5d > 0 else 0.0
+    top3_5d_float_pct = (
+        round((top3_5d / float(issued_lots)) * 100.0, 2)
+        if (issued_lots and issued_lots > 0)
+        else None
+    )
 
+    # 計算三大波段主力 5 日控盤率的 60 日滾動 Z-Score
+    roll5_net_s = top3_daily_net.rolling(5).sum()
+    roll5_vol_s = pd.to_numeric(merged_all["volume"], errors="coerce").rolling(5).sum()
+    ctrl_5d_series = (roll5_net_s / roll5_vol_s.replace(0, np.nan)) * 100.0
+    top3_5d_ctrl_z = compute_rolling_zscore(ctrl_5d_series, window=p["zscore_window"])
+
+    # 卡片二：區間內三大波段主力狀態（改用控盤率＋金額，取代固定 50/300 張門檻）
+    period_amt_ntd = abs(top3_period_net) * latest_close_full * 1000.0
+    min_card_amt = 1_500_000 if len(df_price) <= 1 else p["min_abs_amount_5d_ntd"]
+
+    if is_heavy_dt and len(df_price) <= 1:
+        status_html = f"🟡 今日隔日沖買盤過重（佔量 {dt_vol_pct:.1f}%，慎防倒貨）"
+    elif top3_period_net > 0 and (top3_period_ctrl_pct >= 1.5 or period_amt_ntd >= min_card_amt):
+        status_html = f"🔴 區間內三大波段主力吃貨中（{_fmt_html_num(top3_period_net)}）"
+    elif top3_period_net < 0 and (top3_period_ctrl_pct <= -1.5 or period_amt_ntd >= min_card_amt):
+        status_html = f"🟢 區間內三大波段主力出貨中（{_fmt_html_num(top3_period_net)}）"
+    else:
+        status_html = f"🔵 區間內三大波段主力鎖碼觀望（{_fmt_html_num(top3_period_net)}）"
+
+    status_sub = f"近 60 日波段三大主力：{', '.join(top3_names)}"
+
+    # 近 5 日股價漲跌幅
+    price_5d_pct = 0.0
     if len(full_price) >= 5:
         close_now = float(full_price.iloc[-1]["close"])
         close_5d_ago = float(full_price.iloc[-6]["close"]) if len(full_price) >= 6 else float(full_price.iloc[0]["close"])
-        price_5d_pct = ((close_now - close_5d_ago) / close_5d_ago * 100) if close_5d_ago > 0 else 0.0
+        price_5d_pct = ((close_now - close_5d_ago) / close_5d_ago * 100.0) if close_5d_ago > 0 else 0.0
 
-    # 呼叫 strategy.py 進行策略判定
-    divergence_alert = evaluate_divergence_alert(price_5d_pct, top3_5d, top3_5d_ctrl_pct)
+    # --- 7. 呼叫 strategy.py 判定背離警報與五大劇本（含六大指標共振層） ---
+    divergence_alert = evaluate_divergence_alert(
+        price_5d_pct=price_5d_pct,
+        top3_5d=top3_5d,
+        top3_5d_ctrl_pct=top3_5d_ctrl_pct,
+        latest_close=latest_close_full,
+        top3_5d_amount_ntd=top3_5d_amount_ntd,
+        top3_5d_ctrl_z=top3_5d_ctrl_z,
+        margin_info=margin_info,
+        sbl_info=sbl_info,
+    )
+
     scenario = evaluate_chip_scenario(
         top3_5d=top3_5d,
         top3_5d_ctrl_pct=top3_5d_ctrl_pct,
         latest_close=latest_close_full,
         ma10=latest_ma10,
         ma20=latest_ma20,
-        primary_cost=primary_cost if primary_inv > 0 else 0.0,
+        top3_cost=top3_cost if top3_inv > 0 else 0.0,
         price_5d_pct=price_5d_pct,
-        conc=concentrations or {},
+        conc=conc_with_z,
+        top3_5d_amount_ntd=top3_5d_amount_ntd,
+        top3_5d_ctrl_z=top3_5d_ctrl_z,
+        top3_5d_float_pct=top3_5d_float_pct,
+        vol_ratio_5_20=vol_ratio_5_20,
+        trust_info=trust_info,
+        broker_diff_info=broker_diff_info,
+        margin_info=margin_info,
+        sbl_info=sbl_info,
+        tdcc_info=tdcc_info,
+        day_trade_info=day_trade_info,
     )
 
-    # 前三大分點主力明細
+    # --- 8. 整理前三大波段主力明細列 ---
     top3_rows = []
     for name in top3_names:
-        b_period = int(period_sum.get(name, 0))
-        ctrl_pct = (b_period / period_vol * 100) if period_vol > 0 else 0.0
+        b_period = int(round(float(period_sum.get(name, 0.0))))
+        ctrl_pct = (b_period / period_vol * 100.0) if period_vol > 0 else 0.0
         streak = _calc_streak(full_df[name])
+        prof = broker_profiles.get(name, {})
         top3_rows.append({
             "name": name,
-            "ytd": int(total_ytd.get(name, 0)),
+            "net_60d": int(round(float(total_60d.get(name, 0.0)))),
+            "ytd": int(round(float(total_ytd.get(name, 0.0)))),
             "period": b_period,
-            "d1": int(recent_1.get(name, 0)),
-            "d10": int(recent_10.get(name, 0)),
-            "d20": int(recent_20.get(name, 0)),
+            "d1": int(round(float(recent_1.get(name, 0.0)))),
+            "d10": int(round(float(recent_10.get(name, 0.0)))),
+            "d20": int(round(float(recent_20.get(name, 0.0)))),
             "streak": streak,
-            "ctrl_pct": round(ctrl_pct, 1),
+            "ctrl_pct": round(float(ctrl_pct), 1),
+            "tags": prof.get("tags", []),
+            "win_rate": prof.get("win_rate"),
+            "avg_fwd_ret": prof.get("avg_fwd_ret"),
+            "churn_ratio": prof.get("churn_ratio", 0.0),
         })
 
-    # 備註：本檢視區間純券商分點買超／賣超第一名
+    # 備註：本區間買賣超第一名
     sorted_period = period_sum.sort_values(ascending=False)
-    top_buy_text = f"**{sorted_period.index[0]}**（{_fmt_md_num(int(sorted_period.iloc[0]))}）" if sorted_period.iloc[0] > 0 else "無"
-    top_sell_text = f"**{sorted_period.index[-1]}**（{_fmt_md_num(int(sorted_period.iloc[-1]))}）" if sorted_period.iloc[-1] < 0 else "無"
+    top_buy_text = (
+        f"**{sorted_period.index[0]}**（{_fmt_md_num(int(round(float(sorted_period.iloc[0]))))}）"
+        if sorted_period.iloc[0] > 0 else "無"
+    )
+    top_sell_text = (
+        f"**{sorted_period.index[-1]}**（{_fmt_md_num(int(round(float(sorted_period.iloc[-1]))))}）"
+        if sorted_period.iloc[-1] < 0 else "無"
+    )
 
     return {
         "main_force_html": main_force_html,
@@ -774,16 +1623,39 @@ def analyze_main_force(
         "top3_names": top3_names,
         "top3_period_net": top3_period_net,
         "top3_period_ctrl_pct": top3_period_ctrl_pct,
+        "top3_5d_ctrl_pct": top3_5d_ctrl_pct,
+        "top3_5d_ctrl_z": top3_5d_ctrl_z,
+        "top3_5d_float_pct": top3_5d_float_pct,
+        "top3_cost": round(float(top3_cost), 2) if top3_inv > 0 else 0.0,
+        "top3_inv": int(round(top3_inv)) if top3_inv > 0 else 0,
+        "top3_pnl_pct": top3_pnl_pct,
         "top3_rows": top3_rows,
+        "filtered_day_traders": filtered_dt,
+        "day_trade_info": day_trade_info,
+        "winner_brokers": winner_brokers,
+        "recent_10d_rising": recent_10d_rising,
+        "broker_tags": broker_tags,
         "remark_md": f"- 💡 備註：本檢視區間分點買超第一名為 {top_buy_text} ｜ 分點賣超第一名為 {top_sell_text}",
         "trust_info": trust_info,
-        "top_buyers": {k: int(v) for k, v in top_buyers_ytd.items()},
-        "top_sellers": {k: int(v) for k, v in top_sellers_ytd.items()},
-        "today_buyers": {k: int(v) for k, v in today_buyers.items()},
-        "today_sellers": {k: int(v) for k, v in today_sellers.items()},
+        "broker_diff_info": broker_diff_info,
+        "margin_info": margin_info,
+        "sbl_info": sbl_info,
+        "tdcc_info": tdcc_info,
+        "concentrations": conc_with_z,
+        "vol_ratio_5_20": vol_ratio_5_20,
+        "issued_lots": float(issued_lots or 0.0),
+        "top_buyers": {k: int(round(float(v))) for k, v in top_buyers_60d.items()},
+        "top_sellers": {k: int(round(float(v))) for k, v in top_sellers_60d.items()},
+        "ytd_top_buyers": {k: int(round(float(v))) for k, v in ytd_buyers.items()},
+        "ytd_top_sellers": {k: int(round(float(v))) for k, v in ytd_sellers.items()},
+        "today_buyers": {k: int(round(float(v))) for k, v in today_buyers.items()},
+        "today_sellers": {k: int(round(float(v))) for k, v in today_sellers.items()},
     }
 
 
+# =====================================================================
+# 七、 GitHub 雲端資料庫同步、排序與刪除管理
+# =====================================================================
 def _get_github_config():
     token = os.environ.get("GITHUB_TOKEN", "").strip()
     repo = os.environ.get("REPO_NAME", "").strip()
@@ -805,7 +1677,7 @@ def _sync_file_to_github(local_path: str, repo_path: str) -> tuple[bool, str]:
     api_url = f"https://api.github.com/repos/{repo}/contents/{repo_path}"
     headers = {
         "Authorization": f"token {token}",
-        "Accept": "application/vnd.github.v3+json"
+        "Accept": "application/vnd.github.v3+json",
     }
     with open(local_path, "rb") as f:
         content_b64 = base64.b64encode(f.read()).decode("utf-8")
@@ -830,7 +1702,6 @@ def _sync_file_to_github(local_path: str, repo_path: str) -> tuple[bool, str]:
 
 
 def _delete_file_from_github(repo_path: str) -> tuple[bool, str]:
-    """透過 GitHub REST API 刪除儲存庫內的單一檔案"""
     token, repo = _get_github_config()
     if not token or not repo:
         return False, "未設定 GITHUB_TOKEN 或 REPO_NAME"
@@ -838,7 +1709,7 @@ def _delete_file_from_github(repo_path: str) -> tuple[bool, str]:
     api_url = f"https://api.github.com/repos/{repo}/contents/{repo_path}"
     headers = {
         "Authorization": f"token {token}",
-        "Accept": "application/vnd.github.v3+json"
+        "Accept": "application/vnd.github.v3+json",
     }
 
     get_resp = requests.get(api_url, headers=headers, timeout=10)
@@ -848,10 +1719,7 @@ def _delete_file_from_github(repo_path: str) -> tuple[bool, str]:
         return False, f"查詢失敗 (HTTP {get_resp.status_code})"
 
     sha = get_resp.json().get("sha")
-    payload = {
-        "message": f"Delete {repo_path} from Streamlit",
-        "sha": sha
-    }
+    payload = {"message": f"Delete {repo_path} from Streamlit", "sha": sha}
     del_resp = requests.delete(api_url, headers=headers, json=payload, timeout=15)
     if del_resp.status_code in (200, 204):
         return True, "已從 GitHub 刪除"
@@ -900,7 +1768,8 @@ def delete_stock_database(stock_id: str) -> tuple[bool, str]:
     target_files = [
         f"{stock_id}_price.csv",
         f"{stock_id}_chips.csv",
-        f"{stock_id}_meta.json"
+        f"{stock_id}_aux.csv",
+        f"{stock_id}_meta.json",
     ]
 
     for fname in target_files:
@@ -922,12 +1791,15 @@ def delete_stock_database(stock_id: str) -> tuple[bool, str]:
     return True, f"已刪除 {stock_id}"
 
 
+# =====================================================================
+# 八、 資料庫主更新流程（全量校準 ／ 近 3 日增量同步）
+# =====================================================================
 def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
     """
     更新指定個股資料並存檔至 database/：
-    - 自動讀取並記住該檔股票的上市(.TW)／上櫃(.TWO)後綴存進 _meta.json。
-    - incremental_days=None（手動單檔全量校準）：聯集「全年度前 30 大波段主力」與「近 3 個交易日前 20 大活躍分點」，回溯全年明細。
-    - incremental_days=3（全部更新／GitHub Actions 排程）：僅抓最近 3 個交易日並合併進既有資料庫。
+    - 產生/更新 {id}_price.csv、{id}_chips.csv、{id}_aux.csv、{id}_meta.json。
+    - incremental_days=None（單檔全量校準）：聯集近 60 日波段前 30 大＋全年度前 30 大＋近 3 日前 20 大分點。
+    - incremental_days=3（批量／排程增量更新）：抓最近 3 個交易日分點與輔助籌碼並合併進既有資料庫。
     """
     stock_id = stock_id.strip()
     now_tw = _get_tw_now()
@@ -935,9 +1807,11 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
 
     price_file = f"{stock_id}_price.csv"
     chips_file = f"{stock_id}_chips.csv"
+    aux_file = f"{stock_id}_aux.csv"
     meta_file = f"{stock_id}_meta.json"
     price_path = os.path.join(DB_DIR, price_file)
     chips_path = os.path.join(DB_DIR, chips_file)
+    aux_path = os.path.join(DB_DIR, aux_file)
     meta_path = os.path.join(DB_DIR, meta_file)
 
     saved_meta = {}
@@ -956,9 +1830,17 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
         and os.path.exists(chips_path)
     )
 
+    df_price_old = pd.DataFrame()
+    df_chips_old = pd.DataFrame()
+    df_aux_old = pd.DataFrame()
     if is_incremental:
         df_price_old = pd.read_csv(price_path)
         df_chips_old = pd.read_csv(chips_path)
+        if os.path.exists(aux_path):
+            try:
+                df_aux_old = pd.read_csv(aux_path)
+            except Exception:
+                df_aux_old = pd.DataFrame()
         if df_price_old.empty or df_chips_old.empty:
             is_incremental = False
 
@@ -975,36 +1857,50 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
         if df_price_recent.empty:
             return False
 
+    active_suffix = matched_suffix or preferred_suffix or ".TW"
     session = _create_session()
     df_chips_recent = df_price_recent[["date"]].copy()
     debug_notes = []
 
-    # 1. 抓投信（統稱）
-    df_trust, active_mirror, trust_err = fetch_investment_trust_history(session, stock_id, fetch_start, end_date)
+    # 1. 抓投信買賣超與估計持股
+    df_trust, active_mirror, trust_err = fetch_investment_trust_history(
+        session, stock_id, fetch_start, end_date
+    )
     if not df_trust.empty:
-        df_chips_recent = df_chips_recent.merge(df_trust, on="date", how="left")
+        df_chips_recent = df_chips_recent.merge(df_trust[["date", "投信"]], on="date", how="left")
     else:
         df_chips_recent["投信"] = 0.0
         if trust_err:
             debug_notes.append(f"投信異常: {trust_err}")
 
-    # 2. 抓中文股票名稱
+    # 2. 抓中文股票名稱與在外發行張數 (issued_lots)
     stock_name = str(saved_meta.get("stock_name", "")).strip() if isinstance(saved_meta, dict) else ""
     if not stock_name:
         stock_name = fetch_stock_name(session, stock_id, active_mirror)
 
-    # 3. 取得關鍵券商分點名單
-    brokers, active_mirror, broker_err = fetch_top_brokers(session, stock_id, fetch_start, end_date, active_mirror, limit=30)
+    issued_lots = float(saved_meta.get("issued_lots", 0.0) or 0.0) if isinstance(saved_meta, dict) else 0.0
+    if issued_lots <= 0 or not is_incremental:
+        fetched_lots = fetch_issued_lots(session, stock_id, active_suffix, active_mirror)
+        if fetched_lots > 0:
+            issued_lots = fetched_lots
+
+    # 3. 取得關鍵券商分點名單（全量模式聯集：全年30大 ＋ 近60日30大 ＋ 近3日20大）
+    brokers, active_mirror, broker_err = fetch_top_brokers(
+        session, stock_id, fetch_start, end_date, active_mirror, limit=30
+    )
     if broker_err:
         debug_notes.append(f"分點清單異常: {broker_err}")
 
-    # 全量模式額外聯集「近 3 個交易日前 20 大活躍分點」
-    if not is_incremental and len(df_price_recent) >= 3:
-        recent_3d_start = df_price_recent.tail(3)["date"].min()
-        recent_brokers, _, _ = fetch_top_brokers(session, stock_id, recent_3d_start, end_date, active_mirror, limit=20)
-        if recent_brokers:
-            existing_names = {b["name"] for b in brokers}
-            for rb in recent_brokers:
+    if not is_incremental:
+        existing_names = {b["name"] for b in brokers}
+        extra_windows = []
+        if len(df_price_recent) >= 20:
+            extra_windows.append((df_price_recent.tail(60)["date"].min(), 25))
+        if len(df_price_recent) >= 3:
+            extra_windows.append((df_price_recent.tail(3)["date"].min(), 20))
+        for w_start, w_lim in extra_windows:
+            extra_b, _, _ = fetch_top_brokers(session, stock_id, w_start, end_date, active_mirror, limit=w_lim)
+            for rb in extra_b:
                 if rb["name"] not in existing_names:
                     brokers.append(rb)
                     existing_names.add(rb["name"])
@@ -1029,7 +1925,7 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
 
     df_chips_recent = df_chips_recent.fillna(0.0)
 
-    # 5. 合併或覆蓋資料庫
+    # 5. 合併股價與分點主表
     if is_incremental:
         df_price_kept = df_price_old[df_price_old["date"] < fetch_start].copy()
         df_price = pd.concat([df_price_kept, df_price_recent], ignore_index=True).sort_values("date").reset_index(drop=True)
@@ -1045,23 +1941,79 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
         if brokers and fetched_count == 0:
             debug_notes.append(f"找到 {len(brokers)} 個分點連結，但明細回傳為空")
 
-    # 6. 抓取近 5 / 10 / 20 日全市場前 15 大精準籌碼集中度
-    concentrations = fetch_rolling_concentrations(stock_id, df_price, active_mirror)
+    # 6. 併發抓取輔助籌碼（集中度、融資券、借券賣出、全市場家數差、TDCC 集保）
+    aux_fetch_start = (
+        df_price.tail(max(incremental_days + 7, 10))["date"].min()
+        if (is_incremental and not df_aux_old.empty)
+        else df_price.tail(90)["date"].min()
+    )
+    recent_dates_for_sbl = df_price["date"].tail(8).tolist()
+    existing_tdcc = saved_meta.get("tdcc_history", []) if isinstance(saved_meta, dict) else []
 
-    # 7. 寫入本地 CSV；若在 GitHub Actions 內執行則交由 workflow 統一 git push
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        fut_conc = ex.submit(fetch_rolling_concentrations, stock_id, df_price, active_mirror)
+        fut_margin = ex.submit(fetch_margin_history, _create_session(), stock_id, aux_fetch_start, end_date, active_mirror)
+        fut_sbl = ex.submit(fetch_sbl_history, _create_session(), stock_id, recent_dates_for_sbl, active_suffix)
+        fut_diff = ex.submit(fetch_market_broker_diff, _create_session(), stock_id)
+        fut_tdcc = ex.submit(fetch_tdcc_weekly_history, _create_session(), stock_id, existing_tdcc)
+
+        concentrations = fut_conc.result()
+        df_margin = fut_margin.result()
+        df_sbl = fut_sbl.result()
+        df_diff = fut_diff.result()
+        tdcc_history = fut_tdcc.result()
+
+    # 7. 組合並合併 _aux.csv（保留既有歷史快照如 conc_5d_official）
+    df_aux_new = df_price[["date"]].tail(max(len(df_margin), len(df_sbl), 15)).copy()
+    if not df_trust.empty and "trust_holding" in df_trust.columns:
+        df_aux_new = df_aux_new.merge(df_trust[["date", "trust_holding"]], on="date", how="left")
+    if not df_margin.empty:
+        df_aux_new = df_aux_new.merge(df_margin, on="date", how="left")
+    if not df_sbl.empty:
+        df_aux_new = df_aux_new.merge(df_sbl, on="date", how="left")
+    if not df_diff.empty:
+        df_aux_new = df_aux_new.merge(df_diff, on="date", how="left")
+
+    # 寫入今日官方 5 日集中度快照，累積滿 15 日即可供純官方 Z-Score 使用
+    latest_dt = df_price["date"].max()
+    c5_val = concentrations.get("d5", {}).get("pct") if isinstance(concentrations, dict) else None
+    if c5_val is not None:
+        df_aux_new["conc_5d_official"] = np.nan
+        df_aux_new.loc[df_aux_new["date"] == latest_dt, "conc_5d_official"] = float(c5_val)
+
+    if not df_aux_old.empty:
+        df_aux = (
+            pd.concat([df_aux_old, df_aux_new], ignore_index=True, sort=False)
+            .sort_values("date")
+            .groupby("date", as_index=False)
+            .last()
+            .sort_values("date")
+            .reset_index(drop=True)
+        )
+    else:
+        df_aux = df_aux_new.sort_values("date").reset_index(drop=True)
+
+    # 8. 寫入本地 CSV；若在 GitHub Actions 內執行則交由 workflow 統一 git push
     df_price.to_csv(price_path, index=False, encoding="utf-8-sig")
     df_chips.to_csv(chips_path, index=False, encoding="utf-8-sig")
+    df_aux.to_csv(aux_path, index=False, encoding="utf-8-sig")
 
     is_gha = os.environ.get("GITHUB_ACTIONS", "").lower() == "true"
     if is_gha:
         ok1 = True
-        sync_msg = f"GitHub Actions 自動增量同步（近 {incremental_days} 日）" if is_incremental else "GitHub Actions 自動同步"
+        sync_msg = (
+            f"GitHub Actions 自動增量同步（近 {incremental_days} 日）"
+            if is_incremental
+            else "GitHub Actions 自動同步"
+        )
     else:
         ok1, sync_msg = _sync_file_to_github(price_path, f"database/{price_file}")
         if ok1:
-            _, sync_msg = _sync_file_to_github(chips_path, f"database/{chips_file}")
+            ok1, sync_msg = _sync_file_to_github(chips_path, f"database/{chips_file}")
+        if ok1:
+            _, sync_msg = _sync_file_to_github(aux_path, f"database/{aux_file}")
 
-    # 8. 產出基礎摘要存檔
+    # 9. 產出完整診斷摘要存入 _meta.json
     meta = analyze_main_force(
         df_price,
         df_chips,
@@ -1069,12 +2021,16 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
         df_chips_full=df_chips,
         df_price_full=df_price,
         concentrations=concentrations,
+        df_aux_full=df_aux,
+        tdcc_history=tdcc_history,
+        issued_lots=issued_lots,
     )
     meta["stock_id"] = stock_id
     meta["stock_name"] = stock_name
-    meta["ticker_suffix"] = matched_suffix or preferred_suffix or ""
+    meta["ticker_suffix"] = active_suffix
+    meta["issued_lots"] = issued_lots
     meta["broker_count"] = total_brokers
-    meta["concentrations"] = concentrations
+    meta["tdcc_history"] = tdcc_history
     meta["last_updated"] = now_tw.strftime("%Y-%m-%d %H:%M")
     meta["debug_notes"] = debug_notes
     meta["github_sync"] = f"✅ {sync_msg}" if ok1 else f"⚠️ {sync_msg}"
@@ -1094,7 +2050,10 @@ if __name__ == "__main__":
         for fname in os.listdir(DB_DIR)
         if fname.endswith("_price.csv")
     })
-    print(f"[Daily Update] 開始增量更新（近 3 個交易日）共 {len(existing_stocks)} 檔個股：{existing_stocks}", flush=True)
+    print(
+        f"[Daily Update] 開始增量更新（近 3 個交易日）共 {len(existing_stocks)} 檔個股：{existing_stocks}",
+        flush=True,
+    )
     for sid in existing_stocks:
         t0 = time.time()
         ok = update_stock_database(sid, incremental_days=3)
