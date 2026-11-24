@@ -1,111 +1,373 @@
 {
-  "main_force_html": "投信（今年 <span style=\"color:#ef5350; font-weight:700;\">+932 張</span>）",
+  "main_force_html": "台灣摩根士丹利 <span style=\"font-size:0.78rem; color:#fbbf24;\">🏆贏家(65%)</span>（近60日 <span style=\"color:#ef5350; font-weight:700;\">+289 張</span>）",
   "main_force_sub_lines": [
-    "今年累計買超 <span style=\"color:#ef5350; font-weight:700;\">+4,112 張</span> ／ 賣超 <span style=\"color:#26a69a; font-weight:700;\">-3,180 張</span>（淨額 <span style=\"color:#ef5350; font-weight:700;\">+932 張</span>）",
-    "目前庫存均價：<b style='color:#ffb74d;'>16,066.29 元</b>（帳面損益 <span style=\"color:#26a69a; font-weight:700;\">-48.28%</span>）"
+    "今年累計 <span style=\"color:#ef5350; font-weight:700;\">+619 張</span> ｜ 單一均價 <b>12,304.40 元</b>",
+    "三大主力合計成本：<b style='color:#ffb74d;'>11,190.55 元</b>（帳面 <span style=\"color:#26a69a; font-weight:700;\">-18.32%</span>）",
+    "<span style='color:#94a3b8;'>⚡ 已自動過濾短沖：凱基-台北, 國票-敦北法人</span>"
   ],
-  "status_html": "🟢 區間內今年三大主力吃貨中（<span style=\"color:#ef5350; font-weight:700;\">+1,957 張</span>）",
-  "status_sub": "三大主力名單：投信, 台灣摩根士丹利, 新加坡商瑞銀",
-  "divergence_alert": null,
+  "status_html": "🔴 區間內三大波段主力吃貨中（<span style=\"color:#ef5350; font-weight:700;\">+575 張</span>）",
+  "status_sub": "近 60 日波段三大主力：台灣摩根士丹利, 新加坡商瑞銀, 永豐金-匯立",
+  "divergence_alert": {
+    "type": "bull",
+    "title": "🔴 底部承接背離警報（近 5 日價跌主力買）",
+    "desc": "近 5 日股價下跌 <b>-7.44%</b>，但近 60 日三大波段主力逆勢合計淨買超 <b style='color:#ef5350;'>+305 張</b>（控盤率 <b>+14.9% / Z:+2.1σ</b>、約 252,877 萬元），且全市場未見失控發散，留意低檔換手與止跌轉折訊號。<br>🧹 <b>融資減少 -51 張</b>，確認為高勝率「散戶停損、主力低接」結構。"
+  },
   "scenario": {
     "id": 0,
     "type": "neutral",
+    "sub_type": "中性整理",
     "title": "⚪ 當前狀態：籌碼中性整理（尚未觸發五大關鍵劇本）",
-    "desc": "收盤價 8,310.00 元（10MA 10,372.00 ／ 20MA 12,504.00），三大主力近 5 日淨額 -29 張（控盤率 -1.1%），全市場 5 日集中度 -2.0%，處於多空均衡或橫盤整理階段。",
-    "action": "持續觀察收盤價與 10MA/20MA 位置、5 日集中度是否突破 ±5% 或三大主力控盤率表態。"
+    "desc": "收盤價 9,140.00 元（10MA 10,092.50 ／ 20MA 12,160.25），近 60 日三大波段主力近 5 日淨額 +305 張（控盤率 +14.9% / Z:+2.1σ、佔股本 +0.73%），全市場 5 日集中度 -2.0%，處於多空均衡或橫盤整理階段。",
+    "action": "持續觀察收盤價與 10MA/20MA 位置、5 日集中度或三大波段主力控盤率表態。",
+    "badges": [
+      {
+        "level": "bear",
+        "label": "📉 月線下空頭排列",
+        "detail": "收盤價 (9,140.00) 低於 20MA (12,160.25) 且 10MA 低於 20MA，中線趨勢偏弱 (-8 分)。"
+      },
+      {
+        "level": "bear",
+        "label": "⛓️ 主力深套 (-18.3%)",
+        "detail": "股價已跌破近 60 日三大主力合計成本 (11,190.55 元) 逾 10%，上方解套賣壓沉重 (-6 分)。"
+      },
+      {
+        "level": "bull",
+        "label": "🧹 融資清洗（5日 -51張 / -26.1%）",
+        "detail": "散戶融資明顯退場，籌碼沉澱有利主力拉抬或止跌 (+7 分)。"
+      },
+      {
+        "level": "bull",
+        "label": "🚀 借券回補（5日 -73張 / -25.8%）",
+        "detail": "機構空方開始回補借券，空方壓力減輕並提供軋空助力 (+6 分)。"
+      }
+    ],
+    "conviction_score": 49
   },
   "top3_names": [
-    "投信",
     "台灣摩根士丹利",
-    "新加坡商瑞銀"
+    "新加坡商瑞銀",
+    "永豐金-匯立"
   ],
-  "top3_header_md": "- 今年前三大主力（**投信, 台灣摩根士丹利, 新加坡商瑞銀**）本區間合計：:red[**+1,957 張**]（近 20 日合計：:red[**+158 張**]）",
+  "top3_period_net": 575,
+  "top3_period_ctrl_pct": 0.8,
+  "top3_5d_ctrl_pct": 14.86,
+  "top3_5d_ctrl_z": 2.09,
+  "top3_5d_float_pct": 0.73,
+  "top3_cost": 11190.55,
+  "top3_inv": 727,
+  "top3_pnl_pct": -18.32,
   "top3_rows": [
     {
-      "name": "投信",
-      "ytd": 932,
-      "period": 932,
-      "d1": -184,
-      "d10": -574,
-      "d20": -157,
-      "streak": -6,
-      "ctrl_pct": 1.3
-    },
-    {
       "name": "台灣摩根士丹利",
+      "net_60d": 289,
       "ytd": 619,
       "period": 619,
-      "d1": 11,
-      "d10": -29,
-      "d20": -27,
-      "streak": 1,
-      "ctrl_pct": 0.9
+      "d1": 0,
+      "d10": 21,
+      "d20": 3,
+      "streak": 0,
+      "ctrl_pct": 0.9,
+      "tags": [
+        "🏆贏家(65%)"
+      ],
+      "win_rate": 65.4,
+      "avg_fwd_ret": 5.24,
+      "churn_ratio": 4.58
     },
     {
       "name": "新加坡商瑞銀",
+      "net_60d": 287,
       "ytd": 406,
       "period": 406,
-      "d1": 33,
-      "d10": 224,
-      "d20": 342,
-      "streak": 4,
-      "ctrl_pct": 0.6
+      "d1": 0,
+      "d10": 192,
+      "d20": 326,
+      "streak": 0,
+      "ctrl_pct": 0.6,
+      "tags": [
+        "🏆贏家(74%)"
+      ],
+      "win_rate": 73.9,
+      "avg_fwd_ret": 7.62,
+      "churn_ratio": 3.66
+    },
+    {
+      "name": "永豐金-匯立",
+      "net_60d": 138,
+      "ytd": -450,
+      "period": -450,
+      "d1": 0,
+      "d10": 85,
+      "d20": 93,
+      "streak": 0,
+      "ctrl_pct": -0.6,
+      "tags": [],
+      "win_rate": 70.6,
+      "avg_fwd_ret": 0.23,
+      "churn_ratio": 3.84
     }
   ],
-  "remark_md": "- 💡 備註：本檢視區間買超第一名為 **投信**（:red[**+932 張**]） ｜ 賣超第一名為 **港商麥格理**（:green[**-715 張**]）",
+  "filtered_day_traders": [
+    "凱基-台北",
+    "國票-敦北法人"
+  ],
+  "day_trade_info": {
+    "is_heavy_day_trade": false,
+    "dt_vol_pct": 0.0,
+    "dt_top15_pct": 0.0,
+    "dt_buyers": [],
+    "dt_net_today": 0
+  },
+  "winner_brokers": [
+    {
+      "name": "群益金鼎",
+      "win_rate": 83.3,
+      "avg_fwd_ret": 13.52,
+      "buy_signals": 18,
+      "net_60d": 3,
+      "net_5d": 9,
+      "net_1d": 0
+    },
+    {
+      "name": "新加坡商瑞銀",
+      "win_rate": 73.9,
+      "avg_fwd_ret": 7.62,
+      "buy_signals": 23,
+      "net_60d": 287,
+      "net_5d": 277,
+      "net_1d": 0
+    },
+    {
+      "name": "國泰證券",
+      "win_rate": 68.8,
+      "avg_fwd_ret": 7.29,
+      "buy_signals": 16,
+      "net_60d": -75,
+      "net_5d": 13,
+      "net_1d": 0
+    },
+    {
+      "name": "中國信託",
+      "win_rate": 68.4,
+      "avg_fwd_ret": 12.69,
+      "buy_signals": 19,
+      "net_60d": 30,
+      "net_5d": 8,
+      "net_1d": 0
+    },
+    {
+      "name": "台灣摩根士丹利",
+      "win_rate": 65.4,
+      "avg_fwd_ret": 5.24,
+      "buy_signals": 26,
+      "net_60d": 289,
+      "net_5d": 49,
+      "net_1d": 0
+    }
+  ],
+  "recent_10d_rising": {
+    "新加坡商瑞銀": 192,
+    "摩根大通": 92,
+    "永豐金-匯立": 85,
+    "台灣摩根士丹利": 21,
+    "台新-台北": 14
+  },
+  "broker_tags": {
+    "新加坡商瑞銀": [
+      "🏆贏家(74%)"
+    ],
+    "香港上海匯豐": [
+      "🏆贏家(71%)"
+    ],
+    "凱基-台北": [
+      "⚡隔日沖"
+    ],
+    "台灣摩根士丹利": [
+      "🏆贏家(65%)"
+    ],
+    "港商麥格理": [
+      "🏆贏家(80%)"
+    ],
+    "美商高盛": [
+      "🏆贏家(79%)"
+    ],
+    "美林": [
+      "🏆贏家(63%)"
+    ],
+    "國泰證券": [
+      "🏆贏家(69%)"
+    ],
+    "中國信託": [
+      "🏆贏家(68%)"
+    ],
+    "摩根大通": [
+      "🏆贏家(62%)"
+    ],
+    "宏遠證券": [
+      "🏆贏家(80%)"
+    ],
+    "港商野村": [
+      "🏆贏家(78%)"
+    ],
+    "統一": [
+      "🏆贏家(73%)"
+    ],
+    "新光": [
+      "🏆贏家(60%)"
+    ],
+    "台新-營業部": [
+      "🏆贏家(100%)"
+    ],
+    "華南永昌": [
+      "🏆贏家(86%)"
+    ],
+    "群益金鼎": [
+      "🏆贏家(83%)"
+    ],
+    "富邦證券": [
+      "🏆贏家(77%)"
+    ],
+    "國票-敦北法人": [
+      "⚡隔日沖"
+    ],
+    "兆豐證券": [
+      "🏆贏家(64%)"
+    ],
+    "永豐金證券": [
+      "🏆贏家(78%)"
+    ],
+    "花旗環球": [
+      "🏆贏家(61%)"
+    ],
+    "台新": [
+      "🏆贏家(71%)"
+    ]
+  },
+  "remark_md": "- 💡 備註：本檢視區間分點買超第一名為 **台灣摩根士丹利**（:red[**+619 張**]） ｜ 分點賣超第一名為 **港商麥格理**（:green[**-715 張**]）",
+  "trust_info": {
+    "ytd": 932,
+    "period": 932,
+    "d1": 0,
+    "d5": -339,
+    "d10": -497,
+    "d20": -211,
+    "streak": 0,
+    "ctrl_pct": 1.3,
+    "cost": 16269.64,
+    "inv": 166,
+    "pnl_pct": -43.82,
+    "holding_lots": 3943,
+    "holding_pct": 9.48,
+    "phase": {
+      "tier_label": "中段持股水位 (9.48%)",
+      "tier_level": "info",
+      "momentum": "近 5 日偏賣超",
+      "momentum_level": "bear",
+      "holding_pct": 9.48,
+      "d20": -211
+    }
+  },
+  "broker_diff_info": {
+    "diff_1d": 0,
+    "diff_5d": -12,
+    "neg_streak": 0,
+    "source": "追蹤38分點"
+  },
+  "margin_info": {
+    "latest_bal": 144,
+    "chg_1d": -1,
+    "chg_5d": -51,
+    "chg_5d_pct": -26.15,
+    "short_bal": 2,
+    "short_chg_5d": 0,
+    "short_margin_ratio": 1.39
+  },
+  "sbl_info": {
+    "latest_bal": 210,
+    "chg_1d": 2,
+    "chg_5d": -73,
+    "chg_5d_pct": -25.78
+  },
+  "tdcc_info": {
+    "date": "2026-11-20",
+    "whale_1000_pct": 21.38,
+    "whale_1000_chg_1w": null,
+    "whale_400_pct": 34.09,
+    "whale_400_chg_1w": null,
+    "total_holders": 77024,
+    "holders_chg_1w": null
+  },
+  "concentrations": {
+    "d5": {
+      "pct": -2.0,
+      "net": -41,
+      "buy15": 567,
+      "sell15": 608,
+      "z_score": null,
+      "z_samples": 1
+    },
+    "d10": {
+      "pct": -3.33,
+      "net": -142,
+      "buy15": 627,
+      "sell15": 769,
+      "z_score": null,
+      "z_samples": 1
+    },
+    "d20": {
+      "pct": -5.26,
+      "net": -489,
+      "buy15": 928,
+      "sell15": 1417,
+      "z_score": null,
+      "z_samples": 1
+    }
+  },
+  "vol_ratio_5_20": 0.88,
+  "issued_lots": 41582.95,
   "top_buyers": {
-    "投信": 932,
+    "台灣摩根士丹利": 289,
+    "新加坡商瑞銀": 287,
+    "凱基-台北": 276,
+    "永豐金-匯立": 138,
+    "國票-敦北法人": 113
+  },
+  "top_sellers": {
+    "港商麥格理": -391,
+    "兆豐證券": -200,
+    "摩根大通": -142,
+    "大和國泰": -140,
+    "美林": -135
+  },
+  "ytd_top_buyers": {
     "台灣摩根士丹利": 619,
     "新加坡商瑞銀": 406,
     "凱基-台北": 282,
-    "美商高盛": 227
+    "美商高盛": 227,
+    "中國信託": 176
   },
-  "top_sellers": {
+  "ytd_top_sellers": {
     "港商麥格理": -715,
     "永豐金-匯立": -450,
     "香港上海匯豐": -402,
     "美林": -350,
     "大和國泰": -244
   },
-  "today_buyers": {
-    "摩根大通": 46,
-    "凱基-台北": 43,
-    "新加坡商瑞銀": 33,
-    "群益金鼎": 28,
-    "港商野村": 27
-  },
-  "today_sellers": {
-    "投信": -184,
-    "兆豐證券": -155,
-    "富邦證券": -27,
-    "美商高盛": -21,
-    "凱基": -10
-  },
+  "today_buyers": {},
+  "today_sellers": {},
   "stock_id": "5274",
   "stock_name": "信驊",
   "ticker_suffix": ".TWO",
-  "broker_count": 46,
-  "concentrations": {
-    "d10": {
-      "pct": -2.1,
-      "net": -110,
-      "buy15": 733,
-      "sell15": 843
-    },
-    "d5": {
-      "pct": -2.03,
-      "net": -56,
-      "buy15": 727,
-      "sell15": 783
-    },
-    "d20": {
-      "pct": -4.92,
-      "net": -476,
-      "buy15": 955,
-      "sell15": 1431
+  "broker_count": 38,
+  "tdcc_history": [
+    {
+      "date": "2026-11-20",
+      "whale_1000_pct": 21.38,
+      "whale_400_pct": 34.09,
+      "total_holders": 77024
     }
-  },
-  "last_updated": "2026-11-23 20:15",
+  ],
+  "last_updated": "2026-11-24 09:31",
   "debug_notes": [],
-  "github_sync": "✅ GitHub Actions 自動增量同步（近 3 日）"
+  "github_sync": "✅ 已同步至 GitHub database/"
 }
