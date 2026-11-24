@@ -888,74 +888,88 @@ def _aux_badge(text: str, level: str) -> str:
 
 
 def _render_aux_dashboard(
-    broker_diff_info: dict | None,
+    breadth_info: dict | None,
     margin_info: dict | None,
     sbl_info: dict | None,
     tdcc_info: dict | None,
 ) -> str:
     p = STRATEGY_PARAMS
 
-    # 1. 買賣家數差（含過期延遲標示、樣本數防呆與來源連線狀態）
-    diff_diag_str = str((broker_diff_info or {}).get("diag", "")).strip()
-    diff_diag_html = f"<br><br><span style='color:#94a3b8;'>來源狀態：{diff_diag_str}</span>" if diff_diag_str else ""
-    diff_tip = (
-        "計算公式：買超分點家數 － 賣超分點家數。負值（紅）代表籌碼由散戶流向少數主力；"
-        "正值（綠）代表籌碼流向散戶、趨於發散。若外部資料延遲超過 1 個交易日，將不計入今日分數。"
-        f"{diff_diag_html}"
+    # 1. 主力分點廣度比（含外資共識）
+    breadth_tip = (
+        "<b>主力分點廣度比（排除隔日沖與無進出分點｜需 ≥ 6 家活躍波段分點才計分）：</b><br>"
+        "計算公式：近 5 日淨買超波段分點家數 ÷ (買超家數 ＋ 賣超家數) × 100%。<br>"
+        "• <b>🔥 群起共識 (+4分)：</b>5日集中度正且廣度 ≥ 65%（外資共識 ≥ 70% 或連 3 日 ≥ 60% 再 +2分）。<br>"
+        "• <b>⚠️ 少數硬撐 (-3分)：</b>5日集中度雖為正，但廣度 ≤ 40%（多數追蹤大戶實為調節偷跑）。<br>"
+        "• <b>📉 集體撤退 (-4分)：</b>5日集中度負且廣度 ≤ 35%（外資共識 ≤ 30% 再 -2分）。"
     )
-    if broker_diff_info:
-        d5 = broker_diff_info["diff_5d"]
-        d5_samples = int(broker_diff_info.get("d5_samples", 5) or 5)
-        d1 = broker_diff_info.get("diff_1d")
-        d1_latest = broker_diff_info.get("diff_1d_latest", d1)
-        neg_s = broker_diff_info["neg_streak"]
-        bd_date = str(broker_diff_info.get("date", ""))
-        bd_short = bd_date[5:] if len(bd_date) >= 10 else bd_date
-        is_latest = bool(broker_diff_info.get("is_latest", d1 is not None))
-        is_stale = bool(broker_diff_info.get("is_stale"))
+    if breadth_info and breadth_info.get("breadth_5d") is not None:
+        b5 = float(breadth_info["breadth_5d"])
+        buy5 = int(breadth_info.get("buy_5d", 0) or 0)
+        sell5 = int(breadth_info.get("sell_5d", 0) or 0)
+        act5 = int(breadth_info.get("active_5d", 0) or 0)
+        b1 = breadth_info.get("breadth_1d")
+        fb5 = breadth_info.get("foreign_breadth_5d")
+        fbuy5 = int(breadth_info.get("foreign_buy_5d", 0) or 0)
+        fsell5 = int(breadth_info.get("foreign_sell_5d", 0) or 0)
+        fact5 = int(breadth_info.get("foreign_active_5d", 0) or 0)
+        few_hold = bool(breadth_info.get("few_holding_up", False))
 
-        if is_stale:
-            b_html = _aux_badge(f"⏳ 延遲({bd_short})", "warn")
-            main_lbl = "近5筆"
-            latest_val_html = _span_num(d1_latest, " 家", invert_color=True) if d1_latest is not None else "—"
-            sub_txt = f'<span style="color:#fbbf24;">{bd_short}</span> {latest_val_html} ｜ 延遲未計分'
+        f_bull = (fb5 is not None and fact5 >= p["foreign_breadth_min_active"] and fb5 >= p["foreign_breadth_bull_pct"])
+        f_bear = (fb5 is not None and fact5 >= p["foreign_breadth_min_active"] and fb5 <= p["foreign_breadth_bear_pct"])
+
+        if act5 < p["breadth_min_active"]:
+            b_html = _aux_badge(f"樣本不足({act5}家)", "info")
+            b_col = "#cbd5e1"
+        elif few_hold:
+            b_html = _aux_badge("⚠️ 少數硬撐", "warn")
+            b_col = "#fbbf24"
+        elif b5 >= p["breadth_bull_pct"]:
+            b_html = _aux_badge("🌐 外資齊買" if f_bull else "🔥 群起共識", "bull")
+            b_col = "#ef5350"
+        elif b5 <= p["breadth_bear_pct"]:
+            b_html = _aux_badge("🌐 外資齊賣" if f_bear else "📉 集體撤退", "bear")
+            b_col = "#26a69a"
         else:
-            b_html = _aux_badge("🧲 籌碼集中", "bull") if d5 < 0 else (_aux_badge("📉 籌碼渙散", "bear") if d5 > 0 else _aux_badge("⚪ 持平", "info"))
-            main_lbl = "5日" if d5_samples >= 5 else f"近5日({d5_samples}筆)"
-            if is_latest and d1 is not None:
-                today_seg = f"今日 {_span_num(d1, ' 家', invert_color=True)}"
-            elif d1_latest is not None and bd_short:
-                today_seg = f'<span style="color:#fbbf24;">{bd_short}</span> {_span_num(d1_latest, " 家", invert_color=True)}'
-            else:
-                today_seg = '<span style="color:#94a3b8;">待公布</span>'
-            sub_txt = f"{today_seg} ｜ 連負 <b>{neg_s}</b> 日"
+            b_html = _aux_badge("⚪ 多空分歧", "info")
+            b_col = "#e2e8f0"
 
-        diff_card = (
+        if fact5 > 0 and fb5 is not None:
+            f_col = (
+                "#ef5350" if fb5 >= p["foreign_breadth_bull_pct"]
+                else ("#26a69a" if fb5 <= p["foreign_breadth_bear_pct"] else "#cbd5e1")
+            )
+            f_seg = f'外資 <b>{fbuy5}買/{fsell5}賣</b> (<span style="color:{f_col}; font-weight:700;">{fb5:.0f}%</span>)'
+        else:
+            f_seg = "外資無進出"
+
+        today_seg = f" ｜ 今日 <b>{b1:.0f}%</b>" if b1 is not None else ""
+        breadth_card = (
             f'<div class="aux-card">'
             f'  <div class="aux-head">'
-            f'    <span class="aux-title">🧲 買賣家數差<span class="tip-wrap tip-down">ⓘ<span class="tip-box tip-box-wide">{diff_tip}</span></span></span>'
+            f'    <span class="aux-title">🧭 主力分點廣度<span class="tip-wrap tip-down">ⓘ<span class="tip-box tip-box-wide">{breadth_tip}</span></span></span>'
             f'    {b_html}'
             f'  </div>'
-            f'  <div class="aux-main">{main_lbl} {_span_num(d5, " 家", invert_color=True)}</div>'
-            f'  <div class="aux-sub">{sub_txt}</div>'
+            f'  <div class="aux-main">5日 <span style="color:{b_col}; font-weight:700;">{b5:.0f}%</span> <span style="font-size:0.84rem; color:#cbd5e1; font-weight:600;">({buy5}買/{sell5}賣)</span></div>'
+            f'  <div class="aux-sub">{f_seg}{today_seg}</div>'
             f'</div>'
         )
     else:
-        diff_card = (
+        breadth_card = (
             f'<div class="aux-card">'
-            f'  <div class="aux-head"><span class="aux-title">🧲 買賣家數差<span class="tip-wrap tip-down">ⓘ<span class="tip-box tip-box-wide">{diff_tip}</span></span></span>{_aux_badge("待更新", "info")}</div>'
+            f'  <div class="aux-head"><span class="aux-title">🧭 主力分點廣度<span class="tip-wrap tip-down">ⓘ<span class="tip-box tip-box-wide">{breadth_tip}</span></span></span>{_aux_badge("待更新", "info")}</div>'
             f'  <div class="aux-main" style="color:#94a3b8;">尚無資料</div>'
-            f'  <div class="aux-sub">點擊左側「🔄」補齊</div>'
+            f'  <div class="aux-sub">點擊左側「🔄」補齊分點資料</div>'
             f'</div>'
         )
 
     # 2. 融資融券（升級四象限交叉判定＋相對量能濾網＋日期防呆）
     margin_tip = (
         "<b>融資四象限交叉判讀（須通過 5 日變動佔 5 日總量 ≥ 3% 濾網）：</b><br>"
-        "• <b>🔥 主力融資點火 (+3分)：</b>融資大增＋集中度正＋家數差負（籌碼往少數人集中）。<br>"
-        "• <b>⚠️ 散戶融資過熱 (-5分)：</b>融資大增＋集中度負或家數差正（散戶槓桿擴散）。<br>"
-        "• <b>🧹 融資清洗 (+5分)：</b>融資減少＋集中度正或家數差負（散戶停損、主力承接）。<br>"
-        "• <b>💨 融資退場發散 (-3分)：</b>融資減少＋集中度轉負（原主力融資結帳撤退）。"
+        "• <b>🔥 主力融資點火 (+3分)：</b>融資大增＋集中度正＋本土波段買盤達融資增量 50%（或主力廣度 ≥ 55%）。<br>"
+        "• <b>⚠️ 散戶融資過熱 (-5分)：</b>融資大增＋集中度負或主力廣度／本土買盤不足（散戶槓桿擴散）。<br>"
+        "• <b>🧹 融資清洗 (+5分)：</b>融資減少＋集中度正或主力廣度 ≥ 60%（散戶停損、主力承接）。<br>"
+        "• <b>💨 融資退場發散 (-3分)：</b>融資減少＋集中度轉負且廣度偏弱（原主力融資結帳撤退）。"
     )
     if margin_info:
         m_bal = margin_info["latest_bal"]
@@ -1092,7 +1106,7 @@ def _render_aux_dashboard(
             f'</div>'
         )
 
-    return f'<div class="aux-grid">{diff_card}{margin_card}{sbl_card}{tdcc_card}</div>'
+    return f'<div class="aux-grid">{breadth_card}{margin_card}{sbl_card}{tdcc_card}</div>'
 
 
 def _render_rank_table(
@@ -1481,7 +1495,6 @@ if target_stock:
         df_aux_full=df_aux_full,
         tdcc_history=tdcc_history_saved,
         issued_lots=issued_lots_saved,
-        broker_diff_diag=meta_saved.get("broker_diff_diag", ""),
     )
     broker_count = len([c for c in df_chips_full.columns if c not in ("date", "投信")])
     concentrations = analysis.get("concentrations") or concentrations_saved
@@ -1525,18 +1538,18 @@ if target_stock:
     score_tip_html = (
         "<b>純籌碼健康分數（0～100 分｜完全排除均線與股價漲跌）</b><br>"
         "以 <b>50 分</b>為多空中性基準，依五大純籌碼維度累計加減（最高 ±50 分）：<br>"
-        "• <b>全市場集中度＋買賣家數差：</b>±18 分<br>"
-        "• <b>60日三大波段主力＋投信真實水位：</b>±14 分<br>"
-        "• <b>融資四象限＋借券賣出（含相對量能濾網）：</b>±10 分<br>"
+        "• <b>全市場集中度 (±12)＋主力分點廣度含外資共識 (±6)：</b>±18 分<br>"
+        "• <b>60日三大波段主力 (±8)＋投信真實水位 (±6)：</b>±14 分<br>"
+        "• <b>融資四象限 (±5)＋借券賣出 (±5)（含相對量能濾網）：</b>±10 分<br>"
         "• <b>TDCC 集保大戶週歸戶驗證：</b>±8 分<br>"
         "• <b>當日隔日沖灌水濾網（偏多時單向扣分）：</b>0 ～ -10 分<br>"
         '<table class="tip-mini-tbl">'
         '  <thead><tr><th>分數區間</th><th>燈號狀態</th><th>純籌碼含義</th></tr></thead>'
         '  <tbody>'
-        '    <tr><td style="white-space:nowrap;"><b>70 ～ 100 分</b></td><td style="color:#ef5350; font-weight:700; white-space:nowrap;">強力籌碼集中（紅）</td><td>點、面、輔助籌碼高度同向，大資金明確鎖碼或加速吸籌。</td></tr>'
+        '    <tr><td style="white-space:nowrap;"><b>70 ～ 100 分</b></td><td style="color:#ef5350; font-weight:700; white-space:nowrap;">強力籌碼集中（紅）</td><td>點、面、主力廣度與輔助籌碼高度同向，大資金明確鎖碼或加速吸籌。</td></tr>'
         '    <tr><td style="white-space:nowrap;"><b>55 ～ 69 分</b></td><td style="color:#f59e0b; font-weight:700; white-space:nowrap;">溫和偏多集中（橘）</td><td>籌碼開始沉澱或主力悄悄建倉，但尚未全面共振。</td></tr>'
-        '    <tr><td style="white-space:nowrap;"><b>36 ～ 54 分</b></td><td style="color:#94a3b8; font-weight:700; white-space:nowrap;">籌碼中性／分歧（灰）</td><td>多空籌碼互相抵銷，或集中度與家數差／隔日沖出現矛盾。</td></tr>'
-        '    <tr><td style="white-space:nowrap;"><b>0 ～ 35 分</b></td><td style="color:#26a69a; font-weight:700; white-space:nowrap;">籌碼明顯發散（綠）</td><td>主力倒貨、外圍發散或法人結帳，籌碼明顯流向散戶。</td></tr>'
+        '    <tr><td style="white-space:nowrap;"><b>36 ～ 54 分</b></td><td style="color:#94a3b8; font-weight:700; white-space:nowrap;">籌碼中性／分歧（灰）</td><td>多空籌碼互相抵銷，或集中度與主力廣度／隔日沖出現矛盾。</td></tr>'
+        '    <tr><td style="white-space:nowrap;"><b>0 ～ 35 分</b></td><td style="color:#26a69a; font-weight:700; white-space:nowrap;">籌碼明顯發散（綠）</td><td>主力倒貨、外圍發散或大戶集體撤退，籌碼明顯流向散戶。</td></tr>'
         '  </tbody>'
         '</table>'
     )
@@ -1548,10 +1561,11 @@ if target_stock:
     sb = scenario.get("score_breakdown") or {}
     breakdown_html = ""
     if sb:
+        cb_score = int(sb.get("conc_breadth", sb.get("conc_diff", 0)))
         breakdown_html = (
             f'<div class="score-breakdown-row">'
             f'  <span class="sb-pill">基準 <b>{sb.get("base", 50)}</b></span>'
-            f'  <span class="sb-pill">集中／家數差 {_span_delta_score(int(sb.get("conc_diff", 0)))}</span>'
+            f'  <span class="sb-pill">集中／廣度 {_span_delta_score(cb_score)}</span>'
             f'  <span class="sb-pill">主力／投信 {_span_delta_score(int(sb.get("wave_trust", 0)))}</span>'
             f'  <span class="sb-pill">融資／借券 {_span_delta_score(int(sb.get("credit_sbl", 0)))}</span>'
             f'  <span class="sb-pill">集保大戶 {_span_delta_score(int(sb.get("tdcc", 0)))}</span>'
@@ -1754,7 +1768,7 @@ if target_stock:
     # --- 區塊一之五：四大輔助籌碼儀表板 ---
     st.markdown(
         _render_aux_dashboard(
-            analysis.get("broker_diff_info"),
+            analysis.get("breadth_info"),
             analysis.get("margin_info"),
             analysis.get("sbl_info"),
             analysis.get("tdcc_info"),
@@ -1819,7 +1833,7 @@ if target_stock:
                 <tr>
                     <th>純籌碼結構狀態</th>
                     <th>60日三大波段主力（點）</th>
-                    <th>集中度與家數差（面）</th>
+                    <th>集中度與主力廣度（面）</th>
                     <th>輔助籌碼與分數檢核</th>
                     <th>籌碼解讀與觀察重點</th>
                 </tr>
