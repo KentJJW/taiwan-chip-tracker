@@ -9,7 +9,7 @@ import base64
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse, parse_qs
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import urllib3
 import requests
 from requests.adapters import HTTPAdapter
@@ -25,6 +25,7 @@ from strategy import (
     compute_rolling_zscore,
     profile_brokers,
     select_wave_main_forces,
+    compute_broker_breadth,
     evaluate_trust_phase,
     evaluate_chip_scenario,
     evaluate_divergence_alert,
@@ -154,51 +155,6 @@ def _parse_dj_date(date_str: str) -> str:
     if year < 1911:
         year += 1911
     return f"{year:04d}-{month:02d}-{day:02d}"
-
-
-def _parse_flexible_date(date_val, ref_dt: datetime | None = None) -> str:
-    """支援 Unix 毫秒/秒時間戳、YYYY-MM-DD、YYYY/MM/DD、民國年 YYY/MM/DD、YYYYMMDD 與 MM/DD"""
-    if date_val is None or isinstance(date_val, bool):
-        return ""
-
-    if isinstance(date_val, (int, float)) or (isinstance(date_val, str) and re.match(r"^\d{10,13}$", date_val.strip())):
-        try:
-            ts = float(date_val)
-            if ts > 1e11:
-                ts /= 1000.0
-            dt_tw = datetime.fromtimestamp(ts, tz=timezone(timedelta(hours=8)))
-            return dt_tw.strftime("%Y-%m-%d")
-        except Exception:
-            pass
-
-    s = str(date_val).strip().split("T")[0].split(" ")[0]
-    s_norm = s.replace(".", "/").replace("-", "/")
-
-    ad = _parse_dj_date(s_norm)
-    if ad:
-        return ad
-
-    digits = re.sub(r"\D", "", s)
-    if len(digits) == 8:
-        try:
-            return datetime.strptime(digits, "%Y%m%d").strftime("%Y-%m-%d")
-        except ValueError:
-            pass
-
-    m = re.match(r"^(\d{1,2})/(\d{1,2})$", s_norm)
-    if m:
-        now = ref_dt or _get_tw_now()
-        month, day = int(m.group(1)), int(m.group(2))
-        year = now.year
-        try:
-            cand = datetime(year, month, day)
-            if cand.date() > (now.date() + timedelta(days=7)):
-                year -= 1
-            return f"{year:04d}-{month:02d}-{day:02d}"
-        except ValueError:
-            pass
-
-    return ""
 
 
 def _format_dj_date(ad_date: str) -> str:
@@ -844,328 +800,8 @@ def fetch_broker_daily_history(stock_id: str, broker_info: dict, start_date: str
 
 
 # =====================================================================
-# 輔助籌碼抓取：全市場買賣家數差(Yahoo TW + CMoney + WantGoo + HiStock)
+# 輔助籌碼抓取：融資融券、借券賣出(官方直抓+FinMind)、TDCC 集保大戶
 # =====================================================================
-def _parse_broker_diff_table_html(html: str, end_date: str, ref_dt: datetime) -> list[dict]:
-    """從 HTML 表格中動態定位『日期』與『買賣家數差』欄位"""
-    soup = BeautifulSoup(html, "html.parser")
-    records = []
-    for tbl in soup.find_all("table"):
-        idx_date = None
-        idx_diff = None
-        for tr in tbl.find_all("tr"):
-            cells = [c.get_text(strip=True).replace(" ", "") for c in tr.find_all(["th", "td"], recursive=False)]
-            if not cells:
-                continue
-            if idx_diff is None and any("家數差" in c for c in cells):
-                for i, txt in enumerate(cells):
-                    if "日期" in txt and idx_date is None:
-                        idx_date = i
-                    elif "家數差" in txt and idx_diff is None:
-                        idx_diff = i
-                if idx_date is None:
-                    idx_date = 0
-                continue
-
-            if idx_diff is not None and len(cells) > max(idx_date, idx_diff):
-                ad_date = _parse_flexible_date(cells[idx_date], ref_dt)
-                if ad_date and ad_date <= end_date:
-                    diff_val = _to_clean_float(cells[idx_diff])
-                    if diff_val is not None:
-                        records.append({"date": ad_date, "broker_diff": int(round(diff_val))})
-        if records:
-            break
-    return records
-
-
-def _extract_json_broker_diff_records(text: str, end_date: str, ref_dt: datetime) -> list[dict]:
-    """
-    從內嵌 JSON（Yahoo root.App.main / CMoney __NEXT_DATA__）遞迴搜尋含日期與買賣家數差之物件，
-    嚴格限定欄位鍵名包含 Broker / Branch / Count，絕不誤抓成交張數。
-    """
-    records = []
-    # 1) 直接正則比對顯式家數差鍵名
-    for m in re.finditer(
-        r'"(?:date|Date|tradeDate|dt)"\s*:\s*"?(\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{10,13})"?[^{}]{0,320}'
-        r'"(?:diffBrokerCount|brokerDiff|buySellBrokerDiff|diffBranchCount|branchDiff|buySellDiff|diffCount|buySellBrokerCountDiff)"\s*:\s*(-?\d+)',
-        text,
-    ):
-        ad_date = _parse_flexible_date(m.group(1), ref_dt)
-        if ad_date and ad_date <= end_date:
-            records.append({"date": ad_date, "broker_diff": int(m.group(2))})
-
-    # 2) 比對買超家數與賣超家數成對鍵名（如 overbuyBrokerCount / oversellBrokerCount）
-    for m in re.finditer(
-        r'\{[^{}]*"(?:date|Date|tradeDate|dt)"\s*:\s*"?(\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{10,13})"?[^{}]*\}',
-        text,
-    ):
-        blob = m.group(0)
-        if not re.search(r'(?:Broker|Branch|Count)', blob, re.IGNORECASE):
-            continue
-        m_d = re.search(r'"(?:date|Date|tradeDate|dt)"\s*:\s*"?(\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{10,13})"?', blob)
-        if not m_d:
-            continue
-        ad_date = _parse_flexible_date(m_d.group(1), ref_dt)
-        if not ad_date or ad_date > end_date:
-            continue
-        m_b = re.search(r'"(?:overbuyBrokerCount|buyBrokerCount|buyBranchCount|overbuyCount|buyCount)"\s*:\s*(\d+)', blob)
-        m_s = re.search(r'"(?:oversellBrokerCount|sellBrokerCount|sellBranchCount|oversellCount|sellCount)"\s*:\s*(\d+)', blob)
-        if m_b and m_s:
-            b_val, s_val = int(m_b.group(1)), int(m_s.group(1))
-            if 0 <= b_val <= 980 and 0 <= s_val <= 980:
-                records.append({"date": ad_date, "broker_diff": b_val - s_val})
-
-    return records
-
-
-def _fetch_yahoo_broker_diff(
-    session: requests.Session,
-    stock_id: str,
-    end_date: str,
-    ref_dt: datetime,
-    preferred_suffix: str = None,
-) -> tuple[pd.DataFrame, str]:
-    """
-    從 Yahoo 奇摩股市抓取全市場每日「買賣家數差」：
-    - 同時嘗試 _td-stock JSON 資源端點與 SSR HTML 頁面（含 root.App.main JSON 與雙三元組 DOM 驗算）
-    """
-    if preferred_suffix in (".TW", ".TWO"):
-        other = ".TWO" if preferred_suffix == ".TW" else ".TW"
-        suffixes = [preferred_suffix, other]
-    else:
-        suffixes = [".TW", ".TWO"]
-
-    yf_headers = {
-        "Referer": "https://tw.stock.yahoo.com/",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
-    }
-
-    last_status = "無回應"
-    for suf in suffixes:
-        sym = f"{stock_id}{suf}"
-        # 1) 嘗試 Yahoo _td-stock 直接 JSON API
-        for res_name in ("StockServices.brokerTrading", "StockServices.mainForce"):
-            api_url = f"https://tw.stock.yahoo.com/_td-stock/api/resource/{res_name};symbol={sym}"
-            try:
-                r_api = session.get(api_url, headers={"Referer": f"https://tw.stock.yahoo.com/quote/{sym}/broker-trading"}, timeout=8, verify=False)
-                if r_api.status_code == 200 and len(r_api.text) > 100:
-                    recs = _extract_json_broker_diff_records(r_api.text, end_date, ref_dt)
-                    if recs:
-                        df = pd.DataFrame(recs).drop_duplicates(subset=["date"], keep="last").sort_values("date").reset_index(drop=True)
-                        return df, f"HTTP200({len(df)}筆/最新{df['date'].max()[5:]})"
-            except Exception:
-                pass
-
-        # 2) 抓取 broker-trading SSR 頁面
-        url = f"https://tw.stock.yahoo.com/quote/{sym}/broker-trading"
-        try:
-            resp = session.get(url, headers=yf_headers, timeout=10, verify=False)
-            last_status = f"HTTP{resp.status_code}"
-            if resp.status_code != 200 or len(resp.text) < 2000:
-                continue
-
-            html = resp.text
-            records = _extract_json_broker_diff_records(html, end_date, ref_dt)
-
-            # 方法 3：解析 SSR DOM 列表（找出同一列中第二組 a - b == c 之分點家數三元組）
-            if not records:
-                soup = BeautifulSoup(html, "html.parser")
-                for row_el in soup.find_all(["li", "tr"]):
-                    leaf_texts = []
-                    for child in row_el.find_all(["div", "span", "td"], recursive=True):
-                        if child.find(["div", "span", "td"]) is None:
-                            t = child.get_text(strip=True)
-                            if t and len(t) <= 24:
-                                leaf_texts.append(t)
-
-                    if len(leaf_texts) < 7:
-                        continue
-
-                    ad_date = _parse_flexible_date(leaf_texts[0], ref_dt)
-                    if not ad_date or ad_date > end_date:
-                        continue
-
-                    nums = [_to_clean_float(x) for x in leaf_texts[1:]]
-                    triplets = []
-                    for idx in range(len(nums) - 2):
-                        a, b, c = nums[idx], nums[idx + 1], nums[idx + 2]
-                        if a is not None and b is not None and c is not None:
-                            if a >= 0 and b >= 0 and abs(round(a - b) - round(c)) <= 1:
-                                triplets.append((int(round(a)), int(round(b)), int(round(c))))
-
-                    # 標準主力進出列為 [買超張, 賣超張, 買賣超張, 買超家數, 賣超家數, 買賣家數差]，取第二組三元組
-                    if len(triplets) >= 2:
-                        b_cnt, s_cnt, d_cnt = triplets[1]
-                        if 0 <= b_cnt <= 980 and 0 <= s_cnt <= 980:
-                            records.append({"date": ad_date, "broker_diff": d_cnt})
-                    elif len(triplets) == 1:
-                        b_cnt, s_cnt, d_cnt = triplets[0]
-                        if 0 <= b_cnt <= 980 and 0 <= s_cnt <= 980 and (b_cnt + s_cnt) >= 10:
-                            records.append({"date": ad_date, "broker_diff": d_cnt})
-
-            if records:
-                df = pd.DataFrame(records).drop_duplicates(subset=["date"], keep="last").sort_values("date").reset_index(drop=True)
-                return df, f"HTTP200({len(df)}筆/最新{df['date'].max()[5:]})"
-            last_status = "HTTP200(0筆)"
-        except Exception as e:
-            last_status = type(e).__name__
-
-    return pd.DataFrame(columns=["date", "broker_diff"]), last_status
-
-
-def _fetch_cmoney_broker_diff(session: requests.Session, stock_id: str, end_date: str, ref_dt: datetime) -> tuple[pd.DataFrame, str]:
-    """向 CMoney 經典主力進出表 (f00036.aspx) 與同學會 __NEXT_DATA__ 抓取全市場買賣家數差"""
-    urls = [
-        f"https://www.cmoney.tw/finance/f00036.aspx?s={stock_id}",
-        f"https://www.cmoney.tw/forum/stock/{stock_id}?s=main-force",
-    ]
-    last_status = "無回應"
-    for url in urls:
-        try:
-            resp = session.get(url, headers={"Referer": "https://www.cmoney.tw/"}, timeout=10, verify=False)
-            last_status = f"HTTP{resp.status_code}"
-            if resp.status_code != 200 or len(resp.text) < 1000:
-                continue
-            records = _parse_broker_diff_table_html(resp.text, end_date, ref_dt)
-            if not records:
-                records = _extract_json_broker_diff_records(resp.text, end_date, ref_dt)
-            if records:
-                df = pd.DataFrame(records).drop_duplicates(subset=["date"], keep="last").sort_values("date").reset_index(drop=True)
-                return df, f"HTTP200({len(df)}筆/最新{df['date'].max()[5:]})"
-            last_status = "HTTP200(0筆)"
-        except Exception as e:
-            last_status = type(e).__name__
-    return pd.DataFrame(columns=["date", "broker_diff"]), last_status
-
-
-def _fetch_wantgoo_broker_diff(session: requests.Session, stock_id: str, end_date: str, ref_dt: datetime) -> tuple[pd.DataFrame, str]:
-    """向 WantGoo 主力進出趨勢 JSON API 抓取全市場買賣家數差（先訪問主頁預熱 Cookie）"""
-    try:
-        page_url = f"https://www.wantgoo.com/stock/{stock_id}/major-investors/main-trend"
-        api_url = f"https://www.wantgoo.com/stock/{stock_id}/major-investors/main-trend-data"
-        session.get(page_url, headers={"Referer": "https://www.wantgoo.com/"}, timeout=8, verify=False)
-        wg_headers = {
-            "Referer": page_url,
-            "X-Requested-With": "XMLHttpRequest",
-            "Accept": "application/json, text/javascript, */*; q=0.01",
-            "Sec-Fetch-Dest": "empty",
-            "Sec-Fetch-Mode": "cors",
-            "Sec-Fetch-Site": "same-origin",
-        }
-        resp = session.get(api_url, headers=wg_headers, timeout=10, verify=False)
-        if resp.status_code != 200:
-            return pd.DataFrame(columns=["date", "broker_diff"]), f"HTTP{resp.status_code}"
-        data = resp.json()
-        items = data if isinstance(data, list) else (data.get("data") or [])
-        records = []
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            raw_d = item.get("date") or item.get("tradeDate") or item.get("d")
-            ad_date = _parse_flexible_date(raw_d, ref_dt)
-            if not ad_date or ad_date > end_date:
-                continue
-
-            diff_val = None
-            for k in ("diffCount", "diffBranchCount", "branchDiff", "brokerDiff", "buySellDiff", "diffBrokerCount", "branchCountDiff"):
-                if item.get(k) is not None:
-                    diff_val = _to_clean_float(item[k])
-                    break
-            if diff_val is None:
-                b_cnt = next((item.get(k) for k in ("buyBranchCount", "buyCount", "buyBrokerCount") if item.get(k) is not None), None)
-                s_cnt = next((item.get(k) for k in ("sellBranchCount", "sellCount", "sellBrokerCount") if item.get(k) is not None), None)
-                if b_cnt is not None and s_cnt is not None:
-                    bf, sf = _to_clean_float(b_cnt), _to_clean_float(s_cnt)
-                    if bf is not None and sf is not None:
-                        diff_val = bf - sf
-            if diff_val is not None:
-                records.append({"date": ad_date, "broker_diff": int(round(diff_val))})
-        if records:
-            df = pd.DataFrame(records).drop_duplicates(subset=["date"], keep="last").sort_values("date").reset_index(drop=True)
-            return df, f"HTTP200({len(df)}筆/最新{df['date'].max()[5:]})"
-        return pd.DataFrame(columns=["date", "broker_diff"]), "HTTP200(0筆)"
-    except Exception as e:
-        return pd.DataFrame(columns=["date", "broker_diff"]), type(e).__name__
-
-
-def _fetch_histock_broker_diff(session: requests.Session, stock_id: str, end_date: str, ref_dt: datetime) -> tuple[pd.DataFrame, str]:
-    """向 HiStock 主力進出表抓取全市場買賣家數差"""
-    try:
-        hi_url = f"https://histock.tw/stock/main.aspx?no={stock_id}"
-        resp = session.get(hi_url, headers={"Referer": "https://histock.tw/"}, timeout=10, verify=False)
-        if resp.status_code != 200:
-            return pd.DataFrame(columns=["date", "broker_diff"]), f"HTTP{resp.status_code}"
-        if len(resp.text) > 1000:
-            records = _parse_broker_diff_table_html(resp.text, end_date, ref_dt)
-            if records:
-                df = pd.DataFrame(records).drop_duplicates(subset=["date"], keep="last").sort_values("date").reset_index(drop=True)
-                return df, f"HTTP200({len(df)}筆/最新{df['date'].max()[5:]})"
-        return pd.DataFrame(columns=["date", "broker_diff"]), "HTTP200(0筆)"
-    except Exception as e:
-        return pd.DataFrame(columns=["date", "broker_diff"]), type(e).__name__
-
-
-def fetch_broker_diff_with_diag(
-    session: requests.Session,
-    stock_id: str,
-    start_date: str,
-    end_date: str,
-    mirror: str = None,
-    preferred_suffix: str = None,
-) -> tuple[pd.DataFrame, str]:
-    """多來源合併抓取全市場每日「買賣家數差」，並回傳各來源連線診斷字串"""
-    _ = (start_date, mirror)
-    ref_dt = _get_tw_now()
-    candidates = []
-    diag_parts = []
-
-    df_yf, st_yf = _fetch_yahoo_broker_diff(session, stock_id, end_date, ref_dt, preferred_suffix)
-    diag_parts.append(f"Yahoo:{st_yf}")
-    if not df_yf.empty:
-        max_dt = str(df_yf["date"].max())
-        candidates.append((max_dt, len(df_yf), df_yf))
-        if max_dt >= end_date and len(df_yf) >= 5:
-            return df_yf, " ｜ ".join(diag_parts)
-
-    for label, fetcher in (
-        ("CMoney", _fetch_cmoney_broker_diff),
-        ("WantGoo", _fetch_wantgoo_broker_diff),
-        ("HiStock", _fetch_histock_broker_diff),
-    ):
-        df_cand, st_str = fetcher(session, stock_id, end_date, ref_dt)
-        diag_parts.append(f"{label}:{st_str}")
-        if not df_cand.empty:
-            max_dt = str(df_cand["date"].max())
-            candidates.append((max_dt, len(df_cand), df_cand))
-            if max_dt >= end_date and len(df_cand) >= 5:
-                break
-
-    diag_summary = " ｜ ".join(diag_parts)
-    if not candidates:
-        return pd.DataFrame(columns=["date", "broker_diff"]), diag_summary
-
-    candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
-    merged = candidates[0][2].set_index("date")[["broker_diff"]]
-    for _, _, df_other in candidates[1:]:
-        other_idx = df_other.set_index("date")[["broker_diff"]]
-        merged = merged.combine_first(other_idx)
-
-    return merged.reset_index().sort_values("date").reset_index(drop=True), diag_summary
-
-
-def fetch_broker_diff_history(
-    session: requests.Session,
-    stock_id: str,
-    start_date: str,
-    end_date: str,
-    mirror: str = None,
-    preferred_suffix: str = None,
-) -> pd.DataFrame:
-    df, _ = fetch_broker_diff_with_diag(session, stock_id, start_date, end_date, mirror, preferred_suffix)
-    return df
-
-
 def _fetch_margin_moneydj_fallback(
     session: requests.Session,
     stock_id: str,
@@ -1542,7 +1178,8 @@ def analyze_main_force(
     issued_lots: float = 0.0,
     broker_diff_diag: str = "",
 ) -> dict:
-    """整合滾動 60 日波段主力、投信真實持股比、融資四象限、借券、集保與 100% 純籌碼健康評分"""
+    """整合滾動 60 日波段主力、主力分點廣度比(含外資共識)、投信真實持股比、融資四象限、借券、集保與純籌碼健康評分"""
+    _ = broker_diff_diag
     all_cols = [c for c in df_chips.columns if c != "date"]
     pure_broker_cols = [c for c in all_cols if c != "投信"]
 
@@ -1580,7 +1217,7 @@ def analyze_main_force(
                 "id": 0, "type": "neutral", "sub_type": "無資料",
                 "title": "⚪ 無資料", "desc": "", "action": "",
                 "badges": [], "conviction_score": 50,
-                "score_breakdown": {"base": 50, "conc_diff": 0, "wave_trust": 0, "credit_sbl": 0, "tdcc": 0, "day_trade": 0},
+                "score_breakdown": {"base": 50, "conc_breadth": 0, "conc_diff": 0, "wave_trust": 0, "credit_sbl": 0, "tdcc": 0, "day_trade": 0},
                 "margin_quadrant": 0,
             },
             "concentrations": conc_out,
@@ -1595,6 +1232,7 @@ def analyze_main_force(
             "top3_rows": [],
             "remark_md": "",
             "trust_info": None,
+            "breadth_info": None,
             "broker_diff_info": None,
             "margin_info": None,
             "sbl_info": None,
@@ -1658,8 +1296,7 @@ def analyze_main_force(
         }
         trust_info["phase"] = evaluate_trust_phase(trust_info)
 
-    # --- 3. 整理四大輔助籌碼（嚴格對齊交易日，並計算 lag_days 與 is_latest 供前端標示） ---
-    broker_diff_info = None
+    # --- 3. 整理信用交易與集保輔助籌碼（嚴格對齊交易日並計算 lag_days 與 is_latest） ---
     margin_info = None
     sbl_info = None
     tdcc_info = None
@@ -1671,44 +1308,6 @@ def analyze_main_force(
             how="left",
         )
         last_idx_all = len(aux_aligned) - 1
-
-        if "broker_diff" in aux_aligned.columns and aux_aligned["broker_diff"].notna().any():
-            s_diff_all = pd.to_numeric(aux_aligned["broker_diff"], errors="coerce")
-            valid_idx = s_diff_all.dropna().index
-            last_pos = int(valid_idx[-1])
-            lag_days = last_idx_all - last_pos
-            last_diff_date = str(aux_aligned.loc[last_pos, "date"])
-            is_stale = (lag_days >= 2)
-
-            s_valid = s_diff_all.dropna()
-            d1 = int(round(s_diff_all.iloc[-1])) if pd.notna(s_diff_all.iloc[-1]) else None
-            d1_latest = int(round(s_valid.iloc[-1]))
-            tail5_aligned = s_diff_all.tail(5).dropna()
-            d5_samples = int(len(tail5_aligned))
-            if not is_stale and d5_samples >= 1:
-                d5 = int(round(tail5_aligned.sum()))
-            else:
-                d5 = int(round(s_valid.tail(5).sum()))
-
-            neg_streak = 0
-            for v in reversed(s_valid.tolist()):
-                if v < 0:
-                    neg_streak += 1
-                else:
-                    break
-            broker_diff_info = {
-                "diff_5d": d5,
-                "d5_samples": d5_samples,
-                "diff_1d": d1,
-                "diff_1d_latest": d1_latest,
-                "neg_streak": neg_streak,
-                "date": last_diff_date,
-                "lag_days": lag_days,
-                "is_latest": (lag_days == 0),
-                "is_stale": is_stale,
-                "source": "全市場家數差",
-                "diag": broker_diff_diag,
-            }
 
         if "margin_bal" in aux_aligned.columns and aux_aligned["margin_bal"].notna().any():
             s_m = pd.to_numeric(aux_aligned["margin_bal"], errors="coerce").dropna()
@@ -1777,10 +1376,11 @@ def analyze_main_force(
             "holders_chg_1w": int(latest_t["total_holders"]) - int(prev_t["total_holders"]) if prev_t else None,
         }
 
-    # --- 4. 分點行為畫像與滾動 60 日波段主力篩選 ---
+    # --- 4. 分點行為畫像、主力分點廣度比（含外資共識）與 60 日波段主力篩選 ---
     profiles = profile_brokers(full_price, full_df, lookback_days=lb_days)
     broker_tags = {k: v["tags"] for k, v in profiles.items() if v.get("tags")}
     top3_names, filtered_dt = select_wave_main_forces(profiles, top_n=3, exclude_day_traders=True)
+    breadth_info = compute_broker_breadth(full_df, profiles=profiles, lookback_days=5)
 
     dom_5d_buys = sorted(
         [v["net_5d"] for v in profiles.values() if not v.get("is_foreign") and not v.get("is_day_trader") and v["net_5d"] > 0],
@@ -1824,8 +1424,6 @@ def analyze_main_force(
         "dt_buyers": dt_buyers_today,
     }
 
-    bd_for_score = None if (broker_diff_info and broker_diff_info.get("is_stale")) else broker_diff_info
-
     if not top3_names:
         scenario = evaluate_chip_scenario(
             top3_5d=0,
@@ -1833,7 +1431,7 @@ def analyze_main_force(
             latest_close=latest_close_full,
             conc=conc_out,
             trust_info=trust_info,
-            broker_diff_info=bd_for_score,
+            breadth_info=breadth_info,
             margin_info=margin_info,
             sbl_info=sbl_info,
             tdcc_info=tdcc_info,
@@ -1843,6 +1441,8 @@ def analyze_main_force(
         )
         if margin_info is not None:
             margin_info["quadrant"] = scenario.get("margin_quadrant", 0)
+        if breadth_info is not None:
+            breadth_info["few_holding_up"] = bool(scenario.get("few_holding_up", False))
         return {
             "main_force_html": "無波段買超分點主力（偏空格局）",
             "main_force_sub_lines": ["近 60 日追蹤券商分點累計皆為淨賣超"],
@@ -1862,7 +1462,8 @@ def analyze_main_force(
             "top3_rows": [],
             "remark_md": "",
             "trust_info": trust_info,
-            "broker_diff_info": broker_diff_info,
+            "breadth_info": breadth_info,
+            "broker_diff_info": None,
             "margin_info": margin_info,
             "sbl_info": sbl_info,
             "tdcc_info": tdcc_info,
@@ -1957,7 +1558,7 @@ def analyze_main_force(
         top3_5d_ctrl_z=top3_5d_ctrl_z,
         top3_5d_float_pct=top3_5d_float_pct,
         trust_info=trust_info,
-        broker_diff_info=bd_for_score,
+        breadth_info=breadth_info,
         margin_info=margin_info,
         sbl_info=sbl_info,
         tdcc_info=tdcc_info,
@@ -1967,6 +1568,8 @@ def analyze_main_force(
     )
     if margin_info is not None:
         margin_info["quadrant"] = scenario.get("margin_quadrant", 0)
+    if breadth_info is not None:
+        breadth_info["few_holding_up"] = bool(scenario.get("few_holding_up", False))
 
     # --- 7. 前三大波段主力明細列 ---
     top3_rows = []
@@ -2014,7 +1617,8 @@ def analyze_main_force(
         "top3_rows": top3_rows,
         "remark_md": f"- 💡 備註：本檢視區間分點買超第一名為 {top_buy_text} ｜ 分點賣超第一名為 {top_sell_text}",
         "trust_info": trust_info,
-        "broker_diff_info": broker_diff_info,
+        "breadth_info": breadth_info,
+        "broker_diff_info": None,
         "margin_info": margin_info,
         "sbl_info": sbl_info,
         "tdcc_info": tdcc_info,
@@ -2040,7 +1644,7 @@ def compute_daily_health_scores(
     """
     向量化回算今年每一個交易日的「純籌碼健康分數 (0~100)」與對應狀態：
     - 100% 撇除均線與漲跌，與即時看板套用同一套五層純籌碼評分規則
-    - 同步計入每日隔日沖佔比、融資四象限（含相對量能與本土買超）與借券 Z-Score
+    - 同步逐日計算主力分點廣度比（含外資共識）、當日隔日沖佔比、融資四象限與借券 Z-Score
     """
     if df_price_full is None or df_price_full.empty or df_chips_full is None or df_chips_full.empty:
         return pd.DataFrame(columns=["date", "health_score", "scenario_id", "sub_type"])
@@ -2064,6 +1668,7 @@ def compute_daily_health_scores(
     wave_cols = [c for c in pure_cols if c not in DAY_TRADE_BROKERS] or pure_cols
     dt_cols = [c for c in pure_cols if c in DAY_TRADE_BROKERS]
     dom_wave_cols = [c for c in wave_cols if not is_foreign_broker(c)]
+    foreign_wave_idx = [idx for idx, c in enumerate(wave_cols) if is_foreign_broker(c)]
 
     chips_mat = df_c[wave_cols].to_numpy(dtype=float)
     chips_5d_mat = pd.DataFrame(chips_mat).rolling(5, min_periods=1).sum().to_numpy(dtype=float)
@@ -2099,7 +1704,6 @@ def compute_daily_health_scores(
     c5_arr = pd.to_numeric(df_a["conc_5d"], errors="coerce").to_numpy(dtype=float) if "conc_5d" in df_a.columns else np.full(n, np.nan)
     c10_arr = pd.to_numeric(df_a["conc_10d"], errors="coerce").to_numpy(dtype=float) if "conc_10d" in df_a.columns else np.full(n, np.nan)
     c20_arr = pd.to_numeric(df_a["conc_20d"], errors="coerce").to_numpy(dtype=float) if "conc_20d" in df_a.columns else np.full(n, np.nan)
-    diff_arr = pd.to_numeric(df_a["broker_diff"], errors="coerce").to_numpy(dtype=float) if "broker_diff" in df_a.columns else np.full(n, np.nan)
     m_arr = pd.to_numeric(df_a["margin_bal"], errors="coerce").to_numpy(dtype=float) if "margin_bal" in df_a.columns else np.full(n, np.nan)
     s_arr = pd.to_numeric(df_a["short_bal"], errors="coerce").to_numpy(dtype=float) if "short_bal" in df_a.columns else np.full(n, np.nan)
     sbl_arr = pd.to_numeric(df_a["sbl_bal"], errors="coerce").to_numpy(dtype=float) if "sbl_bal" in df_a.columns else np.full(n, np.nan)
@@ -2109,12 +1713,14 @@ def compute_daily_health_scores(
 
     lb = STRATEGY_PARAMS["wave_lookback_days"]
     z_win = STRATEGY_PARAMS["zscore_window"]
+    high_thresh = STRATEGY_PARAMS["breadth_streak_pct"]
     tdcc_list = sorted(tdcc_history, key=lambda x: x.get("date", "")) if isinstance(tdcc_history, list) else []
 
+    # 預計算每日投信連買／連賣天數與波段分點廣度連強天數
     trust_streak_arr = np.zeros(n, dtype=int)
-    diff_neg_streak_arr = np.zeros(n, dtype=int)
+    breadth_high_streak_arr = np.zeros(n, dtype=int)
     cur_ts = 0
-    cur_dn = 0
+    cur_hs = 0
     for i in range(n):
         v = trust_arr[i]
         if v > 0:
@@ -2125,11 +1731,15 @@ def compute_daily_health_scores(
             cur_ts = 0
         trust_streak_arr[i] = cur_ts
 
-        if not np.isnan(diff_arr[i]) and diff_arr[i] < 0:
-            cur_dn += 1
+        row_d = chips_mat[i]
+        bd = int((row_d > 0).sum())
+        sd = int((row_d < 0).sum())
+        ad = bd + sd
+        if ad >= 4 and (bd / ad * 100.0) >= high_thresh:
+            cur_hs += 1
         else:
-            cur_dn = 0
-        diff_neg_streak_arr[i] = cur_dn
+            cur_hs = 0
+        breadth_high_streak_arr[i] = cur_hs
 
     def _slice_zscore(arr: np.ndarray, idx: int) -> float | None:
         sl = arr[max(0, idx - z_win + 1) : idx + 1]
@@ -2146,6 +1756,7 @@ def compute_daily_health_scores(
             records.append({"date": dt_str, "health_score": np.nan, "scenario_id": 0, "sub_type": ""})
             continue
 
+        # 1. 當日滾動 60 日三大波段主力
         w_start = max(0, i - lb + 1)
         sum_60 = chips_mat[w_start : i + 1].sum(axis=0)
         pos_idx = np.where(sum_60 > 0)[0]
@@ -2176,6 +1787,36 @@ def compute_daily_health_scores(
 
         c5_z = _slice_zscore(c5_arr, i)
 
+        # 2. 當日近 5 日主力分點廣度比（含外資共識）
+        row5 = chips_5d_mat[i]
+        b5_i = int((row5 > 0).sum())
+        s5_i = int((row5 < 0).sum())
+        a5_i = b5_i + s5_i
+        b5_pct_i = round(b5_i / a5_i * 100.0, 1) if a5_i > 0 else None
+
+        fb5_i = fs5_i = fa5_i = 0
+        fb5_pct_i = None
+        if foreign_wave_idx:
+            f_row5 = row5[foreign_wave_idx]
+            fb5_i = int((f_row5 > 0).sum())
+            fs5_i = int((f_row5 < 0).sum())
+            fa5_i = fb5_i + fs5_i
+            if fa5_i > 0:
+                fb5_pct_i = round(fb5_i / fa5_i * 100.0, 1)
+
+        breadth_i = {
+            "breadth_5d": b5_pct_i,
+            "buy_5d": b5_i,
+            "sell_5d": s5_i,
+            "active_5d": a5_i,
+            "foreign_breadth_5d": fb5_pct_i,
+            "foreign_buy_5d": fb5_i,
+            "foreign_sell_5d": fs5_i,
+            "foreign_active_5d": fa5_i,
+            "high_streak": int(breadth_high_streak_arr[i]),
+        }
+
+        # 3. 當日隔日沖佔比與近 5 日本土波段買超
         dt_info_i = None
         if dt_mat.shape[1] > 0 and vol_arr[i] > 0:
             row_dt = dt_mat[i]
@@ -2195,6 +1836,7 @@ def compute_daily_health_scores(
             if len(pos_dom) > 0:
                 dom_buy_5d = int(round(np.sort(pos_dom)[::-1][:3].sum()))
 
+        # 4. 投信當日狀態
         t_hold_i = None
         if not np.isnan(trust_pct_arr[i]):
             t_hold_i = round(float(trust_pct_arr[i]), 2)
@@ -2208,12 +1850,7 @@ def compute_daily_health_scores(
             "holding_pct": t_hold_i,
         }
 
-        bd_i = None
-        if not np.isnan(diff_arr[i]):
-            sub_d = diff_arr[s5_start : i + 1]
-            sub_d = sub_d[~np.isnan(sub_d)]
-            bd_i = {"diff_5d": int(round(sub_d.sum())), "neg_streak": int(diff_neg_streak_arr[i])}
-
+        # 5. 融資四象限、借券賣出與集保大戶當日狀態
         mg_i = None
         if not np.isnan(m_arr[i]) and i >= 5 and not np.isnan(m_arr[i - 5]) and m_arr[i - 5] > 0:
             chg_m = int(round(m_arr[i] - m_arr[i - 5]))
@@ -2265,7 +1902,7 @@ def compute_daily_health_scores(
             top3_5d_ctrl_z=top3_5d_z,
             top3_5d_float_pct=top3_5d_flt,
             trust_info=t_info_i,
-            broker_diff_info=bd_i,
+            breadth_info=breadth_i,
             margin_info=mg_i,
             sbl_info=sbl_i,
             tdcc_info=tdcc_i,
@@ -2533,7 +2170,6 @@ def update_stock_database(stock_id: str, incremental_days: int = None, sync_gith
         if df_price_recent.empty:
             return False
 
-    latest_price_date = str(df_price_recent["date"].max())
     recent_trade_dates = df_price_recent["date"].tail(3).astype(str).tolist()
     active_suffix = matched_suffix or preferred_suffix
 
@@ -2609,20 +2245,7 @@ def update_stock_database(stock_id: str, incremental_days: int = None, sync_gith
 
     df_chips_recent = df_chips_recent.fillna(0.0)
 
-    # 5. 抓取輔助籌碼（全市場家數差、融資券、官方直抓＋FinMind 借券賣出）
-    df_diff, diff_diag = fetch_broker_diff_with_diag(
-        session,
-        stock_id,
-        fetch_start,
-        latest_price_date,
-        active_mirror,
-        preferred_suffix=active_suffix,
-    )
-    if not df_diff.empty:
-        df_aux_recent = df_aux_recent.merge(df_diff, on="date", how="left")
-    else:
-        debug_notes.append(f"買賣家數差暫無回傳（{diff_diag}）")
-
+    # 5. 抓取輔助籌碼（融資融券、官方直抓＋FinMind 借券賣出）
     df_margin = fetch_margin_history(session, stock_id, fetch_start, end_date, active_mirror)
     if not df_margin.empty:
         df_aux_recent = df_aux_recent.merge(df_margin, on="date", how="left")
@@ -2659,13 +2282,6 @@ def update_stock_database(stock_id: str, incremental_days: int = None, sync_gith
             df_aux_old = pd.read_csv(aux_path)
             df_aux_kept = df_aux_old[df_aux_old["date"] < fetch_start].copy()
             df_aux = pd.concat([df_aux_kept, df_aux_recent], ignore_index=True, sort=False).sort_values("date").reset_index(drop=True)
-            if not df_diff.empty:
-                df_aux = df_aux.set_index("date")
-                df_diff_idx = df_diff.set_index("date")[["broker_diff"]]
-                if "broker_diff" not in df_aux.columns:
-                    df_aux["broker_diff"] = np.nan
-                df_aux["broker_diff"] = df_diff_idx["broker_diff"].reindex(df_aux.index).combine_first(df_aux["broker_diff"])
-                df_aux = df_aux.reset_index()
         else:
             df_aux = df_aux_recent
     else:
@@ -2676,7 +2292,7 @@ def update_stock_database(stock_id: str, incremental_days: int = None, sync_gith
             df_aux_prev = pd.read_csv(aux_path)
             df_new_idx = df_aux_recent.set_index("date")
             df_prev_idx = df_aux_prev.drop_duplicates(subset=["date"], keep="last").set_index("date")
-            keep_cols = [c for c in ["conc_5d", "conc_10d", "conc_20d", "broker_diff", "margin_bal", "short_bal", "sbl_bal"] if c in df_prev_idx.columns]
+            keep_cols = [c for c in ["conc_5d", "conc_10d", "conc_20d", "margin_bal", "short_bal", "sbl_bal"] if c in df_prev_idx.columns]
             for col in keep_cols:
                 if col in df_new_idx.columns:
                     df_new_idx[col] = df_new_idx[col].combine_first(df_prev_idx[col].reindex(df_new_idx.index))
@@ -2717,7 +2333,7 @@ def update_stock_database(stock_id: str, incremental_days: int = None, sync_gith
     df_chips.to_csv(chips_path, index=False, encoding="utf-8-sig")
     df_aux.to_csv(aux_path, index=False, encoding="utf-8-sig")
 
-    # 11. 產出摘要並持久化 tracked_brokers 與 broker_diff_diag
+    # 11. 產出摘要並持久化 tracked_brokers
     meta = analyze_main_force(
         df_price,
         df_chips,
@@ -2728,14 +2344,12 @@ def update_stock_database(stock_id: str, incremental_days: int = None, sync_gith
         df_aux_full=df_aux,
         tdcc_history=tdcc_history,
         issued_lots=issued_lots,
-        broker_diff_diag=diff_diag,
     )
     meta["stock_id"] = stock_id
     meta["stock_name"] = stock_name
     meta["ticker_suffix"] = active_suffix or ""
     meta["issued_lots"] = issued_lots
     meta["broker_count"] = total_brokers
-    meta["broker_diff_diag"] = diff_diag
     meta["tracked_brokers"] = {
         name: {"bhid": info["bhid"], "b": info["b"]}
         for name, info in merged_broker_map.items()
