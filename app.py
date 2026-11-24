@@ -32,7 +32,7 @@ st.markdown("""
 /* --- 核心決策總結看板（結論置頂） --- */
 .hero-panel {
     display: grid;
-    grid-template-columns: 220px 1fr;
+    grid-template-columns: 225px 1fr;
     gap: 16px;
     background-color: #161b26;
     border: 1px solid #2e374b;
@@ -105,6 +105,22 @@ st.markdown("""
     color: #fde68a;
     margin-top: 5px;
     line-height: 1.45;
+}
+.score-breakdown-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 7px;
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+    color: #94a3b8;
+}
+.sb-pill {
+    background-color: #111622;
+    border: 1px solid #283247;
+    border-radius: 5px;
+    padding: 2px 7px;
 }
 
 /* --- 精簡單行背離警示條 --- */
@@ -524,7 +540,7 @@ st.markdown("""
     pointer-events: none;
 }
 .tip-box-wide {
-    width: 420px;
+    width: 440px;
 }
 .tip-wrap:hover .tip-box {
     visibility: visible;
@@ -633,6 +649,12 @@ st.markdown("""
     border-top: 1px solid rgba(38, 166, 154, 0.45);
     border-bottom: 1px solid rgba(38, 166, 154, 0.45);
 }
+.matrix-active-neutral td {
+    background-color: rgba(245, 158, 11, 0.13);
+    color: #ffffff;
+    border-top: 1px solid rgba(245, 158, 11, 0.45);
+    border-bottom: 1px solid rgba(245, 158, 11, 0.45);
+}
 .sidebar-help-box {
     background-color: #1a1f2b;
     border: 1px solid #2d3548;
@@ -699,7 +721,7 @@ def _compute_daily_health_cached(
     _tdcc_history: list,
     issued_lots: float,
 ) -> pd.DataFrame:
-    """快取每日籌碼健康分數回算結果，消除勾選 Checkbox 或換分點時的重算卡頓"""
+    """快取每日純籌碼健康分數回算結果，消除勾選 Checkbox 或換分點時的重算卡頓"""
     return compute_daily_health_scores(
         df_price_full=_df_price_full,
         df_chips_full=_df_chips_full,
@@ -773,6 +795,14 @@ def _span_float(val: float, suffix: str = "%", invert_color: bool = False) -> st
     is_bull_color = (val < 0) if invert_color else (val > 0)
     color = "#ef5350" if is_bull_color else "#26a69a"
     return f'<span style="color:{color}; font-weight:700;">{val:+.2f}{suffix}</span>'
+
+
+def _span_delta_score(val: int) -> str:
+    if val > 0:
+        return f'<span style="color:#ef5350; font-weight:700;">{val:+d}</span>'
+    elif val < 0:
+        return f'<span style="color:#26a69a; font-weight:700;">{val:+d}</span>'
+    return '<span style="color:#94a3b8; font-weight:600;">0</span>'
 
 
 def _span_streak(streak: int) -> str:
@@ -863,6 +893,8 @@ def _render_aux_dashboard(
     sbl_info: dict | None,
     tdcc_info: dict | None,
 ) -> str:
+    p = STRATEGY_PARAMS
+
     # 1. 買賣家數差
     diff_tip = "計算公式：買超分點家數 － 賣超分點家數。負值（紅）代表籌碼由散戶流向少數主力；正值（綠）代表籌碼流向散戶、趨於發散。"
     if broker_diff_info:
@@ -889,52 +921,81 @@ def _render_aux_dashboard(
             f'</div>'
         )
 
-    # 2. 融資融券與券資比
-    margin_tip = "融資減少（紅）代表散戶槓桿浮額清洗、籌碼沉澱；融資激增（橘）代表散戶追價過熱。券資比 ＝ 融券餘額 ÷ 融資餘額（＞25% 偏集中、＞35% 具軋空潛力）。"
+    # 2. 融資融券（升級四象限交叉判定＋相對量能濾網）
+    margin_tip = (
+        "<b>融資四象限交叉判讀（須通過 5 日變動佔 5 日總量 ≥ 3% 濾網）：</b><br>"
+        "• <b>🔥 主力融資點火 (+3分)：</b>融資大增＋集中度正＋家數差負（籌碼往少數人集中）。<br>"
+        "• <b>⚠️ 散戶融資過熱 (-5分)：</b>融資大增＋集中度負或家數差正（散戶槓桿擴散）。<br>"
+        "• <b>🧹 融資清洗 (+5分)：</b>融資減少＋集中度正或家數差負（散戶停損、主力承接）。<br>"
+        "• <b>💨 融資退場發散 (-3分)：</b>融資減少＋集中度轉負（原主力融資結帳撤退）。"
+    )
     if margin_info:
         m_bal = margin_info["latest_bal"]
         m_5d = margin_info["chg_5d"]
         m_5d_pct = margin_info["chg_5d_pct"]
+        m_vol_pct = margin_info.get("chg_5d_vol_pct")
         sm_rat = margin_info["short_margin_ratio"]
         s_bal = margin_info["short_bal"]
-        if m_5d_pct <= STRATEGY_PARAMS["margin_clean_5d_pct"] and m_5d < 0:
+        quad = int(margin_info.get("quadrant", 0) or 0)
+
+        if quad == 1:
+            m_badge = _aux_badge("🔥 主力融資點火", "bull")
+            inv_col = False  # 融資增加為偏多紅
+        elif quad == 2:
+            m_badge = _aux_badge("⚠️ 散戶融資過熱", "bear")
+            inv_col = True   # 融資增加為偏空綠
+        elif quad == 3:
             m_badge = _aux_badge("🧹 融資清洗", "bull")
-        elif m_5d_pct >= STRATEGY_PARAMS["margin_surge_5d_pct"] and m_5d > 0:
-            m_badge = _aux_badge("⚠️ 融資激增", "warn")
+            inv_col = True   # 融資減少為偏多紅
+        elif quad == 4:
+            m_badge = _aux_badge("💨 融資退場發散", "bear")
+            inv_col = False  # 融資減少為偏空綠
         else:
             m_badge = _aux_badge("⚪ 信用中性", "info")
+            inv_col = True
+
+        vol_seg = f" ｜ 佔量 <b>{m_vol_pct:.1f}%</b>" if m_vol_pct is not None else ""
         margin_card = (
             f'<div class="aux-card">'
             f'  <div class="aux-head">'
-            f'    <span class="aux-title">🧹 融資浮額／券資比<span class="tip-wrap tip-down">ⓘ<span class="tip-box">{margin_tip}</span></span></span>'
+            f'    <span class="aux-title">🧹 融資四象限／券資比<span class="tip-wrap tip-down">ⓘ<span class="tip-box tip-box-wide">{margin_tip}</span></span></span>'
             f'    {m_badge}'
             f'  </div>'
-            f'  <div class="aux-main">5日 {_span_num(m_5d, " 張", invert_color=True)} ({_span_float(m_5d_pct, "%", invert_color=True)})</div>'
-            f'  <div class="aux-sub">餘額 <b>{m_bal:,}</b> 張 ｜ 融券 <b>{s_bal:,}</b> 張 ｜ 券資比 <b style="color:#fbbf24;">{sm_rat:.1f}%</b></div>'
+            f'  <div class="aux-main">5日 {_span_num(m_5d, " 張", invert_color=inv_col)} ({_span_float(m_5d_pct, "%", invert_color=inv_col)})</div>'
+            f'  <div class="aux-sub">餘額 <b>{m_bal:,}</b> 張{vol_seg} ｜ 券資比 <b style="color:#fbbf24;">{sm_rat:.1f}%</b> ({s_bal:,}張)</div>'
             f'</div>'
         )
     else:
         margin_card = (
             f'<div class="aux-card">'
-            f'  <div class="aux-head"><span class="aux-title">🧹 融資浮額／券資比<span class="tip-wrap tip-down">ⓘ<span class="tip-box">{margin_tip}</span></span></span>{_aux_badge("待更新", "info")}</div>'
+            f'  <div class="aux-head"><span class="aux-title">🧹 融資四象限／券資比<span class="tip-wrap tip-down">ⓘ<span class="tip-box tip-box-wide">{margin_tip}</span></span></span>{_aux_badge("待更新", "info")}</div>'
             f'  <div class="aux-main" style="color:#94a3b8;">尚無資料</div>'
             f'  <div class="aux-sub">點擊左側「🔄」補抓信用交易</div>'
             f'</div>'
         )
 
-    # 3. 借券賣出餘額
-    sbl_tip = "外資與機構法人的真實放空水位。餘額減少（紅）代表空方回補、減輕賣壓並提供軋空助力；餘額大增（綠）代表空單加壓。"
+    # 3. 借券賣出餘額（對齊相對量能濾網與 Z-Score）
+    sbl_tip = (
+        "外資與機構法人的真實放空水位（須通過 5 日變動佔 5 日總量 ≥ 3% 濾網才計分）。"
+        "餘額顯著減少（紅）代表空方回補 (+5分)；餘額顯著大增（綠）代表空單加壓 (-5分)。"
+    )
     if sbl_info:
         sbl_bal = sbl_info["latest_bal"]
         sbl_5d = sbl_info["chg_5d"]
         sbl_pct = sbl_info["chg_5d_pct"]
+        sbl_z = sbl_info.get("chg_5d_z")
+        sbl_vol_pct = sbl_info.get("chg_5d_vol_pct")
         sbl_1d = sbl_info["chg_1d"]
-        if sbl_pct <= STRATEGY_PARAMS["sbl_cover_5d_pct"] and sbl_5d < 0:
+        sbl_vol_ok = True if sbl_vol_pct is None else (sbl_vol_pct >= p["credit_vol_ratio_min"])
+
+        if sbl_vol_ok and sbl_5d < 0 and (sbl_pct <= p["sbl_cover_5d_pct"] or (sbl_z is not None and sbl_z <= p["z_bear_max"])):
             sbl_badge = _aux_badge("🚀 借券回補", "bull")
-        elif sbl_pct >= STRATEGY_PARAMS["sbl_surge_5d_pct"] and sbl_5d > 0:
+        elif sbl_vol_ok and sbl_5d > 0 and (sbl_pct >= p["sbl_surge_5d_pct"] or (sbl_z is not None and sbl_z >= p["z_bull_min"])):
             sbl_badge = _aux_badge("🐻 空單加壓", "bear")
         else:
             sbl_badge = _aux_badge("⚪ 空單持平", "info")
+
+        vol_seg = f" ｜ 佔量 <b>{sbl_vol_pct:.1f}%</b>" if sbl_vol_pct is not None else ""
         sbl_card = (
             f'<div class="aux-card">'
             f'  <div class="aux-head">'
@@ -942,7 +1003,7 @@ def _render_aux_dashboard(
             f'    {sbl_badge}'
             f'  </div>'
             f'  <div class="aux-main">5日 {_span_num(sbl_5d, " 張", invert_color=True)} ({_span_float(sbl_pct, "%", invert_color=True)})</div>'
-            f'  <div class="aux-sub">餘額 <b>{sbl_bal:,}</b> 張 ｜ 今日 {_span_num(sbl_1d, " 張", invert_color=True)}</div>'
+            f'  <div class="aux-sub">餘額 <b>{sbl_bal:,}</b> 張{vol_seg} ｜ 今日 {_span_num(sbl_1d, " 張", invert_color=True)}</div>'
             f'</div>'
         )
     else:
@@ -955,7 +1016,7 @@ def _render_aux_dashboard(
         )
 
     # 4. TDCC 集保戶股權分散表
-    tdcc_tip = "集保中心每週五公布之歸戶股權分散表，可破解主力拆單藏分點與匯撥。千張大戶比率上升且總股東人數減少為標準籌碼集中訊號。"
+    tdcc_tip = "集保中心每週五公布之歸戶股權分散表，可破解主力拆單藏分點與匯撥。大戶比率上升且總股東人數減少為標準籌碼集中訊號（最高 ±8 分）。"
     if tdcc_info:
         w1000 = tdcc_info["whale_1000_pct"]
         w1000_chg = tdcc_info.get("whale_1000_chg_1w")
@@ -965,9 +1026,9 @@ def _render_aux_dashboard(
         t_dt = tdcc_info.get("date", "")
         chg_txt = _span_float(w1000_chg, "%") if w1000_chg is not None else '<span style="color:#94a3b8;">首週</span>'
         h_chg_txt = _span_num(h_chg, " 人", invert_color=True) if h_chg is not None else "—"
-        if w1000_chg is not None and w1000_chg >= 0.2:
+        if w1000_chg is not None and w1000_chg >= 0.2 and (h_chg is None or h_chg < 0):
             t_badge = _aux_badge("🐋 大戶增持", "bull")
-        elif w1000_chg is not None and w1000_chg <= -0.2:
+        elif w1000_chg is not None and w1000_chg <= -0.2 and (h_chg is None or h_chg > 0):
             t_badge = _aux_badge("⚠️ 大戶流出", "bear")
         else:
             t_badge = _aux_badge(t_dt or "每週更新", "info")
@@ -1028,11 +1089,10 @@ def _render_rank_table(
 
 def _split_price_by_health(closes: pd.Series, scores: pd.Series):
     """
-    依每日籌碼健康分數將收盤價折線切分為三個無縫銜接的顏色序列：
-    - y_bull: >= 70 分（偏多共振，亮紅）
-    - y_neutral: 36 ~ 69 分或暖身期（中性拉鋸，金黃）
-    - y_bear: <= 35 分（偏空警戒，亮綠）
-    同時回傳連續紅／綠區間的索引起訖 (start_idx, end_idx, regime) 供主圖繪製背景色帶。
+    依每日純籌碼健康分數將收盤價折線切分為三個無縫銜接的顏色序列：
+    - y_bull: >= 70 分（強力籌碼集中，亮紅）
+    - y_neutral: 36 ~ 69 分或暖身期（中性／溫和，金黃）
+    - y_bear: <= 35 分（籌碼明顯發散，亮綠）
     """
     n = len(closes)
     c_vals = closes.to_numpy(dtype=float)
@@ -1087,7 +1147,7 @@ def _split_price_by_health(closes: pd.Series, scores: pd.Series):
     return y_bull, y_neutral, y_bear, bands
 
 
-st.markdown("### 📈 台股主力分點吃貨／出貨追蹤系統")
+st.markdown("### 📈 台股純籌碼集中／發散追蹤系統")
 
 saved_list = get_saved_stocks()
 if "active_stock" not in st.session_state:
@@ -1344,7 +1404,7 @@ if target_stock:
         st.warning(f"在指定區間 `{start_filter} ~ {end_filter}` 內查無交易資料，請確認輸入的日期。")
         st.stop()
 
-    # 計算區間股價漲跌幅
+    # 計算區間股價漲跌幅（純視覺參考）
     chip_close = float(df_price.iloc[-1]["close"])
     if realtime_price_row is not None:
         display_close = float(realtime_price_row["close"])
@@ -1399,7 +1459,7 @@ if target_stock:
 
     st.markdown(
         f'<div style="display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; gap:8px;">'
-        f'  <h4 style="margin:0;">🎯 {stock_title} 主力診斷結論（{period_label}｜追蹤 {broker_count} 分點）</h4>'
+        f'  <h4 style="margin:0;">🎯 {stock_title} 純籌碼診斷結論（{period_label}｜追蹤 {broker_count} 分點）</h4>'
         f'  <span style="font-size:0.84rem; color:#94a3b8;">{time_badge}</span>'
         f'</div>',
         unsafe_allow_html=True,
@@ -1408,35 +1468,54 @@ if target_stock:
         st.caption(f"雲端資料庫狀態：{meta_saved['github_sync']}")
 
     # =====================================================================
-    # 區塊一：核心決策總結看板（結論置頂：分數 ＋ 劇本 ＋ 操作應對 ＋ 共振徽章）
+    # 區塊一：核心決策總結看板（100% 純籌碼健康分數 ＋ 五層拆解 ＋ 狀態 ＋ 徽章）
     # =====================================================================
     conv_score = int(scenario.get("conviction_score", 50))
     if conv_score >= 70:
-        score_col, score_lbl = "#ef5350", "偏多強勢共振"
+        score_col, score_lbl = "#ef5350", "強力籌碼集中"
     elif conv_score >= 55:
-        score_col, score_lbl = "#f59e0b", "略偏多觀察"
+        score_col, score_lbl = "#f59e0b", "溫和偏多集中"
     elif conv_score <= 35:
-        score_col, score_lbl = "#26a69a", "偏空／出貨風險"
+        score_col, score_lbl = "#26a69a", "籌碼明顯發散"
     else:
-        score_col, score_lbl = "#94a3b8", "中性多空拉鋸"
+        score_col, score_lbl = "#94a3b8", "籌碼中性／分歧"
 
     score_tip_html = (
-        "<b>綜合籌碼健康分數（0～100 分）</b><br>"
-        "以五大劇本為基準分，結合近 5 日投信、家數差、融資、借券、集保週變動、隔日沖與均線／深套趨勢加減計算：<br>"
+        "<b>純籌碼健康分數（0～100 分｜完全排除均線與股價漲跌）</b><br>"
+        "以 <b>50 分</b>為多空中性基準，依五大純籌碼維度累計加減（最高 ±50 分）：<br>"
+        "• <b>全市場集中度＋買賣家數差：</b>±18 分<br>"
+        "• <b>60日三大波段主力＋投信真實水位：</b>±14 分<br>"
+        "• <b>融資四象限＋借券賣出（含相對量能濾網）：</b>±10 分<br>"
+        "• <b>TDCC 集保大戶週歸戶驗證：</b>±8 分<br>"
+        "• <b>當日隔日沖灌水濾網（偏多時單向扣分）：</b>0 ～ -10 分<br>"
         '<table class="tip-mini-tbl">'
-        '  <thead><tr><th>分數區間</th><th>燈號狀態</th><th>實戰好壞與含義</th></tr></thead>'
+        '  <thead><tr><th>分數區間</th><th>燈號狀態</th><th>純籌碼含義</th></tr></thead>'
         '  <tbody>'
-        '    <tr><td style="white-space:nowrap;"><b>70 ～ 100 分</b></td><td style="color:#ef5350; font-weight:700; white-space:nowrap;">偏多強勢共振（紅）</td><td><b>極佳。</b>多頭劇本成立且有多項輔助籌碼同步驗證，屬高勝率結構。</td></tr>'
-        '    <tr><td style="white-space:nowrap;"><b>55 ～ 69 分</b></td><td style="color:#f59e0b; font-weight:700; white-space:nowrap;">略偏多觀察（橘）</td><td><b>中上。</b>有偏多訊號或試單條件，但共振尚未齊全（或混有短線雜訊）。</td></tr>'
-        '    <tr><td style="white-space:nowrap;"><b>36 ～ 54 分</b></td><td style="color:#94a3b8; font-weight:700; white-space:nowrap;">中性多空拉鋸（灰）</td><td><b>普通／觀望。</b>多空籌碼互相抵銷，方向不明確。</td></tr>'
-        '    <tr><td style="white-space:nowrap;"><b>0 ～ 35 分</b></td><td style="color:#26a69a; font-weight:700; white-space:nowrap;">偏空／出貨風險（綠）</td><td><b>差／警戒。</b>觸發空方劇本或籌碼嚴重發散，應避開或逢彈減碼。</td></tr>'
+        '    <tr><td style="white-space:nowrap;"><b>70 ～ 100 分</b></td><td style="color:#ef5350; font-weight:700; white-space:nowrap;">強力籌碼集中（紅）</td><td>點、面、輔助籌碼高度同向，大資金明確鎖碼或加速吸籌。</td></tr>'
+        '    <tr><td style="white-space:nowrap;"><b>55 ～ 69 分</b></td><td style="color:#f59e0b; font-weight:700; white-space:nowrap;">溫和偏多集中（橘）</td><td>籌碼開始沉澱或主力悄悄建倉，但尚未全面共振。</td></tr>'
+        '    <tr><td style="white-space:nowrap;"><b>36 ～ 54 分</b></td><td style="color:#94a3b8; font-weight:700; white-space:nowrap;">籌碼中性／分歧（灰）</td><td>多空籌碼互相抵銷，或集中度與家數差／隔日沖出現矛盾。</td></tr>'
+        '    <tr><td style="white-space:nowrap;"><b>0 ～ 35 分</b></td><td style="color:#26a69a; font-weight:700; white-space:nowrap;">籌碼明顯發散（綠）</td><td>主力倒貨、外圍發散或法人結帳，籌碼明顯流向散戶。</td></tr>'
         '  </tbody>'
         '</table>'
     )
 
     sc_type = scenario.get("type", "neutral")
     hero_cls = "hero-bull" if sc_type == "bull" else ("hero-bear" if sc_type == "bear" else "hero-neutral")
-    sc_action_html = f'<div class="hero-body-action">💡 操作應對：{scenario["action"]}</div>' if scenario.get("action") else ""
+    sc_action_html = f'<div class="hero-body-action">💡 籌碼解讀：{scenario["action"]}</div>' if scenario.get("action") else ""
+
+    sb = scenario.get("score_breakdown") or {}
+    breakdown_html = ""
+    if sb:
+        breakdown_html = (
+            f'<div class="score-breakdown-row">'
+            f'  <span class="sb-pill">基準 <b>{sb.get("base", 50)}</b></span>'
+            f'  <span class="sb-pill">集中／家數差 {_span_delta_score(int(sb.get("conc_diff", 0)))}</span>'
+            f'  <span class="sb-pill">主力／投信 {_span_delta_score(int(sb.get("wave_trust", 0)))}</span>'
+            f'  <span class="sb-pill">融資／借券 {_span_delta_score(int(sb.get("credit_sbl", 0)))}</span>'
+            f'  <span class="sb-pill">集保大戶 {_span_delta_score(int(sb.get("tdcc", 0)))}</span>'
+            f'  <span class="sb-pill">隔日沖濾網 {_span_delta_score(int(sb.get("day_trade", 0)))}</span>'
+            f'</div>'
+        )
 
     badges_html = ""
     sc_badges = scenario.get("badges") or []
@@ -1456,7 +1535,7 @@ if target_stock:
         f'<div class="hero-panel {hero_cls}">'
         f'  <div class="hero-score-box">'
         f'    <div class="hero-score-label">'
-        f'      <span>綜合籌碼健康分數</span>'
+        f'      <span>純籌碼健康分數</span>'
         f'      <span class="tip-wrap tip-down">ⓘ<span class="tip-box tip-box-wide">{score_tip_html}</span></span>'
         f'    </div>'
         f'    <div class="score-val" style="color:{score_col};">{conv_score} <span style="font-size:0.88rem; font-weight:500; color:#94a3b8;">/ 100</span></div>'
@@ -1467,13 +1546,14 @@ if target_stock:
         f'    <div class="hero-body-title">{scenario.get("title", "")}</div>'
         f'    <div class="hero-body-desc">{scenario.get("desc", "")}</div>'
         f'    {sc_action_html}'
+        f'    {breakdown_html}'
         f'    {badges_html}'
         f'  </div>'
         f'</div>',
         unsafe_allow_html=True,
     )
 
-    # --- 區塊一之二：精簡單行價量籌碼背離警示條 ---
+    # --- 區塊一之二：精簡單行價量籌碼背離警示條（純視覺參考，不計入純籌碼分數） ---
     div_alert = analysis.get("divergence_alert")
     if div_alert:
         alert_type = div_alert.get("type", "bull")
@@ -1483,7 +1563,7 @@ if target_stock:
         )
         raw_desc_lines = str(div_alert.get("desc", "")).split("<br>")
         compact_desc = raw_desc_lines[0] if raw_desc_lines else ""
-        full_tip_desc = str(div_alert.get("desc", ""))
+        full_tip_desc = str(div_alert.get("desc", "")) + "<br><span style='color:#94a3b8;'>（此項僅作價量對照參考，不參與純籌碼健康評分）</span>"
         st.markdown(
             f'<div class="div-strip {strip_cls}">'
             f'  <div>'
@@ -1506,7 +1586,7 @@ if target_stock:
     top3_period_net = int(analysis.get("top3_period_net", 0))
     if "吃貨中" in raw_status_html:
         if conv_score <= 35:
-            display_status_html = f'🟡 區間逆勢承接（{_span_num(top3_period_net)}｜格局偏空）'
+            display_status_html = f'🟡 區間逆勢承接（{_span_num(top3_period_net)}｜整體籌碼偏發散）'
         elif z5 is not None and abs(z5) < 1.0:
             display_status_html = f'🟡 區間小幅買超（{_span_num(top3_period_net)}｜屬日常波動）'
         else:
@@ -1557,12 +1637,12 @@ if target_stock:
         </div>
         """, unsafe_allow_html=True)
 
-    # --- 區塊一之四：投信獨立追蹤列（連買賣與近 5 日放大突出） ---
+    # --- 區塊一之四：投信獨立追蹤列 ---
     trust_info = analysis.get("trust_info")
     if trust_info:
         trust_tip = (
             "投信下單分散於各大本土券商法人專戶中，系統不將其與分點張數重複加總，"
-            "但已正式將投信連買／連賣與真實持股比率（佔股本 %）納入五大劇本的共振評分層。"
+            "並以真實持股比率（佔股本 %）與連買／連賣天數獨立計入純籌碼評分（±6 分）。"
             "動向標籤嚴格以買超紅、賣超綠呈現；持股水位 0.5%～5% 且偏買時為初升認養甜蜜期，10% 以上須留意結帳賣壓。"
         )
         phase = trust_info.get("phase") or {}
@@ -1663,35 +1743,43 @@ if target_stock:
         unsafe_allow_html=True,
     )
 
-    # --- 可收合抽屜：價 × 點 × 面 × 共振 交叉判讀矩陣 ---
+    # --- 可收合抽屜：純籌碼結構 5 大狀態判讀矩陣（100% 撇除均線） ---
     matched_id = scenario.get("id", 0)
-    with st.expander("📖 價 × 點 × 面 × 共振 交叉判讀矩陣（點擊展開 5 大實戰劇本與操作應對）", expanded=False):
+    with st.expander("📖 純籌碼結構 5 大狀態判讀矩陣（100% 撇除均線與漲跌）", expanded=False):
         m_rows = []
         for item in SCENARIO_MATRIX:
             is_match = (item["id"] == matched_id)
             row_cls = ""
             badge = ""
             if is_match:
-                row_cls = "matrix-active-bull" if item["type"] == "bull" else "matrix-active-bear"
+                if item["type"] == "bull":
+                    row_cls = "matrix-active-bull"
+                elif item["type"] == "bear":
+                    row_cls = "matrix-active-bear"
+                else:
+                    row_cls = "matrix-active-neutral"
                 badge = '<br><span style="display:inline-block; margin-top:4px; padding:1px 6px; border-radius:4px; background:#f59e0b; color:#0f172a; font-weight:700; font-size:0.75rem;">👈 目前符合</span>'
+            aux_col_html = item.get("aux_cond", "")
+            if item.get("price_cond"):
+                aux_col_html = f'{aux_col_html}<br><span style="color:#94a3b8;">{item["price_cond"]}</span>' if aux_col_html else item["price_cond"]
             m_rows.append(
                 f'<tr class="{row_cls}">'
                 f'  <td style="width:17%; font-weight:700;">{item["name"]}{badge}</td>'
-                f'  <td style="width:18%;">{item.get("price_cond", "")}</td>'
-                f'  <td style="width:17%;">{item.get("main_cond", "")}</td>'
-                f'  <td style="width:20%;">{item.get("conc_cond", "")}</td>'
-                f'  <td style="width:28%;">{item.get("action", "")}</td>'
+                f'  <td style="width:18%;">{item.get("main_cond", "")}</td>'
+                f'  <td style="width:19%;">{item.get("conc_cond", "")}</td>'
+                f'  <td style="width:20%;">{aux_col_html}</td>'
+                f'  <td style="width:26%;">{item.get("action", "")}</td>'
                 f'</tr>'
             )
         st.markdown(f"""
         <table class="matrix-table">
             <thead>
                 <tr>
-                    <th>盤面情境劇本</th>
-                    <th>股價與均線（價）</th>
+                    <th>純籌碼結構狀態</th>
                     <th>60日三大波段主力（點）</th>
-                    <th>集中度與共振驗證（面）</th>
-                    <th>實戰解讀與操作應對</th>
+                    <th>集中度與家數差（面）</th>
+                    <th>輔助籌碼與分數檢核</th>
+                    <th>籌碼解讀與觀察重點</th>
                 </tr>
             </thead>
             <tbody>{"".join(m_rows)}</tbody>
@@ -1708,8 +1796,8 @@ if target_stock:
             "<b>波段主力定義：</b>採近 60 個交易日淨買超前 3 大純券商分點，並透過週轉係數與隔日反手率自動過濾高頻隔日沖分點。<br><br>"
             "<b>控盤率實戰標準：</b><br>"
             "• <b>絕對值 &lt; 2%：</b>影響力一般，屬正常換手。<br>"
-            "• <b>絕對值 2% ～ 5%：</b>態度積極，或 Z-Score 達 ±1.5σ 以上。<br>"
-            "• <b>絕對值 &gt; 5%：</b>高度控盤，波段走勢幾乎由這批主力主導。"
+            "• <b>絕對值 2% ～ 5%：</b>態度積極，或 Z-Score 達 ±1.0σ 以上。<br>"
+            "• <b>絕對值 &gt; 5%：</b>高度控盤，波段籌碼高度集中於這批主力。"
         )
         cost_inline = (
             f' <span style="color:#64748b; margin:0 6px;">｜</span>'
@@ -1854,8 +1942,8 @@ if target_stock:
 
     st.divider()
 
-    # --- 區塊二：股價（含籌碼健康分數三色燈號）、10/20MA、VWAP 主力成本線 vs. 籌碼流向 ---
-    st.markdown(f"#### 📉 {stock_title} 股價、籌碼健康燈號與主力 VWAP 成本線走勢")
+    # --- 區塊二：股價（含純籌碼健康分數三色燈號）、主力 VWAP 成本線 vs. 籌碼流向 ---
+    st.markdown(f"#### 📉 {stock_title} 股價、純籌碼健康燈號與主力 VWAP 成本線走勢")
 
     available_brokers = [c for c in df_chips_full.columns if c != "date"]
     default_selected = [n for n in top3_names if n in available_brokers] or available_brokers[:1]
@@ -1901,22 +1989,26 @@ if target_stock:
     )
     has_health_series = (not df_health.empty) and df_health["health_score"].notna().any()
 
-    c_opt1, c_opt2, c_opt3, c_opt4, c_opt5 = st.columns([1.0, 1.35, 1.25, 1.25, 1.7])
+    c_opt1, c_opt2, c_opt3, c_opt4, c_opt5 = st.columns([1.25, 1.3, 1.2, 1.25, 1.6])
     with c_opt1:
-        show_ma = st.checkbox("顯示 10/20MA", value=True)
+        show_ma = st.checkbox(
+            "顯示 10/20MA (純參考)",
+            value=False,
+            help="均線僅供主圖視覺對照，已完全排除於純籌碼評分之外",
+        )
     with c_opt2:
         show_health_regime = st.checkbox(
-            "健康分數燈號背景",
+            "純籌碼燈號背景",
             value=bool(has_health_series),
             disabled=not bool(has_health_series),
-            help="收盤價折線與主圖背景依每日健康分數動態變色：紅（≥70分偏多共振）、黃（中性）、綠（≤35分偏空警戒）",
+            help="收盤價折線與主圖背景 100% 依每日純籌碼健康分數動態變色：紅（≥70分強力集中）、黃（中性）、綠（≤35分明顯發散）",
         )
     with c_opt3:
         show_health_curve = st.checkbox(
             "疊加分數趨勢線",
             value=False,
             disabled=not bool(has_health_series),
-            help="在主圖右側副軸疊加 5 日平滑籌碼健康分數曲線（0～100分）",
+            help="在主圖右側副軸疊加 5 日平滑純籌碼健康分數曲線（0～100分）",
         )
     with c_opt4:
         has_aux_series = (
@@ -1972,7 +2064,7 @@ if target_stock:
             sel_pnl = (latest_full_close - latest_cost) / latest_cost * 100.0
             pnl_color = "#ef5350" if sel_pnl > 0 else ("#26a69a" if sel_pnl < 0 else "#cbd5e1")
             st.markdown(
-                f'<div class="cost-banner">💰 <b>{target_label}</b> {cost_mode_tag}：'
+                f'<div class="cost-banner">💰 <b>{target_label}</b> {cost_mode_tag}（純視覺參考）：'
                 f'<b style="color:#ffb74d;">{latest_cost:,.2f} 元</b> ｜ '
                 f'區間剩餘庫存：<b>{int(round(latest_inv)):,} 張</b> ｜ '
                 f'對照最新收盤價 ({latest_full_close:.2f} 元) 帳面損益：'
@@ -2007,13 +2099,13 @@ if target_stock:
             )
             chart_height = 620
 
-        # --- Row 1：股價（依健康分數三色變色）、10/20MA 與主力成本線 ---
+        # --- Row 1：股價（依純籌碼健康分數三色變色）、選配 10/20MA 與主力成本線 ---
         if show_ma:
             fig.add_trace(
                 go.Scatter(
                     x=df_plot["date"],
                     y=df_plot["ma10"],
-                    name="10MA",
+                    name="10MA (參考)",
                     line=dict(color="rgba(56, 189, 248, 0.78)", width=1.3),
                     hovertemplate="%{y:,.2f} 元<extra>10MA</extra>",
                 ),
@@ -2023,7 +2115,7 @@ if target_stock:
                 go.Scatter(
                     x=df_plot["date"],
                     y=df_plot["ma20"],
-                    name="20MA",
+                    name="20MA (參考)",
                     line=dict(color="rgba(192, 132, 252, 0.78)", width=1.3),
                     hovertemplate="%{y:,.2f} 元<extra>20MA</extra>",
                 ),
@@ -2046,7 +2138,7 @@ if target_stock:
         price_hover_texts = []
         for cl_v, sc_v, st_v in zip(df_plot["close"], df_plot["health_score"], df_plot["sub_type"].fillna("")):
             if pd.notna(sc_v):
-                price_hover_texts.append(f"{cl_v:,.2f} 元 ｜ 健康分數 {int(round(sc_v))} 分（{st_v}）")
+                price_hover_texts.append(f"{cl_v:,.2f} 元 ｜ 純籌碼 {int(round(sc_v))} 分（{st_v}）")
             else:
                 price_hover_texts.append(f"{cl_v:,.2f} 元")
 
@@ -2062,7 +2154,7 @@ if target_stock:
                     line=dict(color="#FFD700", width=2.4),
                     opacity=0.0,
                     text=price_hover_texts,
-                    hovertemplate="%{text}<extra>收盤／健康</extra>",
+                    hovertemplate="%{text}<extra>收盤／純籌碼</extra>",
                 ),
                 row=1, col=1, secondary_y=False,
             )
@@ -2082,7 +2174,7 @@ if target_stock:
                 go.Scatter(
                     x=df_plot["date"],
                     y=y_bull,
-                    name="偏多共振 (≥70分)",
+                    name="強力集中 (≥70分)",
                     line=dict(color="#ef5350", width=3.1),
                     connectgaps=False,
                     hoverinfo="skip",
@@ -2093,7 +2185,7 @@ if target_stock:
                 go.Scatter(
                     x=df_plot["date"],
                     y=y_bear,
-                    name="偏空警戒 (≤35分)",
+                    name="明顯發散 (≤35分)",
                     line=dict(color="#26a69a", width=3.1),
                     connectgaps=False,
                     hoverinfo="skip",
@@ -2129,14 +2221,14 @@ if target_stock:
                 go.Scatter(
                     x=df_plot["date"],
                     y=df_plot["health_ma5"].round(1),
-                    name="健康分數 (5日均)",
+                    name="純籌碼分數 (5日均)",
                     line=dict(color="rgba(244, 114, 182, 0.72)", width=1.6, dash="dot"),
-                    hovertemplate="%{y:.0f} 分<extra>健康分數(5日均)</extra>",
+                    hovertemplate="%{y:.0f} 分<extra>純籌碼分數(5日均)</extra>",
                 ),
                 row=1, col=1, secondary_y=True,
             )
             fig.update_yaxes(
-                title_text="健康分數 (5日均)",
+                title_text="純籌碼分數 (5日均)",
                 range=[0, 105],
                 tickvals=[0, 35, 70, 100],
                 row=1,
