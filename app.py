@@ -24,28 +24,139 @@ st.set_page_config(page_title="台股主力分點吃貨／出貨追蹤系統", l
 
 st.markdown("""
 <style>
+/* --- 核心決策總結看板（結論置頂） --- */
+.hero-panel {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 16px;
+    background-color: #161b26;
+    border: 1px solid #2e374b;
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin-top: 6px;
+    margin-bottom: 10px;
+    align-items: center;
+}
+.hero-bull {
+    border-left: 5px solid #ef5350;
+    background: linear-gradient(90deg, rgba(239, 83, 80, 0.10) 0%, #161b26 35%);
+}
+.hero-bear {
+    border-left: 5px solid #26a69a;
+    background: linear-gradient(90deg, rgba(38, 166, 154, 0.10) 0%, #161b26 35%);
+}
+.hero-neutral {
+    border-left: 5px solid #64748b;
+    background: linear-gradient(90deg, rgba(100, 116, 139, 0.10) 0%, #161b26 35%);
+}
+.hero-score-box {
+    border-right: 1px solid #2d364a;
+    padding-right: 16px;
+}
+.hero-score-label {
+    font-size: 0.82rem;
+    color: #9aa4b2;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 4px;
+}
+.score-val {
+    font-size: 2.0rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.15;
+}
+.score-bar-bg {
+    width: 100%;
+    height: 7px;
+    background-color: #273043;
+    border-radius: 4px;
+    margin: 7px 0 6px 0;
+    overflow: hidden;
+}
+.score-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+}
+.hero-score-sub {
+    font-size: 0.8rem;
+    color: #cbd5e1;
+    font-weight: 600;
+}
+.hero-body-title {
+    font-size: 1.02rem;
+    font-weight: 700;
+    color: #f8fafc;
+    margin-bottom: 4px;
+}
+.hero-body-desc {
+    font-size: 0.85rem;
+    color: #cbd5e1;
+    line-height: 1.48;
+}
+.hero-body-action {
+    font-size: 0.85rem;
+    color: #fde68a;
+    margin-top: 5px;
+    line-height: 1.45;
+}
+
+/* --- 精簡單行背離警示條 --- */
+.div-strip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    border-radius: 7px;
+    padding: 8px 14px;
+    margin-bottom: 10px;
+    font-size: 0.85rem;
+    line-height: 1.4;
+}
+.div-strip-bull {
+    background-color: rgba(239, 83, 80, 0.12);
+    border: 1px solid rgba(239, 83, 80, 0.35);
+    border-left: 4px solid #ef5350;
+    color: #f8fafc;
+}
+.div-strip-bear {
+    background-color: rgba(38, 166, 154, 0.12);
+    border: 1px solid rgba(38, 166, 154, 0.35);
+    border-left: 4px solid #26a69a;
+    color: #f8fafc;
+}
+.div-strip-warn {
+    background-color: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    border-left: 4px solid #f59e0b;
+    color: #fef3c7;
+}
+
+/* --- 三張核心數據卡片 --- */
 .summary-card {
     background-color: #1c202a;
     border: 1px solid #2e3444;
     border-radius: 10px;
-    padding: 14px 16px;
+    padding: 13px 16px;
     height: 100%;
     position: relative;
     overflow: visible;
 }
 .card-label {
-    font-size: 0.83rem;
+    font-size: 0.82rem;
     color: #9aa4b2;
-    margin-bottom: 6px;
+    margin-bottom: 5px;
     display: flex;
     align-items: center;
     gap: 4px;
 }
 .card-value {
-    font-size: 1.1rem;
+    font-size: 1.08rem;
     font-weight: 700;
     color: #f3f4f6;
-    line-height: 1.4;
+    line-height: 1.38;
     word-break: break-word;
 }
 .card-sub {
@@ -54,51 +165,8 @@ st.markdown("""
     margin-top: 6px;
     line-height: 1.45;
 }
-.score-val {
-    font-size: 1.45rem;
-    font-weight: 800;
-    font-variant-numeric: tabular-nums;
-    line-height: 1.2;
-}
-.score-bar-bg {
-    width: 100%;
-    height: 6px;
-    background-color: #273043;
-    border-radius: 4px;
-    margin-top: 8px;
-    overflow: hidden;
-}
-.score-bar-fill {
-    height: 100%;
-    border-radius: 4px;
-}
-.div-alert-bull {
-    background-color: rgba(239, 83, 80, 0.12);
-    border-left: 4px solid #ef5350;
-    border-radius: 6px;
-    padding: 10px 14px;
-    margin: 10px 0 0 0;
-    font-size: 0.9rem;
-    color: #f8fafc;
-}
-.div-alert-bear {
-    background-color: rgba(38, 166, 154, 0.12);
-    border-left: 4px solid #26a69a;
-    border-radius: 6px;
-    padding: 10px 14px;
-    margin: 10px 0 0 0;
-    font-size: 0.9rem;
-    color: #f8fafc;
-}
-.div-alert-warn {
-    background-color: rgba(245, 158, 11, 0.14);
-    border-left: 4px solid #f59e0b;
-    border-radius: 6px;
-    padding: 10px 14px;
-    margin: 10px 0 0 0;
-    font-size: 0.9rem;
-    color: #fef3c7;
-}
+
+/* --- 投信獨立追蹤列（主次分明） --- */
 .trust-bar {
     background-color: #181d28;
     border: 1px solid #2f3b52;
@@ -111,11 +179,11 @@ st.markdown("""
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    font-size: 0.86rem;
     color: #e2e8f0;
 }
 .trust-title {
     font-weight: 700;
+    font-size: 0.9rem;
     color: #f8fafc;
     display: inline-flex;
     align-items: center;
@@ -130,21 +198,38 @@ st.markdown("""
     border-radius: 4px;
     font-weight: 600;
 }
-.trust-metrics {
+.trust-metrics-wrap {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 13px;
+    gap: 14px;
     font-variant-numeric: tabular-nums;
 }
-.trust-item {
-    color: #cbd5e1;
+.trust-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    background-color: #111622;
+    border: 1px solid #2b354b;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.92rem;
+}
+.trust-secondary {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 11px;
+    font-size: 0.8rem;
+    color: #94a3b8;
 }
 .trust-lbl {
     color: #94a3b8;
-    font-size: 0.8rem;
-    margin-right: 4px;
+    font-size: 0.78rem;
+    margin-right: 3px;
 }
+
+/* --- 四大輔助籌碼卡片（去雜訊＋狀態標籤） --- */
 .aux-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
@@ -162,7 +247,7 @@ st.markdown("""
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 5px;
+    margin-bottom: 6px;
     gap: 6px;
 }
 .aux-title {
@@ -172,15 +257,15 @@ st.markdown("""
     display: inline-flex;
     align-items: center;
 }
-.aux-src {
+.aux-badge {
     font-size: 0.72rem;
-    color: #94a3b8;
-    background-color: #232a3b;
-    padding: 1px 6px;
+    font-weight: 700;
+    padding: 2px 7px;
     border-radius: 4px;
+    white-space: nowrap;
 }
 .aux-main {
-    font-size: 1.02rem;
+    font-size: 1.05rem;
     font-weight: 700;
     color: #f8fafc;
     line-height: 1.35;
@@ -189,8 +274,10 @@ st.markdown("""
     font-size: 0.78rem;
     color: #94a3b8;
     margin-top: 4px;
-    line-height: 1.45;
+    line-height: 1.4;
 }
+
+/* --- 全市場集中度面板 --- */
 .conc-panel {
     background-color: #161a23;
     border: 1px solid #2d3548;
@@ -204,11 +291,11 @@ st.markdown("""
     flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 10px;
+    margin-bottom: 9px;
     gap: 8px;
 }
 .conc-title {
-    font-size: 0.92rem;
+    font-size: 0.9rem;
     font-weight: 700;
     color: #e2e8f0;
     display: inline-flex;
@@ -216,7 +303,7 @@ st.markdown("""
     flex-wrap: wrap;
 }
 .conc-sub-tag {
-    font-size: 0.77rem;
+    font-size: 0.76rem;
     color: #94a3b8;
     background-color: #232938;
     padding: 2px 8px;
@@ -280,41 +367,13 @@ st.markdown("""
     border-radius: 5px;
     white-space: nowrap;
 }
-.scenario-bull {
-    background-color: rgba(239, 83, 80, 0.13);
-    border-left: 4px solid #ef5350;
-    border-radius: 6px;
-    padding: 10px 14px;
-    margin-top: 10px;
-    font-size: 0.88rem;
-    color: #f8fafc;
-    line-height: 1.5;
-}
-.scenario-bear {
-    background-color: rgba(38, 166, 154, 0.13);
-    border-left: 4px solid #26a69a;
-    border-radius: 6px;
-    padding: 10px 14px;
-    margin-top: 10px;
-    font-size: 0.88rem;
-    color: #f8fafc;
-    line-height: 1.5;
-}
-.scenario-neutral {
-    background-color: rgba(148, 163, 184, 0.08);
-    border-left: 4px solid #64748b;
-    border-radius: 6px;
-    padding: 9px 14px;
-    margin-top: 10px;
-    font-size: 0.85rem;
-    color: #cbd5e1;
-    line-height: 1.48;
-}
+
+/* --- 共振徽章 --- */
 .badge-row {
     display: flex;
     flex-wrap: wrap;
     gap: 7px;
-    margin-top: 9px;
+    margin-top: 8px;
 }
 .res-badge {
     display: inline-flex;
@@ -347,6 +406,8 @@ st.markdown("""
     border-color: rgba(148, 163, 184, 0.35);
     color: #cbd5e1;
 }
+
+/* --- 明細與排行榜 --- */
 .top3-header-line {
     font-size: 0.94rem;
     color: #f1f5f9;
@@ -422,6 +483,8 @@ st.markdown("""
     align-items: center;
     justify-content: space-between;
 }
+
+/* --- 懸浮提示框 --- */
 .tip-wrap {
     position: relative;
     display: inline-flex;
@@ -724,6 +787,17 @@ def _format_conc_card(label: str, info: dict) -> str:
     )
 
 
+def _aux_badge(text: str, level: str) -> str:
+    style_map = {
+        "bull": ("#fca5a5", "rgba(239,83,80,0.16)"),
+        "bear": ("#80cbc4", "rgba(38,166,154,0.16)"),
+        "warn": ("#fcd34d", "rgba(245,158,11,0.16)"),
+        "info": ("#94a3b8", "#232a3b"),
+    }
+    col, bg = style_map.get(level, style_map["info"])
+    return f'<span class="aux-badge" style="color:{col}; background:{bg};">{text}</span>'
+
+
 def _render_aux_dashboard(
     broker_diff_info: dict | None,
     margin_info: dict | None,
@@ -731,73 +805,98 @@ def _render_aux_dashboard(
     tdcc_info: dict | None,
 ) -> str:
     # 1. 買賣家數差
+    diff_tip = "計算公式：買超分點家數 － 賣超分點家數。負值（紅）代表籌碼由散戶流向少數主力；正值（綠）代表籌碼流向散戶、趨於發散。"
     if broker_diff_info:
         d5 = broker_diff_info["diff_5d"]
         d1 = broker_diff_info["diff_1d"]
         neg_s = broker_diff_info["neg_streak"]
-        src = broker_diff_info.get("source", "")
+        b_html = _aux_badge("🧲 籌碼集中", "bull") if d5 < 0 else (_aux_badge("📉 籌碼渙散", "bear") if d5 > 0 else _aux_badge("⚪ 持平", "info"))
         diff_card = (
             f'<div class="aux-card">'
-            f'  <div class="aux-head"><span class="aux-title">🧲 買賣家數差</span><span class="aux-src">{src}</span></div>'
+            f'  <div class="aux-head">'
+            f'    <span class="aux-title">🧲 買賣家數差<span class="tip-wrap tip-down">ⓘ<span class="tip-box">{diff_tip}</span></span></span>'
+            f'    {b_html}'
+            f'  </div>'
             f'  <div class="aux-main">5日 {_span_num(d5, " 家", invert_color=True)}</div>'
-            f'  <div class="aux-sub">今日 {_span_num(d1, " 家", invert_color=True)} ｜ 連負 <b>{neg_s}</b> 日<br>負值代表籌碼由散戶流向少數主力</div>'
+            f'  <div class="aux-sub">今日 {_span_num(d1, " 家", invert_color=True)} ｜ 連負 <b>{neg_s}</b> 日</div>'
             f'</div>'
         )
     else:
         diff_card = (
-            '<div class="aux-card">'
-            '  <div class="aux-head"><span class="aux-title">🧲 買賣家數差</span><span class="aux-src">待更新</span></div>'
-            '  <div class="aux-main" style="color:#94a3b8;">尚無資料</div>'
-            '  <div class="aux-sub">點擊左側「🔄」更新即可補齊</div>'
-            '</div>'
+            f'<div class="aux-card">'
+            f'  <div class="aux-head"><span class="aux-title">🧲 買賣家數差<span class="tip-wrap tip-down">ⓘ<span class="tip-box">{diff_tip}</span></span></span>{_aux_badge("待更新", "info")}</div>'
+            f'  <div class="aux-main" style="color:#94a3b8;">尚無資料</div>'
+            f'  <div class="aux-sub">點擊左側「🔄」補齊</div>'
+            f'</div>'
         )
 
     # 2. 融資融券與券資比
+    margin_tip = "融資減少（紅）代表散戶槓桿浮額清洗、籌碼沉澱；融資激增（橘）代表散戶追價過熱。券資比 ＝ 融券餘額 ÷ 融資餘額（＞25% 偏集中、＞35% 具軋空潛力）。"
     if margin_info:
         m_bal = margin_info["latest_bal"]
         m_5d = margin_info["chg_5d"]
         m_5d_pct = margin_info["chg_5d_pct"]
         sm_rat = margin_info["short_margin_ratio"]
         s_bal = margin_info["short_bal"]
+        if m_5d_pct <= STRATEGY_PARAMS["margin_clean_5d_pct"] and m_5d < 0:
+            m_badge = _aux_badge("🧹 融資清洗", "bull")
+        elif m_5d_pct >= STRATEGY_PARAMS["margin_surge_5d_pct"] and m_5d > 0:
+            m_badge = _aux_badge("⚠️ 融資激增", "warn")
+        else:
+            m_badge = _aux_badge("⚪ 信用中性", "info")
         margin_card = (
             f'<div class="aux-card">'
-            f'  <div class="aux-head"><span class="aux-title">🧹 融資浮額／券資比</span><span class="aux-src">信用交易</span></div>'
+            f'  <div class="aux-head">'
+            f'    <span class="aux-title">🧹 融資浮額／券資比<span class="tip-wrap tip-down">ⓘ<span class="tip-box">{margin_tip}</span></span></span>'
+            f'    {m_badge}'
+            f'  </div>'
             f'  <div class="aux-main">5日 {_span_num(m_5d, " 張", invert_color=True)} ({_span_float(m_5d_pct, "%", invert_color=True)})</div>'
-            f'  <div class="aux-sub">融資餘額 <b>{m_bal:,}</b> 張 ｜ 融券 <b>{s_bal:,}</b> 張<br>券資比 <b style="color:#fbbf24;">{sm_rat:.1f}%</b>（紅＝融資清洗偏多）</div>'
+            f'  <div class="aux-sub">餘額 <b>{m_bal:,}</b> 張 ｜ 融券 <b>{s_bal:,}</b> 張 ｜ 券資比 <b style="color:#fbbf24;">{sm_rat:.1f}%</b></div>'
             f'</div>'
         )
     else:
         margin_card = (
-            '<div class="aux-card">'
-            '  <div class="aux-head"><span class="aux-title">🧹 融資浮額／券資比</span><span class="aux-src">待更新</span></div>'
-            '  <div class="aux-main" style="color:#94a3b8;">尚無資料</div>'
-            '  <div class="aux-sub">點擊左側「🔄」補抓信用交易資料</div>'
-            '</div>'
+            f'<div class="aux-card">'
+            f'  <div class="aux-head"><span class="aux-title">🧹 融資浮額／券資比<span class="tip-wrap tip-down">ⓘ<span class="tip-box">{margin_tip}</span></span></span>{_aux_badge("待更新", "info")}</div>'
+            f'  <div class="aux-main" style="color:#94a3b8;">尚無資料</div>'
+            f'  <div class="aux-sub">點擊左側「🔄」補抓信用交易</div>'
+            f'</div>'
         )
 
     # 3. 借券賣出餘額
+    sbl_tip = "外資與機構法人的真實放空水位。餘額減少（紅）代表空方回補、減輕賣壓並提供軋空助力；餘額大增（綠）代表空單加壓。"
     if sbl_info:
         sbl_bal = sbl_info["latest_bal"]
         sbl_5d = sbl_info["chg_5d"]
         sbl_pct = sbl_info["chg_5d_pct"]
         sbl_1d = sbl_info["chg_1d"]
+        if sbl_pct <= STRATEGY_PARAMS["sbl_cover_5d_pct"] and sbl_5d < 0:
+            sbl_badge = _aux_badge("🚀 借券回補", "bull")
+        elif sbl_pct >= STRATEGY_PARAMS["sbl_surge_5d_pct"] and sbl_5d > 0:
+            sbl_badge = _aux_badge("🐻 空單加壓", "bear")
+        else:
+            sbl_badge = _aux_badge("⚪ 空單持平", "info")
         sbl_card = (
             f'<div class="aux-card">'
-            f'  <div class="aux-head"><span class="aux-title">🐻 借券賣出餘額</span><span class="aux-src">外資空方</span></div>'
+            f'  <div class="aux-head">'
+            f'    <span class="aux-title">🐻 借券賣出餘額<span class="tip-wrap tip-down">ⓘ<span class="tip-box">{sbl_tip}</span></span></span>'
+            f'    {sbl_badge}'
+            f'  </div>'
             f'  <div class="aux-main">5日 {_span_num(sbl_5d, " 張", invert_color=True)} ({_span_float(sbl_pct, "%", invert_color=True)})</div>'
-            f'  <div class="aux-sub">餘額 <b>{sbl_bal:,}</b> 張 ｜ 今日 {_span_num(sbl_1d, " 張", invert_color=True)}<br>紅＝回補軋空助力｜綠＝空單加壓</div>'
+            f'  <div class="aux-sub">餘額 <b>{sbl_bal:,}</b> 張 ｜ 今日 {_span_num(sbl_1d, " 張", invert_color=True)}</div>'
             f'</div>'
         )
     else:
         sbl_card = (
-            '<div class="aux-card">'
-            '  <div class="aux-head"><span class="aux-title">🐻 借券賣出餘額</span><span class="aux-src">待更新</span></div>'
-            '  <div class="aux-main" style="color:#94a3b8;">尚無資料</div>'
-            '  <div class="aux-sub">點擊左側「🔄」補抓 TWSE/TPEX 借券</div>'
-            '</div>'
+            f'<div class="aux-card">'
+            f'  <div class="aux-head"><span class="aux-title">🐻 借券賣出餘額<span class="tip-wrap tip-down">ⓘ<span class="tip-box">{sbl_tip}</span></span></span>{_aux_badge("待更新", "info")}</div>'
+            f'  <div class="aux-main" style="color:#94a3b8;">尚無資料</div>'
+            f'  <div class="aux-sub">點擊左側「🔄」補抓借券資料</div>'
+            f'</div>'
         )
 
     # 4. TDCC 集保戶股權分散表
+    tdcc_tip = "集保中心每週五公布之歸戶股權分散表，可破解主力拆單藏分點與匯撥。千張大戶比率上升且總股東人數減少為標準籌碼集中訊號。"
     if tdcc_info:
         w1000 = tdcc_info["whale_1000_pct"]
         w1000_chg = tdcc_info.get("whale_1000_chg_1w")
@@ -807,20 +906,29 @@ def _render_aux_dashboard(
         t_dt = tdcc_info.get("date", "")
         chg_txt = _span_float(w1000_chg, "%") if w1000_chg is not None else '<span style="color:#94a3b8;">首週</span>'
         h_chg_txt = _span_num(h_chg, " 人", invert_color=True) if h_chg is not None else "—"
+        if w1000_chg is not None and w1000_chg >= 0.2:
+            t_badge = _aux_badge("🐋 大戶增持", "bull")
+        elif w1000_chg is not None and w1000_chg <= -0.2:
+            t_badge = _aux_badge("⚠️ 大戶流出", "bear")
+        else:
+            t_badge = _aux_badge(t_dt or "每週更新", "info")
         tdcc_card = (
             f'<div class="aux-card">'
-            f'  <div class="aux-head"><span class="aux-title">🐋 TDCC 集保大戶</span><span class="aux-src">{t_dt}</span></div>'
+            f'  <div class="aux-head">'
+            f'    <span class="aux-title">🐋 TDCC 集保大戶<span class="tip-wrap tip-down-left">ⓘ<span class="tip-box">{tdcc_tip}</span></span></span>'
+            f'    {t_badge}'
+            f'  </div>'
             f'  <div class="aux-main">千張 <b>{w1000:.2f}%</b>（週 {chg_txt}）</div>'
-            f'  <div class="aux-sub">400張以上 <b>{w400:.2f}%</b><br>總股東 <b>{holders:,}</b> 人（週 {h_chg_txt}）</div>'
+            f'  <div class="aux-sub">400張 <b>{w400:.2f}%</b> ｜ 股東 <b>{holders:,}</b> 人（{h_chg_txt}）</div>'
             f'</div>'
         )
     else:
         tdcc_card = (
-            '<div class="aux-card">'
-            '  <div class="aux-head"><span class="aux-title">🐋 TDCC 集保大戶</span><span class="aux-src">每週更新</span></div>'
-            '  <div class="aux-main" style="color:#94a3b8;">尚無資料</div>'
-            '  <div class="aux-sub">點擊左側「🔄」同步集保歸戶大戶</div>'
-            '</div>'
+            f'<div class="aux-card">'
+            f'  <div class="aux-head"><span class="aux-title">🐋 TDCC 集保大戶<span class="tip-wrap tip-down-left">ⓘ<span class="tip-box">{tdcc_tip}</span></span></span>{_aux_badge("每週更新", "info")}</div>'
+            f'  <div class="aux-main" style="color:#94a3b8;">尚無資料</div>'
+            f'  <div class="aux-sub">點擊左側「🔄」同步集保歸戶</div>'
+            f'</div>'
         )
 
     return f'<div class="aux-grid">{diff_card}{margin_card}{sbl_card}{tdcc_card}</div>'
@@ -1088,7 +1196,7 @@ if target_stock:
     if broker_count == 0 and meta_saved.get("debug_notes"):
         st.warning(f"⚠️ 分點明細未取得（{'；'.join(meta_saved['debug_notes'])}）")
 
-    # --- 區塊一：主力診斷結論（滾動 60 日純分點口徑 ＋ 綜合籌碼分數） ---
+    # --- 標題列 ---
     updated_str = meta_saved.get("last_updated", "")
     latest_trade_date = df_price_full["date"].max()
     time_badge = f"🕒 更新時間：{updated_str}（最新交易日：{latest_trade_date}）" if updated_str else f"🕒 最新交易日：{latest_trade_date}"
@@ -1103,6 +1211,9 @@ if target_stock:
     if meta_saved.get("github_sync"):
         st.caption(f"雲端資料庫狀態：{meta_saved['github_sync']}")
 
+    # =====================================================================
+    # 區塊一：核心決策總結看板（結論置頂：分數 ＋ 劇本 ＋ 操作應對 ＋ 共振徽章）
+    # =====================================================================
     conv_score = int(scenario.get("conviction_score", 50))
     if conv_score >= 70:
         score_col, score_lbl = "#ef5350", "偏多強勢共振"
@@ -1113,12 +1224,6 @@ if target_stock:
     else:
         score_col, score_lbl = "#94a3b8", "中性多空拉鋸"
 
-    # Z-Score 三段式動態說明浮窗（由 strategy.build_z_tooltip_html 產出）
-    ctrl5 = float(analysis.get("top3_5d_ctrl_pct", 0.0) or 0.0)
-    z5 = analysis.get("top3_5d_ctrl_z")
-    z_tip_html = build_z_tooltip_html(stock_title, ctrl5, z5)
-
-    # 綜合籌碼健康分數說明浮窗內容（放置於卡片三標題旁）
     score_tip_html = (
         "<b>綜合籌碼健康分數（0～100 分）</b><br>"
         "以五大劇本為基準分，結合近 5 日投信、家數差、融資、借券、集保週變動、隔日沖與均線／深套趨勢加減計算：<br>"
@@ -1133,7 +1238,86 @@ if target_stock:
         '</table>'
     )
 
-    c1, c2, c3, c4 = st.columns([2.25, 2.0, 1.15, 1.1])
+    sc_type = scenario.get("type", "neutral")
+    hero_cls = "hero-bull" if sc_type == "bull" else ("hero-bear" if sc_type == "bear" else "hero-neutral")
+    sc_action_html = f'<div class="hero-body-action">💡 操作應對：{scenario["action"]}</div>' if scenario.get("action") else ""
+
+    badges_html = ""
+    sc_badges = scenario.get("badges") or []
+    if sc_badges:
+        pill_list = []
+        for b in sc_badges:
+            lvl = b.get("level", "info")
+            cls_map = {"bull": "res-bull", "bear": "res-bear", "warn": "res-warn", "info": "res-info"}
+            b_cls = cls_map.get(lvl, "res-info")
+            detail_esc = str(b.get("detail", "")).replace('"', "&quot;")
+            pill_list.append(
+                f'<span class="res-badge {b_cls}" title="{detail_esc}">{b.get("label", "")}</span>'
+            )
+        badges_html = f'<div class="badge-row">{"".join(pill_list)}</div>'
+
+    st.markdown(
+        f'<div class="hero-panel {hero_cls}">'
+        f'  <div class="hero-score-box">'
+        f'    <div class="hero-score-label">'
+        f'      <span>綜合籌碼健康分數</span>'
+        f'      <span class="tip-wrap tip-down">ⓘ<span class="tip-box tip-box-wide">{score_tip_html}</span></span>'
+        f'    </div>'
+        f'    <div class="score-val" style="color:{score_col};">{conv_score} <span style="font-size:0.88rem; font-weight:500; color:#94a3b8;">/ 100</span></div>'
+        f'    <div class="score-bar-bg"><div class="score-bar-fill" style="width:{conv_score}%; background:{score_col};"></div></div>'
+        f'    <div class="hero-score-sub" style="color:{score_col};">{score_lbl}</div>'
+        f'  </div>'
+        f'  <div>'
+        f'    <div class="hero-body-title">{scenario.get("title", "")}</div>'
+        f'    <div class="hero-body-desc">{scenario.get("desc", "")}</div>'
+        f'    {sc_action_html}'
+        f'    {badges_html}'
+        f'  </div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    # --- 區塊一之二：精簡單行價量籌碼背離警示條（不重複長篇警語，細節收進 ⓘ） ---
+    div_alert = analysis.get("divergence_alert")
+    if div_alert:
+        alert_type = div_alert.get("type", "bull")
+        strip_cls = (
+            "div-strip-bull" if alert_type == "bull"
+            else ("div-strip-warn" if alert_type == "warn" else "div-strip-bear")
+        )
+        # 擷取核心數據句（第一行）避免與上方劇本操作建議重複
+        raw_desc_lines = str(div_alert.get("desc", "")).split("<br>")
+        compact_desc = raw_desc_lines[0] if raw_desc_lines else ""
+        full_tip_desc = str(div_alert.get("desc", ""))
+        st.markdown(
+            f'<div class="div-strip {strip_cls}">'
+            f'  <div><b>{div_alert["title"]}</b> ｜ {compact_desc}</div>'
+            f'  <span class="tip-wrap tip-left">ⓘ 詳情<span class="tip-box tip-box-wide">{full_tip_desc}</span></span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    # =====================================================================
+    # 區塊一之三：三大核心卡片（最大分點主力 ／ 三大波段主力狀態 ／ 最新收盤價）
+    # =====================================================================
+    ctrl5 = float(analysis.get("top3_5d_ctrl_pct", 0.0) or 0.0)
+    z5 = analysis.get("top3_5d_ctrl_z")
+    z_tip_html = build_z_tooltip_html(stock_title, ctrl5, z5)
+
+    # 消除視覺訊號打架：大格局偏空或 Z 值屬日常波動時，將「吃貨中」柔化為黃色提示
+    raw_status_html = analysis.get("status_html", "N/A")
+    top3_period_net = int(analysis.get("top3_period_net", 0))
+    if "吃貨中" in raw_status_html:
+        if conv_score <= 35:
+            display_status_html = f'🟡 區間逆勢承接（{_span_num(top3_period_net)}｜格局偏空）'
+        elif z5 is not None and abs(z5) < 1.0:
+            display_status_html = f'🟡 區間小幅買超（{_span_num(top3_period_net)}｜屬日常波動）'
+        else:
+            display_status_html = raw_status_html
+    else:
+        display_status_html = raw_status_html
+
+    c1, c2, c3 = st.columns([2.3, 2.2, 1.2])
     with c1:
         sub_html = "".join([
             f'<div class="card-sub">{line}</div>'
@@ -1163,23 +1347,11 @@ if target_stock:
                 <span>區間內三大波段主力狀態</span>
                 <span class="tip-wrap tip-down">ⓘ<span class="tip-box tip-box-wide">{z_tip_html}</span></span>
             </div>
-            <div class="card-value">{analysis.get("status_html", "N/A")}</div>
+            <div class="card-value">{display_status_html}</div>
             {status_sub_html}
         </div>
         """, unsafe_allow_html=True)
     with c3:
-        st.markdown(f"""
-        <div class="summary-card">
-            <div class="card-label">
-                <span>綜合籌碼健康分數</span>
-                <span class="tip-wrap tip-down-left">ⓘ<span class="tip-box tip-box-wide">{score_tip_html}</span></span>
-            </div>
-            <div class="score-val" style="color:{score_col};">{conv_score} <span style="font-size:0.82rem; font-weight:500; color:#94a3b8;">/ 100</span></div>
-            <div class="score-bar-bg"><div class="score-bar-fill" style="width:{conv_score}%; background:{score_col};"></div></div>
-            <div class="card-sub">{score_lbl}（{scenario.get("sub_type", "")}）</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with c4:
         st.markdown(f"""
         <div class="summary-card">
             <div class="card-label">最新收盤價與區間漲跌</div>
@@ -1188,38 +1360,7 @@ if target_stock:
         </div>
         """, unsafe_allow_html=True)
 
-    # --- 區塊一之二：近 5 日價量籌碼背離警報（含紅／綠／黃防接刀三態樣式） ---
-    div_alert = analysis.get("divergence_alert")
-    if div_alert:
-        alert_type = div_alert.get("type", "bull")
-        if alert_type == "bull":
-            css_cls = "div-alert-bull"
-            div_tip_text = (
-                "觸發條件：近 5 日股價跌幅 ≥ 3%，近 60 日三大波段主力近 5 日淨買超 ≥ 500 萬元、"
-                "控盤率 ≥ +2.0%（或 Z ≥ +1.5σ），且全市場 5 日集中度未嚴重發散、投信未連續大賣。"
-            )
-        elif alert_type == "warn":
-            css_cls = "div-alert-warn"
-            div_tip_text = (
-                "防接落刀濾網觸發：三大波段主力雖逆勢買超，但全市場 5 日集中度 ≤ -3% 或投信連賣 ≥ 3 日，"
-                "外圍大資金賣壓仍重，系統已自動降級為黃色警示，提醒勿盲目接刀。"
-            )
-        else:
-            css_cls = "div-alert-bear"
-            div_tip_text = (
-                "觸發條件：近 5 日股價漲幅 ≥ 3%，且近 60 日三大波段主力近 5 日淨賣超 ≥ 500 萬元、"
-                "控盤率 ≤ -2.0%（或 Z ≤ -1.5σ）。若借券賣出同步增加，須嚴防假突破。"
-            )
-        st.markdown(
-            f'<div class="{css_cls}">'
-            f'  <b>{div_alert["title"]}</b>'
-            f'  <span class="tip-wrap tip-right">ⓘ<span class="tip-box">{div_tip_text}</span></span>'
-            f'  <br>{div_alert["desc"]}'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-
-    # --- 區塊一之三：投信獨立追蹤列（水位與買賣動向拆為雙膠囊，買紅／賣綠嚴格分色） ---
+    # --- 區塊一之四：投信獨立追蹤列（連買賣與近 5 日放大突出） ---
     trust_info = analysis.get("trust_info")
     if trust_info:
         trust_tip = (
@@ -1260,9 +1401,9 @@ if target_stock:
             p_val = trust_info["pnl_pct"]
             p_col = "#ef5350" if p_val > 0 else ("#26a69a" if p_val < 0 else "#cbd5e1")
             cost_seg = (
-                f'<span class="trust-item"><span class="trust-lbl">60日均價</span>'
-                f'<b style="color:#ffb74d;">{trust_info["cost"]:,.2f} 元</b> '
-                f'(<span style="color:{p_col}; font-weight:700;">{p_val:+.2f}%</span>)</span>'
+                f'<span><span class="trust-lbl">60日均價</span>'
+                f'<b style="color:#ffb74d;">{trust_info["cost"]:,.2f}</b> '
+                f'(<span style="color:{p_col}; font-weight:700;">{p_val:+.1f}%</span>)</span>'
             )
 
         st.markdown(
@@ -1272,21 +1413,26 @@ if target_stock:
             f'    <span class="tip-wrap tip-right">ⓘ<span class="tip-box">{trust_tip}</span></span>'
             f'    {tier_pill}{mom_pill}'
             f'  </div>'
-            f'  <div class="trust-metrics">'
-            f'    <span class="trust-item"><span class="trust-lbl">今年</span>{_span_num(trust_info["ytd"])}</span>'
-            f'    <span class="trust-item"><span class="trust-lbl">區間</span>{_span_num(trust_info["period"])}</span>'
-            f'    <span class="trust-item"><span class="trust-lbl">今日</span>{_span_num(trust_info["d1"])}</span>'
-            f'    <span class="trust-item"><span class="trust-lbl">近 5 日</span>{_span_num(trust_info.get("d5", 0))}</span>'
-            f'    <span class="trust-item"><span class="trust-lbl">近 20 日</span>{_span_num(trust_info["d20"])}</span>'
-            f'    <span class="trust-item">{_span_streak(trust_info["streak"])}</span>'
-            f'    <span class="trust-item"><span class="trust-lbl">控盤率</span>{_span_ctrl(trust_info["ctrl_pct"])}</span>'
-            f'    {cost_seg}'
+            f'  <div class="trust-metrics-wrap">'
+            f'    <div class="trust-primary">'
+            f'      <span>{_span_streak(trust_info["streak"])}</span>'
+            f'      <span style="color:#475569;">｜</span>'
+            f'      <span><span class="trust-lbl">近 5 日</span>{_span_num(trust_info.get("d5", 0))}</span>'
+            f'    </div>'
+            f'    <div class="trust-secondary">'
+            f'      <span><span class="trust-lbl">今日</span>{_span_num(trust_info["d1"])}</span>'
+            f'      <span><span class="trust-lbl">區間</span>{_span_num(trust_info["period"])}</span>'
+            f'      <span><span class="trust-lbl">近 20 日</span>{_span_num(trust_info["d20"])}</span>'
+            f'      <span><span class="trust-lbl">今年</span>{_span_num(trust_info["ytd"])}</span>'
+            f'      <span><span class="trust-lbl">控盤</span>{_span_ctrl(trust_info["ctrl_pct"])}</span>'
+            f'      {cost_seg}'
+            f'    </div>'
             f'  </div>'
             f'</div>',
             unsafe_allow_html=True,
         )
 
-    # --- 區塊一之四：四大輔助籌碼儀表板（買賣家數差、融資券、借券賣出、TDCC 集保大戶） ---
+    # --- 區塊一之五：四大輔助籌碼儀表板（去雜訊＋狀態標籤） ---
     st.markdown(
         _render_aux_dashboard(
             analysis.get("broker_diff_info"),
@@ -1297,29 +1443,11 @@ if target_stock:
         unsafe_allow_html=True,
     )
 
-    # --- 區塊一點五：全市場前 15 大籌碼集中度 ＋ 五大劇本 ＋ 六大共振徽章 ---
+    # --- 區塊一之六：全市場前 15 大籌碼集中度橫條 ---
     conc_tip = (
         "計算公式：（該區間全市場前 15 大買超分點總張數 － 前 15 大賣超分點總張數）÷ 區間總成交量 × 100%。"
         "為確保統計口徑完全一致，系統每日自動保存官方快照，累積滿 15 個交易日後即啟用 60 日滾動 Z-Score。"
     )
-    sc_type = scenario.get("type", "neutral")
-    sc_cls = "scenario-bull" if sc_type == "bull" else ("scenario-bear" if sc_type == "bear" else "scenario-neutral")
-    sc_action_html = f'<br><span style="color:#cbd5e1;">💡 操作應對：{scenario["action"]}</span>' if scenario.get("action") else ""
-
-    badges_html = ""
-    sc_badges = scenario.get("badges") or []
-    if sc_badges:
-        pill_list = []
-        for b in sc_badges:
-            lvl = b.get("level", "info")
-            cls_map = {"bull": "res-bull", "bear": "res-bear", "warn": "res-warn", "info": "res-info"}
-            b_cls = cls_map.get(lvl, "res-info")
-            detail_esc = str(b.get("detail", "")).replace('"', "&quot;")
-            pill_list.append(
-                f'<span class="res-badge {b_cls}" title="{detail_esc}">{b.get("label", "")}</span>'
-            )
-        badges_html = f'<div class="badge-row">{"".join(pill_list)}</div>'
-
     st.markdown(
         f'<div class="conc-panel">'
         f'  <div class="conc-header">'
@@ -1333,12 +1461,6 @@ if target_stock:
         f'    {_format_conc_card("近 5 日集中度", concentrations.get("d5", {}))}'
         f'    {_format_conc_card("近 10 日集中度", concentrations.get("d10", {}))}'
         f'    {_format_conc_card("近 20 日集中度", concentrations.get("d20", {}))}'
-        f'  </div>'
-        f'  <div class="{sc_cls}">'
-        f'    <b>{scenario.get("title", "")}</b><br>'
-        f'    {scenario.get("desc", "")}'
-        f'    {sc_action_html}'
-        f'    {badges_html}'
         f'  </div>'
         f'</div>',
         unsafe_allow_html=True,
