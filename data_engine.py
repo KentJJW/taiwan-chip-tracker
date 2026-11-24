@@ -844,10 +844,10 @@ def fetch_broker_daily_history(stock_id: str, broker_info: dict, start_date: str
 
 
 # =====================================================================
-# 輔助籌碼抓取：全市場買賣家數差、融資融券、借券賣出(官方直抓+FinMind)、TDCC
+# 輔助籌碼抓取：全市場買賣家數差(Yahoo TW + WantGoo + CMoney + HiStock)
 # =====================================================================
 def _parse_broker_diff_table_html(html: str, end_date: str, ref_dt: datetime) -> list[dict]:
-    """從 CMoney / HiStock HTML 表格中動態定位『日期』與『買賣家數差』欄位"""
+    """從 HTML 表格中動態定位『日期』與『買賣家數差』欄位"""
     soup = BeautifulSoup(html, "html.parser")
     records = []
     for tbl in soup.find_all("table"):
@@ -878,78 +878,116 @@ def _parse_broker_diff_table_html(html: str, end_date: str, ref_dt: datetime) ->
     return records
 
 
-def _fetch_statementdog_broker_diff(session: requests.Session, stock_id: str, end_date: str, ref_dt: datetime) -> pd.DataFrame:
+def _fetch_yahoo_broker_diff(
+    session: requests.Session,
+    stock_id: str,
+    end_date: str,
+    ref_dt: datetime,
+    preferred_suffix: str = None,
+) -> pd.DataFrame:
     """
-    從財報狗分點籌碼頁 (statementdog.com) 抓取最新一日全市場買賣家數差：
-    - 財報狗口徑：『買超 X 家』＝ +X（籌碼發散）、『賣超 X 家』＝ -X（籌碼集中）
+    從 Yahoo 奇摩股市 (tw.stock.yahoo.com/quote/{stock_id}.TW(O)/broker-trading)
+    抓取全市場每日「買賣家數差」（支援 SSR DOM 列數學驗算 ＋ 內嵌 JSON 雙解析，不擋雲端 IP）。
     """
-    try:
-        url = f"https://statementdog.com/analysis/{stock_id}/broker-trading"
-        resp = session.get(url, headers={"Referer": "https://statementdog.com/"}, timeout=10, verify=False)
-        if resp.status_code != 200 or len(resp.text) < 1000:
-            return pd.DataFrame(columns=["date", "broker_diff"])
+    if preferred_suffix in (".TW", ".TWO"):
+        other = ".TWO" if preferred_suffix == ".TW" else ".TW"
+        suffixes = [preferred_suffix, other]
+    else:
+        suffixes = [".TW", ".TWO"]
 
-        soup = BeautifulSoup(resp.text, "html.parser")
-        plain = re.sub(r"\s+", " ", soup.get_text(" ", strip=True))
+    yf_headers = {
+        "Referer": "https://tw.stock.yahoo.com/",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+    }
 
-        # 1. 解析最新一日「買賣家數差」數值與方向
-        diff_val = None
-        m_dir = re.search(r"買賣家數差[^\d買賣平+-]{0,25}(買超|賣超)\s*([\d,]+)\s*家", plain)
-        if m_dir:
-            num = _to_clean_float(m_dir.group(2))
-            if num is not None:
-                diff_val = int(round(num)) if m_dir.group(1) == "買超" else -int(round(num))
-        else:
-            m_zero = re.search(r"買賣家數差[^\d平+-]{0,20}(?:平盤|0\s*家)", plain)
-            if m_zero:
-                diff_val = 0
-            else:
-                m_signed = re.search(r"買賣家數差[^+-0-9]{0,20}([+-]?[\d,]+)\s*家", plain)
-                if m_signed:
-                    num = _to_clean_float(m_signed.group(1))
-                    if num is not None:
-                        diff_val = int(round(num))
+    for suf in suffixes:
+        url = f"https://tw.stock.yahoo.com/quote/{stock_id}{suf}/broker-trading"
+        try:
+            resp = session.get(url, headers=yf_headers, timeout=10, verify=False)
+            if resp.status_code != 200 or len(resp.text) < 2000:
+                continue
 
-        if diff_val is None:
-            return pd.DataFrame(columns=["date", "broker_diff"])
+            html = resp.text
+            records = []
 
-        # 2. 解析該筆資料對應之交易日期（優先找標題／資料日期旁，其次在近 14 日有效日期中取最新）
-        end_dt_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
-        min_valid_dt = (end_dt_obj - timedelta(days=14)).strftime("%Y-%m-%d")
+            # 方法 1：解析內嵌 JSON 物件（包含 date 與 buyBrokerCount/sellBrokerCount/brokerDiff）
+            for m in re.finditer(
+                r'\{[^{}]*"(?:date|tradeDate)"\s*:\s*"([^"]+)"[^{}]*"(?:buyBrokerCount|sellBrokerCount|brokerDiff|diffBrokerCount)"\s*:\s*-?\d+[^{}]*\}',
+                html,
+            ):
+                blob = m.group(0)
+                m_d = re.search(r'"(?:date|tradeDate)"\s*:\s*"([^"]+)"', blob)
+                if not m_d:
+                    continue
+                ad_date = _parse_flexible_date(m_d.group(1), ref_dt)
+                if not ad_date or ad_date > end_date:
+                    continue
 
-        found_date = ""
-        m_ctx = re.search(r"(?:資料日期|最新交易日|更新時間|分點籌碼動向|近\s*1\s*日)[^0-9]{0,30}(\d{4}[/-]\d{1,2}[/-]\d{1,2})", plain)
-        if m_ctx:
-            cand = _parse_flexible_date(m_ctx.group(1), ref_dt)
-            if cand and min_valid_dt <= cand <= end_date:
-                found_date = cand
+                diff_val = None
+                m_diff = re.search(r'"(?:brokerDiff|diffBrokerCount|buySellBrokerDiff)"\s*:\s*(-?\d+)', blob)
+                if m_diff:
+                    diff_val = int(m_diff.group(1))
+                else:
+                    m_b = re.search(r'"buyBrokerCount"\s*:\s*(\d+)', blob)
+                    m_s = re.search(r'"sellBrokerCount"\s*:\s*(\d+)', blob)
+                    if m_b and m_s:
+                        diff_val = int(m_b.group(1)) - int(m_s.group(1))
 
-        if not found_date:
-            all_dates = []
-            for raw_d in re.findall(r"\b(20\d{2}[/-]\d{1,2}[/-]\d{1,2})\b", plain):
-                cand = _parse_flexible_date(raw_d, ref_dt)
-                if cand and min_valid_dt <= cand <= end_date:
-                    all_dates.append(cand)
-            if all_dates:
-                found_date = max(all_dates)
+                if diff_val is not None:
+                    records.append({"date": ad_date, "broker_diff": diff_val})
 
-        if found_date:
-            return pd.DataFrame([{"date": found_date, "broker_diff": diff_val}])
-    except Exception:
-        pass
+            # 方法 2：解析 SSR DOM 列表（<ul><li> 或 <table><tr>），並以買超家數 - 賣超家數 == 家數差做數學驗證
+            if not records:
+                soup = BeautifulSoup(html, "html.parser")
+                for row_el in soup.find_all(["li", "tr"]):
+                    # 取出最底層欄位文字（每格長度不超過 24 字元，排除整塊容器）
+                    leaf_texts = []
+                    for child in row_el.find_all(["div", "span", "td"], recursive=True):
+                        if child.find(["div", "span", "td"]) is None:
+                            t = child.get_text(strip=True)
+                            if t and len(t) <= 24:
+                                leaf_texts.append(t)
+
+                    if len(leaf_texts) < 7:
+                        continue
+
+                    ad_date = _parse_flexible_date(leaf_texts[0], ref_dt)
+                    if not ad_date or ad_date > end_date:
+                        continue
+
+                    nums = [_to_clean_float(x) for x in leaf_texts[1:8]]
+                    if any(v is None for v in nums[:6]):
+                        continue
+
+                    # 7 欄標準結構：[買超張, 賣超張, 買賣超張, 買超家數, 賣超家數, 買賣家數差]
+                    b_cnt, s_cnt, d_cnt = nums[3], nums[4], nums[5]
+                    if b_cnt >= 0 and s_cnt >= 0 and abs(round(b_cnt - s_cnt) - round(d_cnt)) <= 1:
+                        records.append({"date": ad_date, "broker_diff": int(round(d_cnt))})
+
+            if records:
+                return pd.DataFrame(records).drop_duplicates(subset=["date"], keep="last").sort_values("date").reset_index(drop=True)
+        except Exception:
+            continue
+
     return pd.DataFrame(columns=["date", "broker_diff"])
 
 
 def _fetch_wantgoo_broker_diff(session: requests.Session, stock_id: str, end_date: str, ref_dt: datetime) -> pd.DataFrame:
-    """向 WantGoo 主力進出趨勢 JSON API 抓取全市場買賣家數差"""
+    """向 WantGoo 主力進出趨勢 JSON API 抓取全市場買賣家數差（先訪問主頁預熱 Cookie）"""
     try:
-        wg_url = f"https://www.wantgoo.com/stock/{stock_id}/major-investors/main-trend-data"
+        page_url = f"https://www.wantgoo.com/stock/{stock_id}/major-investors/main-trend"
+        api_url = f"https://www.wantgoo.com/stock/{stock_id}/major-investors/main-trend-data"
+        session.get(page_url, headers={"Referer": "https://www.wantgoo.com/"}, timeout=8, verify=False)
         wg_headers = {
-            "Referer": f"https://www.wantgoo.com/stock/{stock_id}/major-investors/main-trend",
+            "Referer": page_url,
             "X-Requested-With": "XMLHttpRequest",
             "Accept": "application/json, text/javascript, */*; q=0.01",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
         }
-        resp = session.get(wg_url, headers=wg_headers, timeout=10, verify=False)
+        resp = session.get(api_url, headers=wg_headers, timeout=10, verify=False)
         if resp.status_code != 200:
             return pd.DataFrame(columns=["date", "broker_diff"])
         data = resp.json()
@@ -1027,22 +1065,25 @@ def fetch_broker_diff_history(
     start_date: str,
     end_date: str,
     mirror: str = None,
+    preferred_suffix: str = None,
 ) -> pd.DataFrame:
     """
     多來源合併抓取全市場每日「買賣家數差」：
-    - 依序查詢 WantGoo、CMoney、財報狗(最新一日)、HiStock(多日歷史)
-    - 僅當單一來源同時具備最新日且至少 5 筆資料才提早結束；否則將多來源合併，由日期最新者優先覆蓋
+    - 優先向 Yahoo 奇摩股市抓最新盤後主力進出表（SSR + JSON 雙解析，雲端 IP 不受阻）
+    - 依序搭配 WantGoo、CMoney、HiStock 補齊歷史天數，由日期最新者優先覆蓋
     """
     _ = (start_date, mirror)
     ref_dt = _get_tw_now()
     candidates = []
 
-    for fetcher in (
-        _fetch_wantgoo_broker_diff,
-        _fetch_cmoney_broker_diff,
-        _fetch_statementdog_broker_diff,
-        _fetch_histock_broker_diff,
-    ):
+    df_yf = _fetch_yahoo_broker_diff(session, stock_id, end_date, ref_dt, preferred_suffix)
+    if not df_yf.empty:
+        max_dt = str(df_yf["date"].max())
+        candidates.append((max_dt, len(df_yf), df_yf))
+        if max_dt >= end_date and len(df_yf) >= 5:
+            return df_yf
+
+    for fetcher in (_fetch_wantgoo_broker_diff, _fetch_cmoney_broker_diff, _fetch_histock_broker_diff):
         df_cand = fetcher(session, stock_id, end_date, ref_dt)
         if not df_cand.empty:
             max_dt = str(df_cand["date"].max())
@@ -1184,7 +1225,6 @@ def _fetch_official_sbl_day_map(session: requests.Session, ad_date: str, market:
 
     elif market == ".TWO":
         y_slash = ad_date.replace("-", "/")
-        # 1) 優先嘗試櫃買新版 JSON API
         try:
             json_url = f"https://www.tpex.org.tw/www/zh-tw/margin/sbl?date={y_slash}&id=&response=json"
             resp = session.get(json_url, timeout=10, verify=False)
@@ -1210,7 +1250,6 @@ def _fetch_official_sbl_day_map(session: requests.Session, ad_date: str, market:
         except Exception:
             pass
 
-        # 2) 備援：櫃買官方 CSV 下載介面
         if not day_map:
             try:
                 csv_url = f"https://www.tpex.org.tw/www/zh-tw/margin/sbl?date={y_slash}&id=&response=csv"
@@ -1269,7 +1308,6 @@ def fetch_sbl_history(
         if not tmp.empty:
             df_out = tmp.drop_duplicates(subset=["date"], keep="last").sort_values("date").reset_index(drop=True)
 
-    # 補齊近 3 個交易日之官方直抓資料（若 FinMind 尚未同步當日資料，立即由 TWSE / TPEx 補上）
     existing_dates = set(df_out["date"].tolist()) if not df_out.empty else set()
     check_dates = [d for d in (recent_trade_dates or [end_date]) if d and start_date <= d <= end_date][-3:]
     dates_to_fetch = [d for d in check_dates if (d not in existing_dates) or (d == check_dates[-1])]
@@ -2507,11 +2545,18 @@ def update_stock_database(stock_id: str, incremental_days: int = None, sync_gith
     df_chips_recent = df_chips_recent.fillna(0.0)
 
     # 5. 抓取輔助籌碼（全市場家數差、融資券、官方直抓＋FinMind 借券賣出）
-    df_diff = fetch_broker_diff_history(session, stock_id, fetch_start, latest_price_date, active_mirror)
+    df_diff = fetch_broker_diff_history(
+        session,
+        stock_id,
+        fetch_start,
+        latest_price_date,
+        active_mirror,
+        preferred_suffix=active_suffix,
+    )
     if not df_diff.empty:
         df_aux_recent = df_aux_recent.merge(df_diff, on="date", how="left")
     else:
-        debug_notes.append("買賣家數差暫無回傳（WantGoo/CMoney/財報狗/HiStock）")
+        debug_notes.append("買賣家數差暫無回傳（Yahoo/WantGoo/CMoney/HiStock）")
 
     df_margin = fetch_margin_history(session, stock_id, fetch_start, end_date, active_mirror)
     if not df_margin.empty:
