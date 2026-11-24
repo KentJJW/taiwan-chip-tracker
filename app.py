@@ -24,6 +24,9 @@ st.set_page_config(page_title="台股主力分點吃貨／出貨追蹤系統", l
 
 st.markdown("""
 <style>
+.block-container {
+    padding-top: 2.2rem !important;
+}
 /* --- 核心決策總結看板（結論置頂） --- */
 .hero-panel {
     display: grid;
@@ -1285,14 +1288,16 @@ if target_stock:
             "div-strip-bull" if alert_type == "bull"
             else ("div-strip-warn" if alert_type == "warn" else "div-strip-bear")
         )
-        # 擷取核心數據句（第一行）避免與上方劇本操作建議重複
         raw_desc_lines = str(div_alert.get("desc", "")).split("<br>")
         compact_desc = raw_desc_lines[0] if raw_desc_lines else ""
         full_tip_desc = str(div_alert.get("desc", ""))
         st.markdown(
             f'<div class="div-strip {strip_cls}">'
-            f'  <div><b>{div_alert["title"]}</b> ｜ {compact_desc}</div>'
-            f'  <span class="tip-wrap tip-left">ⓘ 詳情<span class="tip-box tip-box-wide">{full_tip_desc}</span></span>'
+            f'  <div>'
+            f'    <b>{div_alert["title"]}</b>'
+            f'    <span class="tip-wrap tip-down" style="margin:0 6px 0 4px;">ⓘ 詳情<span class="tip-box tip-box-wide">{full_tip_desc}</span></span>'
+            f'    ｜ {compact_desc}'
+            f'  </div>'
             f'</div>',
             unsafe_allow_html=True,
         )
