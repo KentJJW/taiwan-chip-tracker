@@ -844,7 +844,7 @@ def fetch_broker_daily_history(stock_id: str, broker_info: dict, start_date: str
 
 
 # =====================================================================
-# 輔助籌碼抓取：全市場買賣家數差(Yahoo TW + WantGoo + CMoney + HiStock)
+# 輔助籌碼抓取：全市場買賣家數差(Yahoo TW + CMoney + WantGoo + HiStock)
 # =====================================================================
 def _parse_broker_diff_table_html(html: str, end_date: str, ref_dt: datetime) -> list[dict]:
     """從 HTML 表格中動態定位『日期』與『買賣家數差』欄位"""
@@ -878,16 +878,56 @@ def _parse_broker_diff_table_html(html: str, end_date: str, ref_dt: datetime) ->
     return records
 
 
+def _extract_json_broker_diff_records(text: str, end_date: str, ref_dt: datetime) -> list[dict]:
+    """
+    從內嵌 JSON（Yahoo root.App.main / CMoney __NEXT_DATA__）遞迴搜尋含日期與買賣家數差之物件，
+    嚴格限定欄位鍵名包含 Broker / Branch / Count，絕不誤抓成交張數。
+    """
+    records = []
+    # 1) 直接正則比對顯式家數差鍵名
+    for m in re.finditer(
+        r'"(?:date|Date|tradeDate|dt)"\s*:\s*"?(\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{10,13})"?[^{}]{0,320}'
+        r'"(?:diffBrokerCount|brokerDiff|buySellBrokerDiff|diffBranchCount|branchDiff|buySellDiff|diffCount|buySellBrokerCountDiff)"\s*:\s*(-?\d+)',
+        text,
+    ):
+        ad_date = _parse_flexible_date(m.group(1), ref_dt)
+        if ad_date and ad_date <= end_date:
+            records.append({"date": ad_date, "broker_diff": int(m.group(2))})
+
+    # 2) 比對買超家數與賣超家數成對鍵名（如 overbuyBrokerCount / oversellBrokerCount）
+    for m in re.finditer(
+        r'\{[^{}]*"(?:date|Date|tradeDate|dt)"\s*:\s*"?(\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{10,13})"?[^{}]*\}',
+        text,
+    ):
+        blob = m.group(0)
+        if not re.search(r'(?:Broker|Branch|Count)', blob, re.IGNORECASE):
+            continue
+        m_d = re.search(r'"(?:date|Date|tradeDate|dt)"\s*:\s*"?(\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{10,13})"?', blob)
+        if not m_d:
+            continue
+        ad_date = _parse_flexible_date(m_d.group(1), ref_dt)
+        if not ad_date or ad_date > end_date:
+            continue
+        m_b = re.search(r'"(?:overbuyBrokerCount|buyBrokerCount|buyBranchCount|overbuyCount|buyCount)"\s*:\s*(\d+)', blob)
+        m_s = re.search(r'"(?:oversellBrokerCount|sellBrokerCount|sellBranchCount|oversellCount|sellCount)"\s*:\s*(\d+)', blob)
+        if m_b and m_s:
+            b_val, s_val = int(m_b.group(1)), int(m_s.group(1))
+            if 0 <= b_val <= 980 and 0 <= s_val <= 980:
+                records.append({"date": ad_date, "broker_diff": b_val - s_val})
+
+    return records
+
+
 def _fetch_yahoo_broker_diff(
     session: requests.Session,
     stock_id: str,
     end_date: str,
     ref_dt: datetime,
     preferred_suffix: str = None,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, str]:
     """
-    從 Yahoo 奇摩股市 (tw.stock.yahoo.com/quote/{stock_id}.TW(O)/broker-trading)
-    抓取全市場每日「買賣家數差」（支援 SSR DOM 列數學驗算 ＋ 內嵌 JSON 雙解析，不擋雲端 IP）。
+    從 Yahoo 奇摩股市抓取全市場每日「買賣家數差」：
+    - 同時嘗試 _td-stock JSON 資源端點與 SSR HTML 頁面（含 root.App.main JSON 與雙三元組 DOM 驗算）
     """
     if preferred_suffix in (".TW", ".TWO"):
         other = ".TWO" if preferred_suffix == ".TW" else ".TW"
@@ -901,47 +941,37 @@ def _fetch_yahoo_broker_diff(
         "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
     }
 
+    last_status = "無回應"
     for suf in suffixes:
-        url = f"https://tw.stock.yahoo.com/quote/{stock_id}{suf}/broker-trading"
+        sym = f"{stock_id}{suf}"
+        # 1) 嘗試 Yahoo _td-stock 直接 JSON API
+        for res_name in ("StockServices.brokerTrading", "StockServices.mainForce"):
+            api_url = f"https://tw.stock.yahoo.com/_td-stock/api/resource/{res_name};symbol={sym}"
+            try:
+                r_api = session.get(api_url, headers={"Referer": f"https://tw.stock.yahoo.com/quote/{sym}/broker-trading"}, timeout=8, verify=False)
+                if r_api.status_code == 200 and len(r_api.text) > 100:
+                    recs = _extract_json_broker_diff_records(r_api.text, end_date, ref_dt)
+                    if recs:
+                        df = pd.DataFrame(recs).drop_duplicates(subset=["date"], keep="last").sort_values("date").reset_index(drop=True)
+                        return df, f"HTTP200({len(df)}筆/最新{df['date'].max()[5:]})"
+            except Exception:
+                pass
+
+        # 2) 抓取 broker-trading SSR 頁面
+        url = f"https://tw.stock.yahoo.com/quote/{sym}/broker-trading"
         try:
             resp = session.get(url, headers=yf_headers, timeout=10, verify=False)
+            last_status = f"HTTP{resp.status_code}"
             if resp.status_code != 200 or len(resp.text) < 2000:
                 continue
 
             html = resp.text
-            records = []
+            records = _extract_json_broker_diff_records(html, end_date, ref_dt)
 
-            # 方法 1：解析內嵌 JSON 物件（包含 date 與 buyBrokerCount/sellBrokerCount/brokerDiff）
-            for m in re.finditer(
-                r'\{[^{}]*"(?:date|tradeDate)"\s*:\s*"([^"]+)"[^{}]*"(?:buyBrokerCount|sellBrokerCount|brokerDiff|diffBrokerCount)"\s*:\s*-?\d+[^{}]*\}',
-                html,
-            ):
-                blob = m.group(0)
-                m_d = re.search(r'"(?:date|tradeDate)"\s*:\s*"([^"]+)"', blob)
-                if not m_d:
-                    continue
-                ad_date = _parse_flexible_date(m_d.group(1), ref_dt)
-                if not ad_date or ad_date > end_date:
-                    continue
-
-                diff_val = None
-                m_diff = re.search(r'"(?:brokerDiff|diffBrokerCount|buySellBrokerDiff)"\s*:\s*(-?\d+)', blob)
-                if m_diff:
-                    diff_val = int(m_diff.group(1))
-                else:
-                    m_b = re.search(r'"buyBrokerCount"\s*:\s*(\d+)', blob)
-                    m_s = re.search(r'"sellBrokerCount"\s*:\s*(\d+)', blob)
-                    if m_b and m_s:
-                        diff_val = int(m_b.group(1)) - int(m_s.group(1))
-
-                if diff_val is not None:
-                    records.append({"date": ad_date, "broker_diff": diff_val})
-
-            # 方法 2：解析 SSR DOM 列表（<ul><li> 或 <table><tr>），並以買超家數 - 賣超家數 == 家數差做數學驗證
+            # 方法 3：解析 SSR DOM 列表（找出同一列中第二組 a - b == c 之分點家數三元組）
             if not records:
                 soup = BeautifulSoup(html, "html.parser")
                 for row_el in soup.find_all(["li", "tr"]):
-                    # 取出最底層欄位文字（每格長度不超過 24 字元，排除整塊容器）
                     leaf_texts = []
                     for child in row_el.find_all(["div", "span", "td"], recursive=True):
                         if child.find(["div", "span", "td"]) is None:
@@ -956,24 +986,60 @@ def _fetch_yahoo_broker_diff(
                     if not ad_date or ad_date > end_date:
                         continue
 
-                    nums = [_to_clean_float(x) for x in leaf_texts[1:8]]
-                    if any(v is None for v in nums[:6]):
-                        continue
+                    nums = [_to_clean_float(x) for x in leaf_texts[1:]]
+                    triplets = []
+                    for idx in range(len(nums) - 2):
+                        a, b, c = nums[idx], nums[idx + 1], nums[idx + 2]
+                        if a is not None and b is not None and c is not None:
+                            if a >= 0 and b >= 0 and abs(round(a - b) - round(c)) <= 1:
+                                triplets.append((int(round(a)), int(round(b)), int(round(c))))
 
-                    # 7 欄標準結構：[買超張, 賣超張, 買賣超張, 買超家數, 賣超家數, 買賣家數差]
-                    b_cnt, s_cnt, d_cnt = nums[3], nums[4], nums[5]
-                    if b_cnt >= 0 and s_cnt >= 0 and abs(round(b_cnt - s_cnt) - round(d_cnt)) <= 1:
-                        records.append({"date": ad_date, "broker_diff": int(round(d_cnt))})
+                    # 標準主力進出列為 [買超張, 賣超張, 買賣超張, 買超家數, 賣超家數, 買賣家數差]，取第二組三元組
+                    if len(triplets) >= 2:
+                        b_cnt, s_cnt, d_cnt = triplets[1]
+                        if 0 <= b_cnt <= 980 and 0 <= s_cnt <= 980:
+                            records.append({"date": ad_date, "broker_diff": d_cnt})
+                    elif len(triplets) == 1:
+                        b_cnt, s_cnt, d_cnt = triplets[0]
+                        if 0 <= b_cnt <= 980 and 0 <= s_cnt <= 980 and (b_cnt + s_cnt) >= 10:
+                            records.append({"date": ad_date, "broker_diff": d_cnt})
 
             if records:
-                return pd.DataFrame(records).drop_duplicates(subset=["date"], keep="last").sort_values("date").reset_index(drop=True)
-        except Exception:
-            continue
+                df = pd.DataFrame(records).drop_duplicates(subset=["date"], keep="last").sort_values("date").reset_index(drop=True)
+                return df, f"HTTP200({len(df)}筆/最新{df['date'].max()[5:]})"
+            last_status = "HTTP200(0筆)"
+        except Exception as e:
+            last_status = type(e).__name__
 
-    return pd.DataFrame(columns=["date", "broker_diff"])
+    return pd.DataFrame(columns=["date", "broker_diff"]), last_status
 
 
-def _fetch_wantgoo_broker_diff(session: requests.Session, stock_id: str, end_date: str, ref_dt: datetime) -> pd.DataFrame:
+def _fetch_cmoney_broker_diff(session: requests.Session, stock_id: str, end_date: str, ref_dt: datetime) -> tuple[pd.DataFrame, str]:
+    """向 CMoney 經典主力進出表 (f00036.aspx) 與同學會 __NEXT_DATA__ 抓取全市場買賣家數差"""
+    urls = [
+        f"https://www.cmoney.tw/finance/f00036.aspx?s={stock_id}",
+        f"https://www.cmoney.tw/forum/stock/{stock_id}?s=main-force",
+    ]
+    last_status = "無回應"
+    for url in urls:
+        try:
+            resp = session.get(url, headers={"Referer": "https://www.cmoney.tw/"}, timeout=10, verify=False)
+            last_status = f"HTTP{resp.status_code}"
+            if resp.status_code != 200 or len(resp.text) < 1000:
+                continue
+            records = _parse_broker_diff_table_html(resp.text, end_date, ref_dt)
+            if not records:
+                records = _extract_json_broker_diff_records(resp.text, end_date, ref_dt)
+            if records:
+                df = pd.DataFrame(records).drop_duplicates(subset=["date"], keep="last").sort_values("date").reset_index(drop=True)
+                return df, f"HTTP200({len(df)}筆/最新{df['date'].max()[5:]})"
+            last_status = "HTTP200(0筆)"
+        except Exception as e:
+            last_status = type(e).__name__
+    return pd.DataFrame(columns=["date", "broker_diff"]), last_status
+
+
+def _fetch_wantgoo_broker_diff(session: requests.Session, stock_id: str, end_date: str, ref_dt: datetime) -> tuple[pd.DataFrame, str]:
     """向 WantGoo 主力進出趨勢 JSON API 抓取全市場買賣家數差（先訪問主頁預熱 Cookie）"""
     try:
         page_url = f"https://www.wantgoo.com/stock/{stock_id}/major-investors/main-trend"
@@ -989,7 +1055,7 @@ def _fetch_wantgoo_broker_diff(session: requests.Session, stock_id: str, end_dat
         }
         resp = session.get(api_url, headers=wg_headers, timeout=10, verify=False)
         if resp.status_code != 200:
-            return pd.DataFrame(columns=["date", "broker_diff"])
+            return pd.DataFrame(columns=["date", "broker_diff"]), f"HTTP{resp.status_code}"
         data = resp.json()
         items = data if isinstance(data, list) else (data.get("data") or [])
         records = []
@@ -1016,47 +1082,76 @@ def _fetch_wantgoo_broker_diff(session: requests.Session, stock_id: str, end_dat
             if diff_val is not None:
                 records.append({"date": ad_date, "broker_diff": int(round(diff_val))})
         if records:
-            return pd.DataFrame(records).drop_duplicates(subset=["date"], keep="last").sort_values("date").reset_index(drop=True)
-    except Exception:
-        pass
-    return pd.DataFrame(columns=["date", "broker_diff"])
+            df = pd.DataFrame(records).drop_duplicates(subset=["date"], keep="last").sort_values("date").reset_index(drop=True)
+            return df, f"HTTP200({len(df)}筆/最新{df['date'].max()[5:]})"
+        return pd.DataFrame(columns=["date", "broker_diff"]), "HTTP200(0筆)"
+    except Exception as e:
+        return pd.DataFrame(columns=["date", "broker_diff"]), type(e).__name__
 
 
-def _fetch_cmoney_broker_diff(session: requests.Session, stock_id: str, end_date: str, ref_dt: datetime) -> pd.DataFrame:
-    """向 CMoney 主力進出頁抓取全市場買賣家數差"""
-    try:
-        cm_url = f"https://www.cmoney.tw/forum/stock/{stock_id}?s=main-force"
-        resp = session.get(cm_url, headers={"Referer": "https://www.cmoney.tw/"}, timeout=10, verify=False)
-        if resp.status_code == 200 and len(resp.text) > 1000:
-            records = _parse_broker_diff_table_html(resp.text, end_date, ref_dt)
-            if not records:
-                json_matches = re.findall(
-                    r'"(?:date|Date|tradeDate)"\s*:\s*"([^"]+)"[^{}]{0,260}"(?:diffBrokerCount|brokerDiff|buySellBrokerDiff|diffCount|buySellBrokerCountDiff)"\s*:\s*(-?\d+(?:\.\d+)?)',
-                    resp.text,
-                )
-                for raw_d, raw_v in json_matches:
-                    ad_date = _parse_flexible_date(raw_d, ref_dt)
-                    if ad_date and ad_date <= end_date:
-                        records.append({"date": ad_date, "broker_diff": int(round(float(raw_v)))})
-            if records:
-                return pd.DataFrame(records).drop_duplicates(subset=["date"], keep="last").sort_values("date").reset_index(drop=True)
-    except Exception:
-        pass
-    return pd.DataFrame(columns=["date", "broker_diff"])
-
-
-def _fetch_histock_broker_diff(session: requests.Session, stock_id: str, end_date: str, ref_dt: datetime) -> pd.DataFrame:
+def _fetch_histock_broker_diff(session: requests.Session, stock_id: str, end_date: str, ref_dt: datetime) -> tuple[pd.DataFrame, str]:
     """向 HiStock 主力進出表抓取全市場買賣家數差"""
     try:
         hi_url = f"https://histock.tw/stock/main.aspx?no={stock_id}"
         resp = session.get(hi_url, headers={"Referer": "https://histock.tw/"}, timeout=10, verify=False)
-        if resp.status_code == 200 and len(resp.text) > 1000:
+        if resp.status_code != 200:
+            return pd.DataFrame(columns=["date", "broker_diff"]), f"HTTP{resp.status_code}"
+        if len(resp.text) > 1000:
             records = _parse_broker_diff_table_html(resp.text, end_date, ref_dt)
             if records:
-                return pd.DataFrame(records).drop_duplicates(subset=["date"], keep="last").sort_values("date").reset_index(drop=True)
-    except Exception:
-        pass
-    return pd.DataFrame(columns=["date", "broker_diff"])
+                df = pd.DataFrame(records).drop_duplicates(subset=["date"], keep="last").sort_values("date").reset_index(drop=True)
+                return df, f"HTTP200({len(df)}筆/最新{df['date'].max()[5:]})"
+        return pd.DataFrame(columns=["date", "broker_diff"]), "HTTP200(0筆)"
+    except Exception as e:
+        return pd.DataFrame(columns=["date", "broker_diff"]), type(e).__name__
+
+
+def fetch_broker_diff_with_diag(
+    session: requests.Session,
+    stock_id: str,
+    start_date: str,
+    end_date: str,
+    mirror: str = None,
+    preferred_suffix: str = None,
+) -> tuple[pd.DataFrame, str]:
+    """多來源合併抓取全市場每日「買賣家數差」，並回傳各來源連線診斷字串"""
+    _ = (start_date, mirror)
+    ref_dt = _get_tw_now()
+    candidates = []
+    diag_parts = []
+
+    df_yf, st_yf = _fetch_yahoo_broker_diff(session, stock_id, end_date, ref_dt, preferred_suffix)
+    diag_parts.append(f"Yahoo:{st_yf}")
+    if not df_yf.empty:
+        max_dt = str(df_yf["date"].max())
+        candidates.append((max_dt, len(df_yf), df_yf))
+        if max_dt >= end_date and len(df_yf) >= 5:
+            return df_yf, " ｜ ".join(diag_parts)
+
+    for label, fetcher in (
+        ("CMoney", _fetch_cmoney_broker_diff),
+        ("WantGoo", _fetch_wantgoo_broker_diff),
+        ("HiStock", _fetch_histock_broker_diff),
+    ):
+        df_cand, st_str = fetcher(session, stock_id, end_date, ref_dt)
+        diag_parts.append(f"{label}:{st_str}")
+        if not df_cand.empty:
+            max_dt = str(df_cand["date"].max())
+            candidates.append((max_dt, len(df_cand), df_cand))
+            if max_dt >= end_date and len(df_cand) >= 5:
+                break
+
+    diag_summary = " ｜ ".join(diag_parts)
+    if not candidates:
+        return pd.DataFrame(columns=["date", "broker_diff"]), diag_summary
+
+    candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    merged = candidates[0][2].set_index("date")[["broker_diff"]]
+    for _, _, df_other in candidates[1:]:
+        other_idx = df_other.set_index("date")[["broker_diff"]]
+        merged = merged.combine_first(other_idx)
+
+    return merged.reset_index().sort_values("date").reset_index(drop=True), diag_summary
 
 
 def fetch_broker_diff_history(
@@ -1067,40 +1162,8 @@ def fetch_broker_diff_history(
     mirror: str = None,
     preferred_suffix: str = None,
 ) -> pd.DataFrame:
-    """
-    多來源合併抓取全市場每日「買賣家數差」：
-    - 優先向 Yahoo 奇摩股市抓最新盤後主力進出表（SSR + JSON 雙解析，雲端 IP 不受阻）
-    - 依序搭配 WantGoo、CMoney、HiStock 補齊歷史天數，由日期最新者優先覆蓋
-    """
-    _ = (start_date, mirror)
-    ref_dt = _get_tw_now()
-    candidates = []
-
-    df_yf = _fetch_yahoo_broker_diff(session, stock_id, end_date, ref_dt, preferred_suffix)
-    if not df_yf.empty:
-        max_dt = str(df_yf["date"].max())
-        candidates.append((max_dt, len(df_yf), df_yf))
-        if max_dt >= end_date and len(df_yf) >= 5:
-            return df_yf
-
-    for fetcher in (_fetch_wantgoo_broker_diff, _fetch_cmoney_broker_diff, _fetch_histock_broker_diff):
-        df_cand = fetcher(session, stock_id, end_date, ref_dt)
-        if not df_cand.empty:
-            max_dt = str(df_cand["date"].max())
-            candidates.append((max_dt, len(df_cand), df_cand))
-            if max_dt >= end_date and len(df_cand) >= 5:
-                break
-
-    if not candidates:
-        return pd.DataFrame(columns=["date", "broker_diff"])
-
-    candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
-    merged = candidates[0][2].set_index("date")[["broker_diff"]]
-    for _, _, df_other in candidates[1:]:
-        other_idx = df_other.set_index("date")[["broker_diff"]]
-        merged = merged.combine_first(other_idx)
-
-    return merged.reset_index().sort_values("date").reset_index(drop=True)
+    df, _ = fetch_broker_diff_with_diag(session, stock_id, start_date, end_date, mirror, preferred_suffix)
+    return df
 
 
 def _fetch_margin_moneydj_fallback(
@@ -1477,6 +1540,7 @@ def analyze_main_force(
     df_aux_full: pd.DataFrame = None,
     tdcc_history: list = None,
     issued_lots: float = 0.0,
+    broker_diff_diag: str = "",
 ) -> dict:
     """整合滾動 60 日波段主力、投信真實持股比、融資四象限、借券、集保與 100% 純籌碼健康評分"""
     all_cols = [c for c in df_chips.columns if c != "date"]
@@ -1643,6 +1707,7 @@ def analyze_main_force(
                 "is_latest": (lag_days == 0),
                 "is_stale": is_stale,
                 "source": "全市場家數差",
+                "diag": broker_diff_diag,
             }
 
         if "margin_bal" in aux_aligned.columns and aux_aligned["margin_bal"].notna().any():
@@ -2545,7 +2610,7 @@ def update_stock_database(stock_id: str, incremental_days: int = None, sync_gith
     df_chips_recent = df_chips_recent.fillna(0.0)
 
     # 5. 抓取輔助籌碼（全市場家數差、融資券、官方直抓＋FinMind 借券賣出）
-    df_diff = fetch_broker_diff_history(
+    df_diff, diff_diag = fetch_broker_diff_with_diag(
         session,
         stock_id,
         fetch_start,
@@ -2556,7 +2621,7 @@ def update_stock_database(stock_id: str, incremental_days: int = None, sync_gith
     if not df_diff.empty:
         df_aux_recent = df_aux_recent.merge(df_diff, on="date", how="left")
     else:
-        debug_notes.append("買賣家數差暫無回傳（Yahoo/WantGoo/CMoney/HiStock）")
+        debug_notes.append(f"買賣家數差暫無回傳（{diff_diag}）")
 
     df_margin = fetch_margin_history(session, stock_id, fetch_start, end_date, active_mirror)
     if not df_margin.empty:
@@ -2652,7 +2717,7 @@ def update_stock_database(stock_id: str, incremental_days: int = None, sync_gith
     df_chips.to_csv(chips_path, index=False, encoding="utf-8-sig")
     df_aux.to_csv(aux_path, index=False, encoding="utf-8-sig")
 
-    # 11. 產出摘要並持久化 tracked_brokers
+    # 11. 產出摘要並持久化 tracked_brokers 與 broker_diff_diag
     meta = analyze_main_force(
         df_price,
         df_chips,
@@ -2663,12 +2728,14 @@ def update_stock_database(stock_id: str, incremental_days: int = None, sync_gith
         df_aux_full=df_aux,
         tdcc_history=tdcc_history,
         issued_lots=issued_lots,
+        broker_diff_diag=diff_diag,
     )
     meta["stock_id"] = stock_id
     meta["stock_name"] = stock_name
     meta["ticker_suffix"] = active_suffix or ""
     meta["issued_lots"] = issued_lots
     meta["broker_count"] = total_brokers
+    meta["broker_diff_diag"] = diff_diag
     meta["tracked_brokers"] = {
         name: {"bhid": info["bhid"], "b": info["b"]}
         for name, info in merged_broker_map.items()
