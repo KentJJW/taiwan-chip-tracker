@@ -47,6 +47,10 @@ DJ_MIRRORS = [
     "https://5850web.moneydj.com",
 ]
 
+# TDCC 集保全市場 CSV 記憶體快取（批次更新時避免重複下載數 MB 大檔）
+_TDCC_CACHE: dict = {"ts": 0.0, "text": ""}
+_TDCC_CACHE_TTL = 3600
+
 
 class LegacySSLAdapter(HTTPAdapter):
     """解決 Python 3.11 / OpenSSL 3.0 連線台灣券商網站時的舊版 SSL 交握錯誤"""
@@ -111,6 +115,16 @@ def _get_tw_now() -> datetime:
         return datetime.utcnow() + timedelta(hours=8)
 
 
+def _to_clean_float(val: str) -> float | None:
+    s = str(val).replace(",", "").replace("+", "").replace("%", "").strip()
+    if s in ("", "--", "-", "N/A"):
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
 def _fmt_html_num(val: int, suffix: str = " 張") -> str:
     if val > 0:
         return f'<span style="color:#ef5350; font-weight:700;">{val:+,}{suffix}</span>'
@@ -154,7 +168,11 @@ def calculate_main_force_cost(
     daily_net: pd.Series,
     window_days: int | None = None,
 ) -> tuple[pd.Series, float, float]:
-    """移動加權平均成本法（優先使用每日 VWAP，支援指定滾動視窗或全年度累計）"""
+    """
+    移動加權平均成本法：
+    - 優先使用每日真實 VWAP
+    - 若 df_price 含有 adj_factor（來自還原權息比率），遇除權息日自動對歷史 avg_cost 做等比例校正
+    """
     if "vwap" in df_price.columns and df_price["vwap"].notna().any():
         avg_prices = pd.to_numeric(df_price["vwap"], errors="coerce").fillna(df_price["close"])
     else:
@@ -164,16 +182,30 @@ def calculate_main_force_cost(
         else:
             avg_prices = df_price["close"]
 
+    if "adj_factor" in df_price.columns and df_price["adj_factor"].notna().any():
+        adj_series = pd.to_numeric(df_price["adj_factor"], errors="coerce").ffill().bfill().fillna(1.0)
+    else:
+        adj_series = pd.Series(1.0, index=df_price.index)
+
     start_idx = max(0, len(df_price) - window_days) if (window_days and window_days > 0) else 0
 
     inv = 0.0
     avg_cost = 0.0
+    prev_adj = None
     cost_list = []
 
-    for i, (p, net) in enumerate(zip(avg_prices, daily_net)):
+    for i, (p, net, cur_adj) in enumerate(zip(avg_prices, daily_net, adj_series)):
         if i < start_idx:
             cost_list.append(None)
             continue
+
+        # 偵測除權息日：若 adj_factor 發生跳變（> 0.1%），等比例調整既有庫存成本
+        if prev_adj is not None and prev_adj > 0 and cur_adj > 0 and inv > 0 and avg_cost > 0:
+            ratio = float(prev_adj) / float(cur_adj)
+            if abs(ratio - 1.0) > 0.001:
+                avg_cost = avg_cost * ratio
+        prev_adj = float(cur_adj) if pd.notna(cur_adj) and cur_adj > 0 else prev_adj
+
         if pd.isna(p) or pd.isna(net):
             cost_list.append(round(avg_cost, 2) if inv > 0 and avg_cost > 0 else None)
             continue
@@ -198,10 +230,10 @@ def calculate_main_force_cost(
 
 
 # =====================================================================
-# 股價與基礎資訊抓取（含 VWAP 與已發行股本張數）
+# 股價與基礎資訊抓取（優先官方真實 VWAP ＋ yfinance 除權息因子）
 # =====================================================================
 def _fetch_twse_tpex_price(stock_id: str, start_date: str, end_date: str, preferred_suffix: str = None) -> tuple[pd.DataFrame, str]:
-    """備援股價來源：向證交所 (TWSE) 或櫃買中心 (TPEX) 抓取每日開高低收、成交量(張)與精準 VWAP"""
+    """向證交所 (TWSE) 或櫃買中心 (TPEX) 抓取每日開高低收、成交量(張)與精準成交金額 VWAP"""
     session = _create_session()
     dt_start = datetime.strptime(start_date, "%Y-%m-%d")
     dt_end = datetime.strptime(end_date, "%Y-%m-%d")
@@ -212,15 +244,6 @@ def _fetch_twse_tpex_price(stock_id: str, start_date: str, end_date: str, prefer
     while cur <= end_m:
         months.append((cur.year, cur.month))
         cur = datetime(cur.year + 1, 1, 1) if cur.month == 12 else datetime(cur.year, cur.month + 1, 1)
-
-    def _to_float(v):
-        s = str(v).replace(",", "").replace("+", "").strip()
-        if s in ("", "--", "-"):
-            return None
-        try:
-            return float(s)
-        except ValueError:
-            return None
 
     def _try_twse() -> pd.DataFrame:
         rows = []
@@ -240,9 +263,9 @@ def _fetch_twse_tpex_price(stock_id: str, start_date: str, end_date: str, prefer
                     ad_date = _parse_dj_date(str(item[0]))
                     if not ad_date or not (start_date <= ad_date <= end_date):
                         continue
-                    vol_shares = _to_float(item[1])
-                    amt_ntd = _to_float(item[2])
-                    op, hi, lo, cl = _to_float(item[3]), _to_float(item[4]), _to_float(item[5]), _to_float(item[6])
+                    vol_shares = _to_clean_float(item[1])
+                    amt_ntd = _to_clean_float(item[2])
+                    op, hi, lo, cl = _to_clean_float(item[3]), _to_clean_float(item[4]), _to_clean_float(item[5]), _to_clean_float(item[6])
                     if cl is not None:
                         vwap = round(amt_ntd / vol_shares, 2) if (amt_ntd and vol_shares and vol_shares > 0) else round((op + hi + lo + cl) / 4.0, 2)
                         rows.append({
@@ -276,9 +299,9 @@ def _fetch_twse_tpex_price(stock_id: str, start_date: str, end_date: str, prefer
                     ad_date = _parse_dj_date(str(item[0]))
                     if not ad_date or not (start_date <= ad_date <= end_date):
                         continue
-                    vol_k = _to_float(item[1])
-                    amt_k = _to_float(item[2])
-                    op, hi, lo, cl = _to_float(item[3]), _to_float(item[4]), _to_float(item[5]), _to_float(item[6])
+                    vol_k = _to_clean_float(item[1])
+                    amt_k = _to_clean_float(item[2])
+                    op, hi, lo, cl = _to_clean_float(item[3]), _to_clean_float(item[4]), _to_clean_float(item[5]), _to_clean_float(item[6])
                     if cl is not None:
                         vwap = round(amt_k / vol_k, 2) if (amt_k and vol_k and vol_k > 0) else round((op + hi + lo + cl) / 4.0, 2)
                         rows.append({
@@ -305,8 +328,8 @@ def _fetch_twse_tpex_price(stock_id: str, start_date: str, end_date: str, prefer
     return pd.DataFrame(), ""
 
 
-def fetch_price_history(stock_id: str, start_date: str, end_date: str, preferred_suffix: str = None) -> tuple[pd.DataFrame, str]:
-    """抓取指定區間每日股價並回傳 (DataFrame, 成功後綴 '.TW' 或 '.TWO')"""
+def _fetch_yf_price_and_adj(stock_id: str, start_date: str, end_date: str, preferred_suffix: str = None) -> tuple[pd.DataFrame, str]:
+    """從 yfinance 抓取股價與還原權息因子 adj_factor (Adj Close / Close)"""
     end_dt = (datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
     if preferred_suffix in (".TW", ".TWO"):
         other = ".TWO" if preferred_suffix == ".TW" else ".TW"
@@ -323,17 +346,47 @@ def fetch_price_history(stock_id: str, start_date: str, end_date: str, preferred
                     df.columns = df.columns.get_level_values(0)
                 df = df.reset_index()
                 df["date"] = pd.to_datetime(df["Date"]).dt.strftime("%Y-%m-%d")
-                df = df[["date", "Open", "High", "Low", "Close", "Volume"]].copy()
-                df.columns = ["date", "open", "high", "low", "close", "volume"]
-                df["volume"] = (df["volume"] / 1000).round(0)
-                df["vwap"] = ((df["open"] + df["high"] + df["low"] + df["close"]) / 4.0).round(2)
-                df_out = df[df["date"] >= start_date].dropna(subset=["close"])
-                if not df_out.empty:
-                    return df_out, suffix
+                adj_col = "Adj Close" if "Adj Close" in df.columns else "Close"
+                out = pd.DataFrame({
+                    "date": df["date"],
+                    "open": pd.to_numeric(df["Open"], errors="coerce"),
+                    "high": pd.to_numeric(df["High"], errors="coerce"),
+                    "low": pd.to_numeric(df["Low"], errors="coerce"),
+                    "close": pd.to_numeric(df["Close"], errors="coerce"),
+                    "volume": (pd.to_numeric(df["Volume"], errors="coerce") / 1000.0).round(0),
+                })
+                adj_close = pd.to_numeric(df[adj_col], errors="coerce")
+                out["adj_factor"] = (adj_close / out["close"].replace(0, np.nan)).round(6).fillna(1.0)
+                out["vwap"] = ((out["open"] + out["high"] + out["low"] + out["close"]) / 4.0).round(2)
+                out = out[out["date"] >= start_date].dropna(subset=["close"]).reset_index(drop=True)
+                if not out.empty:
+                    return out, suffix
         except Exception:
             continue
+    return pd.DataFrame(), ""
 
-    return _fetch_twse_tpex_price(stock_id, start_date, end_date, preferred_suffix)
+
+def fetch_price_history(stock_id: str, start_date: str, end_date: str, preferred_suffix: str = None) -> tuple[pd.DataFrame, str]:
+    """
+    優先向 TWSE/TPEX 官方取得精準成交金額 VWAP，並結合 yfinance 補齊除權息因子 adj_factor；
+    若官方 API 暫時無法連線，自動降級回 yfinance。
+    """
+    df_official, suf_off = _fetch_twse_tpex_price(stock_id, start_date, end_date, preferred_suffix)
+    df_yf, suf_yf = _fetch_yf_price_and_adj(stock_id, start_date, end_date, suf_off or preferred_suffix)
+
+    if not df_official.empty:
+        if not df_yf.empty and "adj_factor" in df_yf.columns:
+            df_merged = df_official.merge(df_yf[["date", "adj_factor"]], on="date", how="left")
+            df_merged["adj_factor"] = df_merged["adj_factor"].ffill().bfill().fillna(1.0)
+        else:
+            df_merged = df_official.copy()
+            df_merged["adj_factor"] = 1.0
+        return df_merged, suf_off
+
+    if not df_yf.empty:
+        return df_yf, suf_yf
+
+    return pd.DataFrame(), ""
 
 
 def fetch_stock_name(session: requests.Session = None, stock_id: str = "", mirror: str = None) -> str:
@@ -385,31 +438,70 @@ def fetch_issued_lots(stock_id: str, preferred_suffix: str = None) -> float:
 
 
 # =====================================================================
-# 投信、券商分點與集中度抓取
+# 投信（含真實總持股與持股比率）、券商分點與集中度抓取
 # =====================================================================
 def fetch_investment_trust_history(session: requests.Session, stock_id: str, start_date: str, end_date: str, mirror: str = None):
-    """抓取「投信」每日淨買賣超(張)"""
+    """
+    從 MoneyDJ zcl.djhtm 抓取「投信」每日淨買賣超(張)，
+    並透過動態表頭解析同步取得「投信真實持股張數 (trust_holding)」與「投信持股比率 (trust_holding_pct)」。
+    """
     s_fmt = _format_dj_date(start_date)
     e_fmt = _format_dj_date(end_date)
     html, ok_mirror, err = _fetch_dj_html(session, f"/z/zc/zcl/zcl.djhtm?a={stock_id}&c={s_fmt}&d={e_fmt}", mirror)
     if not html:
-        return pd.DataFrame(columns=["date", "投信"]), mirror, err
+        return pd.DataFrame(columns=["date", "投信", "trust_holding", "trust_holding_pct"]), mirror, err
 
     soup = BeautifulSoup(html, "html.parser")
+
+    # 動態偵測欄位索引（預設相容標準 zcl.djhtm 結構）
+    idx_trust_net = 2
+    idx_trust_hold = None
+    idx_trust_pct = None
+
+    for tr in soup.find_all("tr"):
+        cells = [c.get_text(strip=True).replace(" ", "") for c in tr.find_all(["th", "td"])]
+        if any("日期" in c for c in cells) and any("投信" in c for c in cells):
+            for i, txt in enumerate(cells):
+                if "投信" in txt and ("買賣超" in txt or "買賣" in txt or txt == "投信"):
+                    idx_trust_net = i
+                elif "投信" in txt and ("持股" in txt or "庫存" in txt) and ("比" not in txt and "%" not in txt):
+                    idx_trust_hold = i
+                elif "投信" in txt and ("比" in txt or "%" in txt):
+                    idx_trust_pct = i
+            break
+
     records = []
     for tr in soup.find_all("tr"):
-        tds = [td.get_text(strip=True).replace(",", "").replace("+", "") for td in tr.find_all("td")]
-        if len(tds) >= 4:
-            ad_date = _parse_dj_date(tds[0])
-            if ad_date and start_date <= ad_date <= end_date:
-                try:
-                    records.append({"date": ad_date, "投信": float(tds[2])})
-                except ValueError:
-                    continue
+        tds = [td.get_text(strip=True) for td in tr.find_all("td")]
+        if len(tds) <= idx_trust_net:
+            continue
+        ad_date = _parse_dj_date(tds[0])
+        if not (ad_date and start_date <= ad_date <= end_date):
+            continue
+        net_val = _to_clean_float(tds[idx_trust_net])
+        if net_val is None:
+            continue
+
+        hold_val = _to_clean_float(tds[idx_trust_hold]) if (idx_trust_hold is not None and idx_trust_hold < len(tds)) else np.nan
+        pct_val = _to_clean_float(tds[idx_trust_pct]) if (idx_trust_pct is not None and idx_trust_pct < len(tds)) else np.nan
+
+        # 數值合理性防呆
+        if hold_val is not None and not pd.isna(hold_val) and hold_val < 0:
+            hold_val = np.nan
+        if pct_val is not None and not pd.isna(pct_val) and not (0.0 <= pct_val <= 100.0):
+            pct_val = np.nan
+
+        records.append({
+            "date": ad_date,
+            "投信": net_val,
+            "trust_holding": hold_val if hold_val is not None else np.nan,
+            "trust_holding_pct": pct_val if pct_val is not None else np.nan,
+        })
 
     if not records:
-        return pd.DataFrame(columns=["date", "投信"]), ok_mirror, "投信表格無資料"
-    df = pd.DataFrame(records).groupby("date", as_index=False)["投信"].sum()
+        return pd.DataFrame(columns=["date", "投信", "trust_holding", "trust_holding_pct"]), ok_mirror, "投信表格無資料"
+
+    df = pd.DataFrame(records).drop_duplicates(subset=["date"], keep="last").sort_values("date").reset_index(drop=True)
     return df, ok_mirror, ""
 
 
@@ -441,15 +533,13 @@ def _parse_zco_totals(html: str) -> tuple[float, float]:
         tds = [td.get_text(strip=True).replace(",", "").replace("+", "") for td in tr.find_all("td")]
         for i, text in enumerate(tds):
             if "合計買超" in text and i + 1 < len(tds):
-                try:
-                    buy_total = abs(float(tds[i + 1]))
-                except ValueError:
-                    pass
+                v = _to_clean_float(tds[i + 1])
+                if v is not None:
+                    buy_total = abs(v)
             elif "合計賣超" in text and i + 1 < len(tds):
-                try:
-                    sell_total = abs(float(tds[i + 1]))
-                except ValueError:
-                    pass
+                v = _to_clean_float(tds[i + 1])
+                if v is not None:
+                    sell_total = abs(v)
 
     if buy_total is not None and sell_total is not None:
         return buy_total, sell_total
@@ -462,15 +552,13 @@ def _parse_zco_totals(html: str) -> tuple[float, float]:
             left_a = tds[0].find("a", href=True)
             right_a = tds[5].find("a", href=True)
             if left_a and "zco0" in left_a["href"].lower():
-                try:
-                    b_sum += abs(float(tds[3].get_text(strip=True).replace(",", "").replace("+", "")))
-                except ValueError:
-                    pass
+                v = _to_clean_float(tds[3].get_text(strip=True))
+                if v is not None:
+                    b_sum += abs(v)
             if right_a and "zco0" in right_a["href"].lower():
-                try:
-                    s_sum += abs(float(tds[8].get_text(strip=True).replace(",", "").replace("+", "")))
-                except ValueError:
-                    pass
+                v = _to_clean_float(tds[8].get_text(strip=True))
+                if v is not None:
+                    s_sum += abs(v)
     return b_sum, s_sum
 
 
@@ -576,14 +664,13 @@ def fetch_broker_daily_history(stock_id: str, broker_info: dict, start_date: str
         soup = BeautifulSoup(html, "html.parser")
         records = []
         for tr in soup.find_all("tr"):
-            tds = [td.get_text(strip=True).replace(",", "").replace("+", "") for td in tr.find_all("td")]
+            tds = [td.get_text(strip=True) for td in tr.find_all("td")]
             if len(tds) >= 5:
                 ad_date = _parse_dj_date(tds[0])
                 if ad_date and start_date <= ad_date <= end_date:
-                    try:
-                        records.append({"date": ad_date, broker_name: float(tds[-1])})
-                    except ValueError:
-                        continue
+                    val = _to_clean_float(tds[-1])
+                    if val is not None:
+                        records.append({"date": ad_date, broker_name: val})
 
         if records:
             return pd.DataFrame(records).groupby("date", as_index=False)[broker_name].sum()
@@ -607,16 +694,14 @@ def fetch_broker_diff_history(session: requests.Session, stock_id: str, start_da
     soup = BeautifulSoup(html, "html.parser")
     records = []
     for tr in soup.find_all("tr"):
-        tds = [td.get_text(strip=True).replace(",", "").replace("+", "") for td in tr.find_all("td")]
+        tds = [td.get_text(strip=True) for td in tr.find_all("td")]
         if len(tds) >= 4:
             ad_date = _parse_dj_date(tds[0])
             if ad_date and start_date <= ad_date <= end_date:
-                try:
-                    buy_cnt = float(tds[1])
-                    sell_cnt = float(tds[2])
+                buy_cnt = _to_clean_float(tds[1])
+                sell_cnt = _to_clean_float(tds[2])
+                if buy_cnt is not None and sell_cnt is not None:
                     records.append({"date": ad_date, "broker_diff": int(round(buy_cnt - sell_cnt))})
-                except ValueError:
-                    continue
 
     if not records:
         return pd.DataFrame(columns=["date", "broker_diff"])
@@ -624,7 +709,7 @@ def fetch_broker_diff_history(session: requests.Session, stock_id: str, start_da
 
 
 def fetch_margin_history(session: requests.Session, stock_id: str, start_date: str, end_date: str, mirror: str = None) -> pd.DataFrame:
-    """從 MoneyDJ 抓取每日融資餘額(張)與融券餘額(張)"""
+    """從 MoneyDJ 抓取每日融資餘額(張)與融券餘額(張)（動態表頭解析＋數值防呆）"""
     s_fmt = _format_dj_date(start_date)
     e_fmt = _format_dj_date(end_date)
     html, _, _ = _fetch_dj_html(session, f"/z/zc/zcn/zcn.djhtm?a={stock_id}&c={s_fmt}&d={e_fmt}", mirror, timeout=6)
@@ -634,18 +719,29 @@ def fetch_margin_history(session: requests.Session, stock_id: str, start_date: s
         return pd.DataFrame(columns=["date", "margin_bal", "short_bal"])
 
     soup = BeautifulSoup(html, "html.parser")
+
+    # 動態偵測「餘額」欄位索引（通常表頭會有兩次「餘額」：前者融資餘額、後者融券餘額）
+    idx_margin = 4
+    idx_short = 11
+    for tr in soup.find_all("tr"):
+        cells = [c.get_text(strip=True).replace(" ", "") for c in tr.find_all(["th", "td"])]
+        if any("餘額" in c for c in cells) and len(cells) >= 10:
+            bal_indices = [i for i, txt in enumerate(cells) if "餘額" in txt and "增減" not in txt]
+            if len(bal_indices) >= 2:
+                idx_margin, idx_short = bal_indices[0], bal_indices[1]
+            break
+
     records = []
     for tr in soup.find_all("tr"):
-        tds = [td.get_text(strip=True).replace(",", "").replace("+", "") for td in tr.find_all("td")]
-        if len(tds) >= 12:
-            ad_date = _parse_dj_date(tds[0])
-            if ad_date and start_date <= ad_date <= end_date:
-                try:
-                    m_bal = float(tds[4])
-                    s_bal = float(tds[11])
-                    records.append({"date": ad_date, "margin_bal": m_bal, "short_bal": s_bal})
-                except ValueError:
-                    continue
+        tds = [td.get_text(strip=True) for td in tr.find_all("td")]
+        if len(tds) <= max(idx_margin, idx_short):
+            continue
+        ad_date = _parse_dj_date(tds[0])
+        if ad_date and start_date <= ad_date <= end_date:
+            m_bal = _to_clean_float(tds[idx_margin])
+            s_bal = _to_clean_float(tds[idx_short])
+            if m_bal is not None and s_bal is not None and m_bal >= 0 and s_bal >= 0:
+                records.append({"date": ad_date, "margin_bal": m_bal, "short_bal": s_bal})
 
     if not records:
         return pd.DataFrame(columns=["date", "margin_bal", "short_bal"])
@@ -653,7 +749,7 @@ def fetch_margin_history(session: requests.Session, stock_id: str, start_date: s
 
 
 def fetch_sbl_history(session: requests.Session, stock_id: str, start_date: str, end_date: str, mirror: str = None) -> pd.DataFrame:
-    """從 MoneyDJ 抓取每日借券賣出餘額(張)"""
+    """從 MoneyDJ 抓取每日借券賣出餘額(張)（動態表頭解析＋數值防呆）"""
     s_fmt = _format_dj_date(start_date)
     e_fmt = _format_dj_date(end_date)
     html, _, _ = _fetch_dj_html(session, f"/z/zc/zcn/zcn0.djhtm?a={stock_id}&c={s_fmt}&d={e_fmt}", mirror, timeout=6)
@@ -663,32 +759,62 @@ def fetch_sbl_history(session: requests.Session, stock_id: str, start_date: str,
         return pd.DataFrame(columns=["date", "sbl_bal"])
 
     soup = BeautifulSoup(html, "html.parser")
+
+    idx_sbl = 6
+    for tr in soup.find_all("tr"):
+        cells = [c.get_text(strip=True).replace(" ", "") for c in tr.find_all(["th", "td"])]
+        if any("日期" in c for c in cells) and any("餘額" in c for c in cells):
+            for i, txt in enumerate(cells):
+                if "借券" in txt and "餘額" in txt:
+                    idx_sbl = i
+                    break
+            else:
+                bal_indices = [i for i, txt in enumerate(cells) if "餘額" in txt]
+                if bal_indices:
+                    idx_sbl = bal_indices[-1]
+            break
+
     records = []
     for tr in soup.find_all("tr"):
-        tds = [td.get_text(strip=True).replace(",", "").replace("+", "") for td in tr.find_all("td")]
-        if len(tds) >= 7:
-            ad_date = _parse_dj_date(tds[0])
-            if ad_date and start_date <= ad_date <= end_date:
-                try:
-                    sbl_bal = float(tds[6])
-                    records.append({"date": ad_date, "sbl_bal": sbl_bal})
-                except ValueError:
-                    continue
+        tds = [td.get_text(strip=True) for td in tr.find_all("td")]
+        if len(tds) <= idx_sbl:
+            continue
+        ad_date = _parse_dj_date(tds[0])
+        if ad_date and start_date <= ad_date <= end_date:
+            sbl_bal = _to_clean_float(tds[idx_sbl])
+            if sbl_bal is not None and sbl_bal >= 0:
+                records.append({"date": ad_date, "sbl_bal": sbl_bal})
 
     if not records:
         return pd.DataFrame(columns=["date", "sbl_bal"])
     return pd.DataFrame(records).drop_duplicates(subset=["date"]).sort_values("date").reset_index(drop=True)
 
 
-def fetch_tdcc_snapshot(session: requests.Session, stock_id: str, existing_history: list = None) -> list:
-    """從集保結算所 OpenData 抓取最新一週集保戶股權分散表，並合併進歷史週序列"""
-    history = list(existing_history) if isinstance(existing_history, list) else []
+def _get_tdcc_csv_text(session: requests.Session) -> str:
+    """單次下載全市場 TDCC 集保 CSV 並快取於記憶體（TTL 1 小時），避免批次更新重複下載大檔"""
+    now = time.time()
+    if _TDCC_CACHE["text"] and (now - _TDCC_CACHE["ts"]) < _TDCC_CACHE_TTL:
+        return _TDCC_CACHE["text"]
     try:
         url = "https://opendata.tdcc.com.tw/getOD.ashx?id=1-5"
-        resp = session.get(url, timeout=12, verify=False)
-        if resp.status_code != 200 or len(resp.content) < 1000:
+        resp = session.get(url, timeout=15, verify=False)
+        if resp.status_code == 200 and len(resp.content) > 1000:
+            text = resp.content.decode("utf-8-sig", errors="ignore")
+            _TDCC_CACHE["ts"] = now
+            _TDCC_CACHE["text"] = text
+            return text
+    except Exception:
+        pass
+    return _TDCC_CACHE["text"]
+
+
+def fetch_tdcc_snapshot(session: requests.Session, stock_id: str, existing_history: list = None) -> list:
+    """從集保結算所 OpenData 快取解析最新一週集保戶股權分散表，並合併進歷史週序列"""
+    history = list(existing_history) if isinstance(existing_history, list) else []
+    try:
+        text = _get_tdcc_csv_text(session)
+        if not text:
             return history
-        text = resp.content.decode("utf-8-sig", errors="ignore")
         lines = [line.strip() for line in text.splitlines() if f",{stock_id}," in f",{line},"]
         if not lines:
             return history
@@ -793,7 +919,7 @@ def _populate_aux_concentrations(
 
 
 # =====================================================================
-# 核心分析引擎（單日診斷 ＋ 全年度每日健康分數回算）
+# 核心分析引擎（單日診斷 ＋ 全年度每日健康分數向量化回算）
 # =====================================================================
 def analyze_main_force(
     df_price: pd.DataFrame,
@@ -806,7 +932,7 @@ def analyze_main_force(
     tdcc_history: list = None,
     issued_lots: float = 0.0,
 ) -> dict:
-    """整合滾動 60 日波段主力、投信獨立追蹤、四大輔助籌碼、Z-Score 與五大劇本"""
+    """整合滾動 60 日波段主力、投信獨立追蹤（真實持股比）、四大輔助籌碼、Z-Score 與五大劇本"""
     all_cols = [c for c in df_chips.columns if c != "date"]
     pure_broker_cols = [c for c in all_cols if c != "投信"]
 
@@ -871,7 +997,7 @@ def analyze_main_force(
     latest_close_full = float(full_price.iloc[-1]["close"])
     lb_days = STRATEGY_PARAMS["wave_lookback_days"]
 
-    # --- 2. 投信獨立追蹤 ---
+    # --- 2. 投信獨立追蹤（優先採用 _aux.csv 的真實持股比率） ---
     trust_info = None
     if "投信" in full_df.columns:
         t_ytd = int(round(full_df["投信"].sum()))
@@ -886,7 +1012,18 @@ def analyze_main_force(
         merged_trust = full_price.merge(full_df[["date", "投信"]], on="date", how="left").fillna({"投信": 0.0})
         _, t_cost, t_inv = calculate_main_force_cost(merged_trust, merged_trust["投信"], window_days=lb_days)
         t_pnl = round((latest_close_full - t_cost) / t_cost * 100.0, 2) if (t_cost > 0 and t_inv > 0) else None
-        holding_pct = round((max(t_ytd, 0) / issued_lots * 100.0), 2) if issued_lots > 0 else None
+
+        # 優先讀取真實投信持股比率，其次以真實持股張數 ÷ 股本計算，最後才降級回 None（不再誤用 t_ytd）
+        holding_pct = None
+        if df_aux_full is not None and not df_aux_full.empty:
+            if "trust_holding_pct" in df_aux_full.columns:
+                s_tpct = pd.to_numeric(df_aux_full["trust_holding_pct"], errors="coerce").dropna()
+                if not s_tpct.empty:
+                    holding_pct = round(float(s_tpct.iloc[-1]), 2)
+            if holding_pct is None and "trust_holding" in df_aux_full.columns and issued_lots > 0:
+                s_thold = pd.to_numeric(df_aux_full["trust_holding"], errors="coerce").dropna()
+                if not s_thold.empty:
+                    holding_pct = round(float(s_thold.iloc[-1]) / issued_lots * 100.0, 2)
 
         trust_info = {
             "ytd": t_ytd,
@@ -924,7 +1061,6 @@ def analyze_main_force(
                         break
                 broker_diff_info = {"diff_5d": d5, "diff_1d": d1, "neg_streak": neg_streak, "source": "全市場家數差"}
         elif pure_broker_cols:
-            # 備援：以追蹤分點計算家數差
             daily_b = (full_df[pure_broker_cols] > 0).sum(axis=1)
             daily_s = (full_df[pure_broker_cols] < 0).sum(axis=1)
             s_diff = daily_b - daily_s
@@ -989,7 +1125,6 @@ def analyze_main_force(
     broker_tags = {k: v["tags"] for k, v in profiles.items() if v.get("tags")}
     top3_names, filtered_dt = select_wave_main_forces(profiles, top_n=3, exclude_day_traders=True)
 
-    # 排行榜整理
     s_60d_all = pd.Series({k: v["net_60d"] for k, v in profiles.items()}).sort_values(ascending=False)
     s_ytd_all = pd.Series({k: v["net_ytd"] for k, v in profiles.items()}).sort_values(ascending=False)
     s_1d_all = pd.Series({k: v["net_1d"] for k, v in profiles.items()}).sort_values(ascending=False)
@@ -1001,7 +1136,6 @@ def analyze_main_force(
     today_buyers = {k: int(v) for k, v in s_1d_all[s_1d_all > 0].head(5).items()}
     today_sellers = {k: int(v) for k, v in s_1d_all[s_1d_all < 0].tail(5).sort_values(ascending=True).items()}
 
-    # 贏家分點與近 10 日新崛起波段分點
     winner_brokers = sorted(
         [v for v in profiles.values() if v.get("is_winner")],
         key=lambda x: (x["win_rate"], x["net_60d"]),
@@ -1015,7 +1149,6 @@ def analyze_main_force(
     }
     recent_10d_rising = dict(sorted(rising_10d.items(), key=lambda x: x[1], reverse=True)[:5])
 
-    # 當日隔日沖佔比警訊
     today_vol = float(full_price.iloc[-1]["volume"]) if "volume" in full_price.columns else 0.0
     dt_buyers_today = [k for k, v in profiles.items() if v.get("is_day_trader") and v["net_1d"] > 0]
     dt_buy_sum = sum(profiles[k]["net_1d"] for k in dt_buyers_today)
@@ -1100,7 +1233,6 @@ def analyze_main_force(
 
     status_sub = f"近 60 日波段三大主力：{', '.join(top3_names)}"
 
-    # 近 5 日控盤率、金額與 60 日滾動 Z-Score
     vol_5d = float(full_price.tail(5)["volume"].sum()) if "volume" in full_price.columns else 0.0
     top3_5d_ctrl_pct = round((top3_5d / vol_5d * 100.0), 1) if vol_5d > 0 else 0.0
     top3_5d_float_pct = round((top3_5d / issued_lots * 100.0), 2) if issued_lots > 0 else None
@@ -1113,7 +1245,6 @@ def analyze_main_force(
     rolling_5d_ctrl_series = (rolling_5d_net / rolling_5d_vol) * 100.0
     top3_5d_ctrl_z = compute_rolling_zscore(rolling_5d_ctrl_series, window=STRATEGY_PARAMS["zscore_window"], min_periods=15)
 
-    # 均線與量比
     latest_ma10 = round(float(full_price["close"].tail(10).mean()), 2)
     latest_ma20 = round(float(full_price["close"].tail(20).mean()), 2)
     vol_20d_avg = float(full_price["volume"].tail(20).mean()) if "volume" in full_price.columns else 0.0
@@ -1232,8 +1363,9 @@ def compute_daily_health_scores(
     min_warmup_days: int = 20,
 ) -> pd.DataFrame:
     """
-    向量化回算今年每一個交易日的「綜合籌碼健康分數 (0~100)」與對應劇本，
-    供 app.py 繪製「每日健康分數走勢線 vs. 股價」對照圖表。
+    向量化回算今年每一個交易日的「綜合籌碼健康分數 (0~100)」與對應劇本：
+    - 預先向量化計算 5 日成交量、各分點 5 日滾動淨額與投信真實持股比率，大幅加速回算
+    - 成本計算同步套用除權息因子 adj_factor
     """
     if df_price_full is None or df_price_full.empty or df_chips_full is None or df_chips_full.empty:
         return pd.DataFrame(columns=["date", "health_score", "scenario_id", "sub_type"])
@@ -1254,16 +1386,24 @@ def compute_daily_health_scores(
     if not pure_cols:
         return pd.DataFrame(columns=["date", "health_score", "scenario_id", "sub_type"])
 
-    # 預先過濾已知隔日沖分點，加速逐日滾動計算
     wave_cols = [c for c in pure_cols if c not in DAY_TRADE_BROKERS] or pure_cols
     chips_mat = df_c[wave_cols].to_numpy(dtype=float)
 
+    # 預計算各分點 5 日滾動合計矩陣（消除內層逐日切片加總迴圈）
+    chips_5d_mat = pd.DataFrame(chips_mat).rolling(5, min_periods=1).sum().to_numpy(dtype=float)
+
     close_arr = pd.to_numeric(df_p["close"], errors="coerce").to_numpy(dtype=float)
     vol_arr = pd.to_numeric(df_p["volume"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+    vol5_sum_arr = pd.Series(vol_arr).rolling(5, min_periods=1).sum().to_numpy(dtype=float)
     vwap_arr = (
         pd.to_numeric(df_p["vwap"], errors="coerce").fillna(df_p["close"]).to_numpy(dtype=float)
         if "vwap" in df_p.columns
         else close_arr
+    )
+    adj_arr = (
+        pd.to_numeric(df_p["adj_factor"], errors="coerce").ffill().bfill().fillna(1.0).to_numpy(dtype=float)
+        if "adj_factor" in df_p.columns
+        else np.ones(n, dtype=float)
     )
     ma10_arr = pd.Series(close_arr).rolling(10).mean().to_numpy(dtype=float)
     ma20_arr = pd.Series(close_arr).rolling(20).mean().to_numpy(dtype=float)
@@ -1271,6 +1411,17 @@ def compute_daily_health_scores(
     vol20_arr = pd.Series(vol_arr).rolling(20).mean().to_numpy(dtype=float)
 
     trust_arr = pd.to_numeric(df_c["投信"], errors="coerce").fillna(0.0).to_numpy(dtype=float) if "投信" in df_c.columns else np.zeros(n)
+    trust_5d_arr = pd.Series(trust_arr).rolling(5, min_periods=1).sum().to_numpy(dtype=float)
+    trust_pct_arr = (
+        pd.to_numeric(df_a["trust_holding_pct"], errors="coerce").to_numpy(dtype=float)
+        if "trust_holding_pct" in df_a.columns
+        else np.full(n, np.nan)
+    )
+    trust_hold_arr = (
+        pd.to_numeric(df_a["trust_holding"], errors="coerce").to_numpy(dtype=float)
+        if "trust_holding" in df_a.columns
+        else np.full(n, np.nan)
+    )
 
     c5_arr = pd.to_numeric(df_a["conc_5d"], errors="coerce").to_numpy(dtype=float) if "conc_5d" in df_a.columns else np.full(n, np.nan)
     c10_arr = pd.to_numeric(df_a["conc_10d"], errors="coerce").to_numpy(dtype=float) if "conc_10d" in df_a.columns else np.full(n, np.nan)
@@ -1283,6 +1434,19 @@ def compute_daily_health_scores(
     lb = STRATEGY_PARAMS["wave_lookback_days"]
     z_win = STRATEGY_PARAMS["zscore_window"]
     tdcc_list = sorted(tdcc_history, key=lambda x: x.get("date", "")) if isinstance(tdcc_history, list) else []
+
+    # 預計算每日投信連買／連賣天數
+    trust_streak_arr = np.zeros(n, dtype=int)
+    cur_s = 0
+    for i in range(n):
+        v = trust_arr[i]
+        if v > 0:
+            cur_s = cur_s + 1 if cur_s > 0 else 1
+        elif v < 0:
+            cur_s = cur_s - 1 if cur_s < 0 else -1
+        else:
+            cur_s = 0
+        trust_streak_arr[i] = cur_s
 
     records = []
     for i in range(n):
@@ -1298,28 +1462,28 @@ def compute_daily_health_scores(
         if len(pos_idx) > 0:
             top3_idx = pos_idx[np.argsort(sum_60[pos_idx])[::-1][:3]]
             top3_daily = chips_mat[:, top3_idx].sum(axis=1)
+            top3_5d_series = chips_5d_mat[:, top3_idx].sum(axis=1)
         else:
             top3_daily = np.zeros(n)
+            top3_5d_series = np.zeros(n)
 
         s5_start = max(0, i - 4)
-        top3_5d = int(round(top3_daily[s5_start : i + 1].sum()))
-        vol_5d = float(vol_arr[s5_start : i + 1].sum())
+        top3_5d = int(round(top3_5d_series[i]))
+        vol_5d = float(vol5_sum_arr[i])
         top3_5d_ctrl_pct = round((top3_5d / vol_5d * 100.0), 1) if vol_5d > 0 else 0.0
         top3_5d_amt = float((top3_daily[s5_start : i + 1] * vwap_arr[s5_start : i + 1] * 1000.0).sum())
         top3_5d_flt = round((top3_5d / issued_lots * 100.0), 2) if issued_lots > 0 else None
 
-        # 滾動 Z-Score（三大主力控盤率 & 官方 5 日集中度）
+        # 向量化計算三大主力控盤率 60 日 Z-Score
         top3_5d_z = None
         if i >= 14:
             z_s = max(4, i - z_win + 1)
-            ctrl_hist = []
-            for j in range(z_s, i + 1):
-                v5 = float(vol_arr[j - 4 : j + 1].sum())
-                if v5 > 0:
-                    ctrl_hist.append(float(top3_daily[j - 4 : j + 1].sum()) / v5 * 100.0)
-            if len(ctrl_hist) >= 15:
+            v5_slice = vol5_sum_arr[z_s : i + 1]
+            valid_v = v5_slice > 0
+            if int(valid_v.sum()) >= 15:
+                ctrl_hist = (top3_5d_series[z_s : i + 1][valid_v] / v5_slice[valid_v]) * 100.0
                 std_c = float(np.std(ctrl_hist))
-                top3_5d_z = round((ctrl_hist[-1] - float(np.mean(ctrl_hist))) / std_c, 2) if std_c > 1e-9 else 0.0
+                top3_5d_z = round((float(ctrl_hist[-1]) - float(np.mean(ctrl_hist))) / std_c, 2) if std_c > 1e-9 else 0.0
 
         c5_hist = c5_arr[max(0, i - z_win + 1) : i + 1]
         c5_hist = c5_hist[~np.isnan(c5_hist)]
@@ -1328,10 +1492,16 @@ def compute_daily_health_scores(
             std_5 = float(np.std(c5_hist))
             c5_z = round((float(c5_hist[-1]) - float(np.mean(c5_hist))) / std_5, 2) if std_5 > 1e-9 else 0.0
 
-        # 三大主力滾動 60 日移動加權成本
+        # 三大主力滾動 60 日移動加權成本（含除權息校正）
         inv = 0.0
         avg_c = 0.0
-        for p_val, net_val in zip(vwap_arr[w_start : i + 1], top3_daily[w_start : i + 1]):
+        prev_a = None
+        for p_val, net_val, a_val in zip(vwap_arr[w_start : i + 1], top3_daily[w_start : i + 1], adj_arr[w_start : i + 1]):
+            if prev_a is not None and prev_a > 0 and a_val > 0 and inv > 0 and avg_c > 0:
+                ratio = prev_a / a_val
+                if abs(ratio - 1.0) > 0.001:
+                    avg_c *= ratio
+            prev_a = a_val if a_val > 0 else prev_a
             if net_val > 0:
                 avg_c = (inv * avg_c + net_val * p_val) / (inv + net_val) if inv > 0 else p_val
                 inv += net_val
@@ -1342,12 +1512,19 @@ def compute_daily_health_scores(
                     avg_c = 0.0
         top3_cost_i = round(avg_c, 2) if inv > 0 else 0.0
 
-        # 2. 投信當日狀態
-        t_ytd_i = float(trust_arr[: i + 1].sum())
-        t_d5_i = int(round(trust_arr[s5_start : i + 1].sum()))
-        t_streak_i = _calc_streak(pd.Series(trust_arr[: i + 1]))
-        t_hold_i = round((max(t_ytd_i, 0.0) / issued_lots * 100.0), 2) if issued_lots > 0 else None
-        t_info_i = {"streak": t_streak_i, "d5": t_d5_i, "cost": 0.0, "holding_pct": t_hold_i}
+        # 2. 投信當日狀態（採用真實持股比率）
+        t_hold_i = None
+        if not np.isnan(trust_pct_arr[i]):
+            t_hold_i = round(float(trust_pct_arr[i]), 2)
+        elif not np.isnan(trust_hold_arr[i]) and issued_lots > 0:
+            t_hold_i = round(float(trust_hold_arr[i]) / issued_lots * 100.0, 2)
+
+        t_info_i = {
+            "streak": int(trust_streak_arr[i]),
+            "d5": int(round(trust_5d_arr[i])),
+            "cost": 0.0,
+            "holding_pct": t_hold_i,
+        }
 
         # 3. 輔助籌碼當日狀態
         bd_i = None
@@ -1418,7 +1595,7 @@ def compute_daily_health_scores(
 
 
 # =====================================================================
-# GitHub 雲端同步與資料庫管理
+# GitHub 雲端同步（支援 Git Data API 單次打包 Commit）與資料庫管理
 # =====================================================================
 def _get_github_config():
     token = os.environ.get("GITHUB_TOKEN", "").strip()
@@ -1433,36 +1610,103 @@ def _get_github_config():
     return token, repo
 
 
-def _sync_file_to_github(local_path: str, repo_path: str) -> tuple[bool, str]:
+def sync_files_to_github_batch(file_pairs: list[tuple[str, str]], commit_message: str = "Sync database") -> tuple[bool, str]:
+    """
+    透過 GitHub Git Data API（Blobs -> Tree -> Commit -> Ref）將多個檔案打包成單一 Commit 推送，
+    大幅降低 API 次數與 Rate Limit 風險。
+    file_pairs: [(local_path, repo_path), ...]
+    """
     token, repo = _get_github_config()
     if not token or not repo:
         return False, "未讀取到 GITHUB_TOKEN 或 REPO_NAME（請確認 Streamlit Secrets）"
 
-    api_url = f"https://api.github.com/repos/{repo}/contents/{repo_path}"
+    valid_pairs = [(lp, rp) for lp, rp in file_pairs if os.path.exists(lp)]
+    if not valid_pairs:
+        return True, "無需同步檔案"
+
     headers = {
         "Authorization": f"token {token}",
-        "Accept": "application/vnd.github.v3+json"
+        "Accept": "application/vnd.github.v3+json",
     }
-    with open(local_path, "rb") as f:
-        content_b64 = base64.b64encode(f.read()).decode("utf-8")
+    base_api = f"https://api.github.com/repos/{repo}"
 
-    sha = None
-    get_resp = requests.get(api_url, headers=headers, timeout=10)
-    if get_resp.status_code == 200:
-        sha = get_resp.json().get("sha")
-
-    payload = {"message": f"Sync {repo_path}", "content": content_b64}
-    if sha:
-        payload["sha"] = sha
-
-    put_resp = requests.put(api_url, headers=headers, json=payload, timeout=15)
-    if put_resp.status_code in (200, 201):
-        return True, "已同步至 GitHub database/"
     try:
-        err_msg = put_resp.json().get("message", "")
-    except Exception:
-        err_msg = put_resp.text[:80]
-    return False, f"GitHub 寫入失敗 (HTTP {put_resp.status_code}: {err_msg})"
+        # 1. 取得預設分支名稱
+        repo_resp = requests.get(base_api, headers=headers, timeout=10)
+        if repo_resp.status_code != 200:
+            return False, f"讀取儲存庫失敗 (HTTP {repo_resp.status_code})"
+        default_branch = repo_resp.json().get("default_branch", "main")
+
+        # 2. 取得目前 HEAD commit 與 base_tree
+        ref_resp = requests.get(f"{base_api}/git/ref/heads/{default_branch}", headers=headers, timeout=10)
+        if ref_resp.status_code != 200:
+            return False, f"讀取分支 {default_branch} 失敗 (HTTP {ref_resp.status_code})"
+        head_sha = ref_resp.json()["object"]["sha"]
+
+        commit_resp = requests.get(f"{base_api}/git/commits/{head_sha}", headers=headers, timeout=10)
+        if commit_resp.status_code != 200:
+            return False, f"讀取 HEAD Commit 失敗 (HTTP {commit_resp.status_code})"
+        base_tree_sha = commit_resp.json()["tree"]["sha"]
+
+        # 3. 逐檔建立 Blob 並組裝 Tree
+        tree_items = []
+        for local_path, repo_path in valid_pairs:
+            with open(local_path, "rb") as f:
+                content_b64 = base64.b64encode(f.read()).decode("utf-8")
+            blob_resp = requests.post(
+                f"{base_api}/git/blobs",
+                headers=headers,
+                json={"content": content_b64, "encoding": "base64"},
+                timeout=15,
+            )
+            if blob_resp.status_code != 201:
+                return False, f"建立 Blob 失敗 ({repo_path}: HTTP {blob_resp.status_code})"
+            tree_items.append({
+                "path": repo_path,
+                "mode": "100644",
+                "type": "blob",
+                "sha": blob_resp.json()["sha"],
+            })
+
+        # 4. 建立新 Tree
+        tree_resp = requests.post(
+            f"{base_api}/git/trees",
+            headers=headers,
+            json={"base_tree": base_tree_sha, "tree": tree_items},
+            timeout=15,
+        )
+        if tree_resp.status_code != 201:
+            return False, f"建立 Tree 失敗 (HTTP {tree_resp.status_code})"
+        new_tree_sha = tree_resp.json()["sha"]
+
+        # 5. 建立新 Commit
+        new_commit_resp = requests.post(
+            f"{base_api}/git/commits",
+            headers=headers,
+            json={"message": commit_message, "tree": new_tree_sha, "parents": [head_sha]},
+            timeout=15,
+        )
+        if new_commit_resp.status_code != 201:
+            return False, f"建立 Commit 失敗 (HTTP {new_commit_resp.status_code})"
+        new_commit_sha = new_commit_resp.json()["sha"]
+
+        # 6. 更新分支指標
+        patch_resp = requests.patch(
+            f"{base_api}/git/refs/heads/{default_branch}",
+            headers=headers,
+            json={"sha": new_commit_sha},
+            timeout=15,
+        )
+        if patch_resp.status_code not in (200, 201):
+            return False, f"更新分支失敗 (HTTP {patch_resp.status_code})"
+
+        return True, f"已單次打包同步 {len(valid_pairs)} 個檔案至 GitHub database/"
+    except Exception as e:
+        return False, f"GitHub 打包同步異常 ({type(e).__name__})"
+
+
+def _sync_file_to_github(local_path: str, repo_path: str) -> tuple[bool, str]:
+    return sync_files_to_github_batch([(local_path, repo_path)], commit_message=f"Sync {repo_path}")
 
 
 def _delete_file_from_github(repo_path: str) -> tuple[bool, str]:
@@ -1559,11 +1803,12 @@ def delete_stock_database(stock_id: str) -> tuple[bool, str]:
     return True, f"已刪除 {stock_id}"
 
 
-def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
+def update_stock_database(stock_id: str, incremental_days: int = None, sync_github: bool = True) -> bool:
     """
     更新指定個股資料並存檔至 database/：
-    - incremental_days=None（新增建檔／全年度重抓）：抓全年股價、投信、分點、輔助籌碼，並自動 8 執行緒回溯補齊今年每日 5/10/20 日官方集中度至 _aux.csv。
-    - incremental_days=3（全部更新／每日排程）：僅增量抓近 3 日資料，並把最新集中度追加至 _aux.csv 最後幾列。
+    - incremental_days=None（新增建檔／全年度重抓）：抓全年真實 VWAP、除權息因子、投信(含真實持股比)、分點、輔助籌碼與歷史集中度。
+    - incremental_days=3（全部更新／每日排程）：僅增量抓近 3 日資料，並合併「既有追蹤分點 ∪ 近 3 日前 30 大」避免舊主力被填 0。
+    - sync_github=False 時僅寫入本地，供 app.py「全部更新」結束後統一單次打包 Commit。
     """
     stock_id = stock_id.strip()
     now_tw = _get_tw_now()
@@ -1586,6 +1831,7 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
         except Exception:
             saved_meta = {}
     preferred_suffix = saved_meta.get("ticker_suffix") if isinstance(saved_meta, dict) else None
+    saved_tracked_brokers = saved_meta.get("tracked_brokers", {}) if isinstance(saved_meta, dict) else {}
 
     is_incremental = (
         incremental_days is not None
@@ -1615,12 +1861,16 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
 
     session = _create_session()
     df_chips_recent = df_price_recent[["date"]].copy()
+    df_aux_recent = df_price_recent[["date"]].copy()
     debug_notes = []
 
-    # 1. 抓投信
+    # 1. 抓投信（含真實總持股與持股比率）
     df_trust, active_mirror, trust_err = fetch_investment_trust_history(session, stock_id, fetch_start, end_date)
     if not df_trust.empty:
-        df_chips_recent = df_chips_recent.merge(df_trust, on="date", how="left")
+        df_chips_recent = df_chips_recent.merge(df_trust[["date", "投信"]], on="date", how="left")
+        trust_aux_cols = [c for c in ["date", "trust_holding", "trust_holding_pct"] if c in df_trust.columns]
+        if len(trust_aux_cols) > 1:
+            df_aux_recent = df_aux_recent.merge(df_trust[trust_aux_cols], on="date", how="left")
     else:
         df_chips_recent["投信"] = 0.0
         if trust_err:
@@ -1635,28 +1885,39 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
     if issued_lots <= 0:
         issued_lots = fetch_issued_lots(stock_id, matched_suffix or preferred_suffix)
 
-    # 3. 取得關鍵券商分點名單
+    # 3. 取得關鍵券商分點名單（增量更新時合併既有追蹤分點，防止舊主力被填 0）
     brokers, active_mirror, broker_err = fetch_top_brokers(session, stock_id, fetch_start, end_date, active_mirror, limit=30)
     if broker_err:
         debug_notes.append(f"分點清單異常: {broker_err}")
 
+    merged_broker_map = {}
+    if isinstance(saved_tracked_brokers, dict) and is_incremental:
+        for b_name, b_info in saved_tracked_brokers.items():
+            if isinstance(b_info, dict) and (b_info.get("bhid") or b_info.get("b")):
+                merged_broker_map[b_name] = {
+                    "name": b_name,
+                    "bhid": str(b_info.get("bhid", "")),
+                    "b": str(b_info.get("b", "")),
+                }
+
+    for b in brokers:
+        merged_broker_map[b["name"]] = b
+
     if not is_incremental and len(df_price_recent) >= 3:
         recent_3d_start = df_price_recent.tail(3)["date"].min()
         recent_brokers, _, _ = fetch_top_brokers(session, stock_id, recent_3d_start, end_date, active_mirror, limit=20)
-        if recent_brokers:
-            existing_names = {b["name"] for b in brokers}
-            for rb in recent_brokers:
-                if rb["name"] not in existing_names:
-                    brokers.append(rb)
-                    existing_names.add(rb["name"])
+        for rb in recent_brokers:
+            merged_broker_map[rb["name"]] = rb
+
+    target_brokers = list(merged_broker_map.values())
 
     # 4. 併發抓取分點每日買賣超明細
     fetched_count = 0
-    if brokers:
+    if target_brokers:
         with ThreadPoolExecutor(max_workers=6) as executor:
             future_map = {
                 executor.submit(fetch_broker_daily_history, stock_id, b, fetch_start, end_date, active_mirror): b
-                for b in brokers
+                for b in target_brokers
             }
             for future in as_completed(future_map):
                 b = future_map[future]
@@ -1671,7 +1932,6 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
     df_chips_recent = df_chips_recent.fillna(0.0)
 
     # 5. 抓取輔助籌碼（家數差、融資券、借券賣出）
-    df_aux_recent = df_price_recent[["date"]].copy()
     df_diff = fetch_broker_diff_history(session, stock_id, fetch_start, end_date, active_mirror)
     if not df_diff.empty:
         df_aux_recent = df_aux_recent.merge(df_diff, on="date", how="left")
@@ -1685,7 +1945,9 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
     # 6. 合併或覆蓋資料庫
     if is_incremental:
         df_price_kept = df_price_old[df_price_old["date"] < fetch_start].copy()
-        df_price = pd.concat([df_price_kept, df_price_recent], ignore_index=True).sort_values("date").reset_index(drop=True)
+        df_price = pd.concat([df_price_kept, df_price_recent], ignore_index=True, sort=False).sort_values("date").reset_index(drop=True)
+        if "adj_factor" in df_price.columns:
+            df_price["adj_factor"] = pd.to_numeric(df_price["adj_factor"], errors="coerce").ffill().bfill().fillna(1.0)
 
         df_chips_kept = df_chips_old[df_chips_old["date"] < fetch_start].copy()
         df_chips = pd.concat([df_chips_kept, df_chips_recent], ignore_index=True, sort=False).fillna(0.0)
@@ -1703,7 +1965,6 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
         df_chips = df_chips_recent
         total_brokers = fetched_count
         if os.path.exists(aux_path):
-            # 保留既有歷史集中度快照，避免全年度重抓時覆蓋掉已補齊的 conc_5d/10d/20d
             df_aux_prev = pd.read_csv(aux_path)
             keep_conc_cols = [c for c in ["date", "conc_5d", "conc_10d", "conc_20d"] if c in df_aux_prev.columns]
             if len(keep_conc_cols) > 1:
@@ -1713,10 +1974,10 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
         else:
             df_aux = df_aux_recent
 
-        if brokers and fetched_count == 0:
-            debug_notes.append(f"找到 {len(brokers)} 個分點連結，但明細回傳為空")
+        if target_brokers and fetched_count == 0:
+            debug_notes.append(f"找到 {len(target_brokers)} 個分點連結，但明細回傳為空")
 
-    # 7. 補齊 _aux.csv 中的官方每日集中度（全量模式自動補齊全年缺失日；增量模式補齊近 3 日）
+    # 7. 補齊 _aux.csv 中的官方每日集中度
     df_aux = _populate_aux_concentrations(
         stock_id=stock_id,
         df_price=df_price,
@@ -1726,7 +1987,7 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
         max_workers=8,
     )
 
-    # 8. 抓取最新 5 / 10 / 20 日全市場前 15 大精準籌碼集中度（含買賣張數明細）並同步寫入 _aux.csv 最後一列
+    # 8. 抓取最新 5 / 10 / 20 日全市場前 15 大精準籌碼集中度並寫入 _aux.csv 最後一列
     concentrations = fetch_rolling_concentrations(stock_id, df_price, active_mirror)
     if not df_aux.empty and isinstance(concentrations, dict):
         last_i = len(df_aux) - 1
@@ -1735,7 +1996,7 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
             if pct_val is not None:
                 df_aux.loc[last_i, col] = pct_val
 
-    # 9. 抓取最新一週 TDCC 集保大戶
+    # 9. 抓取最新一週 TDCC 集保大戶（共用快取）
     tdcc_history_old = saved_meta.get("tdcc_history", []) if isinstance(saved_meta, dict) else []
     tdcc_history = fetch_tdcc_snapshot(session, stock_id, tdcc_history_old)
 
@@ -1744,18 +2005,7 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
     df_chips.to_csv(chips_path, index=False, encoding="utf-8-sig")
     df_aux.to_csv(aux_path, index=False, encoding="utf-8-sig")
 
-    is_gha = os.environ.get("GITHUB_ACTIONS", "").lower() == "true"
-    if is_gha:
-        ok1 = True
-        sync_msg = f"GitHub Actions 自動增量同步（近 {incremental_days} 日）" if is_incremental else "GitHub Actions 自動同步"
-    else:
-        ok1, sync_msg = _sync_file_to_github(price_path, f"database/{price_file}")
-        if ok1:
-            _, sync_msg = _sync_file_to_github(chips_path, f"database/{chips_file}")
-        if ok1:
-            _, sync_msg = _sync_file_to_github(aux_path, f"database/{aux_file}")
-
-    # 11. 產出摘要存檔
+    # 11. 產出摘要並持久化 tracked_brokers
     meta = analyze_main_force(
         df_price,
         df_chips,
@@ -1772,16 +2022,44 @@ def update_stock_database(stock_id: str, incremental_days: int = None) -> bool:
     meta["ticker_suffix"] = matched_suffix or preferred_suffix or ""
     meta["issued_lots"] = issued_lots
     meta["broker_count"] = total_brokers
+    meta["tracked_brokers"] = {
+        name: {"bhid": info["bhid"], "b": info["b"]}
+        for name, info in merged_broker_map.items()
+    }
     meta["tdcc_history"] = tdcc_history
     meta["last_updated"] = now_tw.strftime("%Y-%m-%d %H:%M")
     meta["debug_notes"] = debug_notes
-    meta["github_sync"] = f"✅ {sync_msg}" if ok1 else f"⚠️ {sync_msg}"
 
-    with open(meta_path, "w", encoding="utf-8") as f:
-        json.dump(meta, f, ensure_ascii=False, indent=2)
+    is_gha = os.environ.get("GITHUB_ACTIONS", "").lower() == "true"
+    if is_gha:
+        meta["github_sync"] = (
+            f"✅ GitHub Actions 自動增量同步（近 {incremental_days} 日）"
+            if is_incremental
+            else "✅ GitHub Actions 自動同步"
+        )
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+    elif sync_github:
+        meta["github_sync"] = "✅ 準備打包同步至 GitHub database/"
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
 
-    if not is_gha and ok1:
-        _sync_file_to_github(meta_path, f"database/{meta_file}")
+        ok_sync, sync_msg = sync_files_to_github_batch(
+            [
+                (price_path, f"database/{price_file}"),
+                (chips_path, f"database/{chips_file}"),
+                (aux_path, f"database/{aux_file}"),
+                (meta_path, f"database/{meta_file}"),
+            ],
+            commit_message=f"Update {stock_id} ({now_tw.strftime('%Y-%m-%d')})",
+        )
+        meta["github_sync"] = f"✅ {sync_msg}" if ok_sync else f"⚠️ {sync_msg}"
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+    else:
+        meta["github_sync"] = "✅ 本地已更新（等待批次打包同步）"
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
 
     return True
 
