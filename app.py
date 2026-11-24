@@ -2036,7 +2036,11 @@ if target_stock:
         st.warning("請至少選擇一個券商分點或「投信」來繪製圖表。")
     else:
         price_cols = [c for c in ["date", "open", "high", "low", "close", "vwap", "adj_factor"] if c in df_price_full.columns]
-        df_plot = df_price_full[price_cols].merge(df_chips_full, on="date", how="left").fillna(0.0)
+        df_plot = df_price_full[price_cols].merge(df_chips_full, on="date", how="left")
+        chip_merge_cols = [c for c in df_chips_full.columns if c != "date"]
+        if chip_merge_cols:
+            df_plot[chip_merge_cols] = df_plot[chip_merge_cols].fillna(0.0)
+
         if has_health_series:
             df_plot = df_plot.merge(df_health[["date", "health_score", "sub_type"]], on="date", how="left")
         else:
