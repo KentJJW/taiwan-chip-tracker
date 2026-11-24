@@ -1176,7 +1176,7 @@ def analyze_main_force(
             "period": b_period,
             "d1": prof["net_1d"],
             "d10": prof["net_10d"],
-            "d20": prof["net_20d"],
+            "d20": int(round(full_df.tail(20)[name].sum())),
             "streak": streak,
             "ctrl_pct": round(ctrl_pct, 1),
             "tags": prof.get("tags", []),
