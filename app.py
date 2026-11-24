@@ -19,6 +19,7 @@ from data_engine import (
     fetch_stock_name,
     load_stock_order,
     save_stock_order,
+    sync_files_to_github_batch,
 )
 
 st.set_page_config(page_title="台股主力分點吃貨／出貨追蹤系統", layout="wide")
@@ -655,6 +656,59 @@ def get_saved_stocks() -> list:
     return load_stock_order(raw_ids)
 
 
+def _get_stock_cache_key(stock_id: str) -> str:
+    """依本地資料檔修改時間產生快取鍵，檔案一更新即自動失效重算"""
+    parts = []
+    for suffix in ("_price.csv", "_chips.csv", "_aux.csv", "_meta.json"):
+        p = os.path.join(DB_DIR, f"{stock_id}{suffix}")
+        parts.append(f"{os.path.getmtime(p):.3f}" if os.path.exists(p) else "0")
+    return "|".join(parts)
+
+
+@st.cache_data(show_spinner=False)
+def _load_stock_data_cached(stock_id: str, cache_key: str):
+    """快取讀取個股本地 CSV 與 meta.json，避免切換互動元件時重複讀檔"""
+    price_path = os.path.join(DB_DIR, f"{stock_id}_price.csv")
+    chips_path = os.path.join(DB_DIR, f"{stock_id}_chips.csv")
+    aux_path = os.path.join(DB_DIR, f"{stock_id}_aux.csv")
+    meta_path = os.path.join(DB_DIR, f"{stock_id}_meta.json")
+
+    df_price_full = pd.read_csv(price_path)
+    df_chips_full = pd.read_csv(chips_path)
+    df_aux_full = None
+    if os.path.exists(aux_path):
+        try:
+            df_aux_full = pd.read_csv(aux_path)
+        except Exception:
+            df_aux_full = None
+
+    with open(meta_path, "r", encoding="utf-8") as f:
+        meta_saved = json.load(f)
+
+    return df_price_full, df_chips_full, df_aux_full, meta_saved
+
+
+@st.cache_data(show_spinner=False)
+def _compute_daily_health_cached(
+    stock_id: str,
+    cache_key: str,
+    pending_chip_date: str | None,
+    _df_price_full: pd.DataFrame,
+    _df_chips_full: pd.DataFrame,
+    _df_aux_full: pd.DataFrame | None,
+    _tdcc_history: list,
+    issued_lots: float,
+) -> pd.DataFrame:
+    """快取每日籌碼健康分數回算結果，消除勾選 Checkbox 或換分點時的重算卡頓"""
+    return compute_daily_health_scores(
+        df_price_full=_df_price_full,
+        df_chips_full=_df_chips_full,
+        df_aux_full=_df_aux_full,
+        tdcc_history=_tdcc_history,
+        issued_lots=issued_lots,
+    )
+
+
 @st.cache_data(ttl=86400, show_spinner=False)
 def _cached_fetch_stock_name(stock_id: str) -> str:
     return fetch_stock_name(stock_id=stock_id)
@@ -1018,7 +1072,6 @@ def _split_price_by_health(closes: pd.Series, scores: pd.Series):
             y_neutral[i - 1] = c_vals[i - 1]
             y_neutral[i] = c_vals[i]
 
-    # 整理連續紅／綠背景色帶區間
     bands = []
     cur_reg = None
     start_i = 0
@@ -1070,8 +1123,8 @@ with st.sidebar:
     if saved_list:
         st.markdown(
             '<div class="sidebar-help-box">'
-            '全部更新：近 3 日增量更新所有個股、融資借券與集保<br>'
-            '個股更新：全年度重抓校準（含近 60 日新主力與歷史集中度）'
+            '全部更新：近 3 日增量更新所有個股、融資借券與集保，並單次打包同步 GitHub<br>'
+            '個股更新：全年度重抓校準（真實 VWAP、投信持股比、近 60 日新主力與歷史集中度）'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -1081,15 +1134,58 @@ with st.sidebar:
             if st.button(
                 "🔄 全部更新",
                 key="btn_update_all",
-                help="對所有已存個股執行近 3 個交易日增量更新，同步更新集中度、融資券、借券與集保",
+                help="對所有已存個股執行近 3 個交易日增量更新，結束後單次打包同步至 GitHub",
                 width="stretch",
                 disabled=st.session_state["sort_mode"],
             ):
                 prog = st.progress(0, text="準備批量增量更新...")
+                updated_ids = []
                 for idx, sid in enumerate(saved_list):
                     lbl = get_stock_display_label(sid)
-                    prog.progress(idx / len(saved_list), text=f"正在增量更新 {lbl} ({idx+1}/{len(saved_list)})...")
-                    update_stock_database(sid, incremental_days=3)
+                    prog.progress(idx / len(saved_list) * 0.9, text=f"正在增量更新 {lbl} ({idx+1}/{len(saved_list)})...")
+                    if update_stock_database(sid, incremental_days=3, sync_github=False):
+                        updated_ids.append(sid)
+
+                if updated_ids and os.environ.get("GITHUB_ACTIONS", "").lower() != "true":
+                    prog.progress(0.95, text=f"正在單次打包同步 {len(updated_ids)} 檔個股至 GitHub...")
+                    file_pairs = []
+                    today_str = datetime.today().strftime("%Y-%m-%d")
+                    for sid in updated_ids:
+                        meta_p = os.path.join(DB_DIR, f"{sid}_meta.json")
+                        if os.path.exists(meta_p):
+                            try:
+                                with open(meta_p, "r", encoding="utf-8") as f:
+                                    m_obj = json.load(f)
+                                m_obj["github_sync"] = f"✅ 已單次打包同步（全部更新 {len(updated_ids)} 檔）"
+                                with open(meta_p, "w", encoding="utf-8") as f:
+                                    json.dump(m_obj, f, ensure_ascii=False, indent=2)
+                            except Exception:
+                                pass
+                        for suffix in ("_price.csv", "_chips.csv", "_aux.csv", "_meta.json"):
+                            fname = f"{sid}{suffix}"
+                            lp = os.path.join(DB_DIR, fname)
+                            if os.path.exists(lp):
+                                file_pairs.append((lp, f"database/{fname}"))
+
+                    ok_batch, batch_msg = sync_files_to_github_batch(
+                        file_pairs,
+                        commit_message=f"Batch update {len(updated_ids)} stocks ({today_str})",
+                    )
+                    if not ok_batch:
+                        for sid in updated_ids:
+                            meta_p = os.path.join(DB_DIR, f"{sid}_meta.json")
+                            if os.path.exists(meta_p):
+                                try:
+                                    with open(meta_p, "r", encoding="utf-8") as f:
+                                        m_obj = json.load(f)
+                                    m_obj["github_sync"] = f"⚠️ {batch_msg}"
+                                    with open(meta_p, "w", encoding="utf-8") as f:
+                                        json.dump(m_obj, f, ensure_ascii=False, indent=2)
+                                except Exception:
+                                    pass
+
+                _load_stock_data_cached.clear()
+                _compute_daily_health_cached.clear()
                 prog.progress(1.0, text="全部增量更新完成！")
                 st.rerun()
 
@@ -1141,18 +1237,22 @@ with st.sidebar:
                     if st.button(
                         "🔄",
                         key=f"upd_{sid}",
-                        help=f"全年度重抓校準 {display_name}（補齊 VWAP、近 60 日主力、歷史集中度、融資借券與集保）",
+                        help=f"全年度重抓校準 {display_name}（補齊真實 VWAP、投信持股比、近 60 日主力、歷史集中度、融資借券與集保）",
                         width="stretch",
                     ):
                         with st.spinner(f"正在全年度重抓校準 {display_name}..."):
-                            ok = update_stock_database(sid, incremental_days=None)
+                            ok = update_stock_database(sid, incremental_days=None, sync_github=True)
                             if ok:
                                 st.session_state["active_stock"] = sid
+                                _load_stock_data_cached.clear()
+                                _compute_daily_health_cached.clear()
                         st.rerun()
                 with col_del:
                     if st.button("✕", key=f"del_{sid}", help=f"刪除 {display_name} 的所有歷史資料", width="stretch"):
                         with st.spinner(f"正在刪除 {display_name}..."):
                             delete_stock_database(sid)
+                            _load_stock_data_cached.clear()
+                            _compute_daily_health_cached.clear()
                             remaining = get_saved_stocks()
                             st.session_state["active_stock"] = remaining[0] if remaining else ""
                         st.rerun()
@@ -1166,13 +1266,10 @@ target_stock = st.session_state.get("active_stock", "").strip()
 
 if target_stock:
     price_path = os.path.join(DB_DIR, f"{target_stock}_price.csv")
-    chips_path = os.path.join(DB_DIR, f"{target_stock}_chips.csv")
-    aux_path = os.path.join(DB_DIR, f"{target_stock}_aux.csv")
-    meta_path = os.path.join(DB_DIR, f"{target_stock}_meta.json")
 
     if (btn_add and input_stock) or not os.path.exists(price_path):
-        with st.spinner(f"正在抓取 {target_stock} 股價、投信、波段分點、歷史集中度、融資借券與集保大戶資料..."):
-            ok = update_stock_database(target_stock, incremental_days=None)
+        with st.spinner(f"正在抓取 {target_stock} 真實 VWAP 股價、投信持股比、波段分點、歷史集中度、融資借券與集保大戶資料..."):
+            ok = update_stock_database(target_stock, incremental_days=None, sync_github=True)
             if not ok:
                 st.error(f"找不到股票代號 `{target_stock}`，請確認是否為正確的上市櫃代號（目前不支援興櫃）。")
                 st.stop()
@@ -1180,19 +1277,15 @@ if target_stock:
             if target_stock not in cur_order:
                 cur_order.insert(0, target_stock)
                 save_stock_order(cur_order, sync_github=True)
+            _load_stock_data_cached.clear()
+            _compute_daily_health_cached.clear()
             st.rerun()
 
-    df_price_full = pd.read_csv(price_path)
-    df_chips_full = pd.read_csv(chips_path)
-    df_aux_full = None
-    if os.path.exists(aux_path):
-        try:
-            df_aux_full = pd.read_csv(aux_path)
-        except Exception:
-            df_aux_full = None
-
-    with open(meta_path, "r", encoding="utf-8") as f:
-        meta_saved = json.load(f)
+    cache_key = _get_stock_cache_key(target_stock)
+    df_price_raw, df_chips_raw, df_aux_raw, meta_saved = _load_stock_data_cached(target_stock, cache_key)
+    df_price_full = df_price_raw.copy()
+    df_chips_full = df_chips_raw.copy()
+    df_aux_full = df_aux_raw.copy() if df_aux_raw is not None else None
 
     stock_title = get_stock_display_label(target_stock)
 
@@ -1380,7 +1473,7 @@ if target_stock:
         unsafe_allow_html=True,
     )
 
-    # --- 區塊一之二：精簡單行價量籌碼背離警示條（ⓘ 詳情改放標題旁並向下彈出） ---
+    # --- 區塊一之二：精簡單行價量籌碼背離警示條 ---
     div_alert = analysis.get("divergence_alert")
     if div_alert:
         alert_type = div_alert.get("type", "bull")
@@ -1469,7 +1562,7 @@ if target_stock:
     if trust_info:
         trust_tip = (
             "投信下單分散於各大本土券商法人專戶中，系統不將其與分點張數重複加總，"
-            "但已正式將投信連買／連賣與持股比率（佔股本 %）納入五大劇本的共振評分層。"
+            "但已正式將投信連買／連賣與真實持股比率（佔股本 %）納入五大劇本的共振評分層。"
             "動向標籤嚴格以買超紅、賣超綠呈現；持股水位 0.5%～5% 且偏買時為初升認養甜蜜期，10% 以上須留意結帳賣壓。"
         )
         phase = trust_info.get("phase") or {}
@@ -1536,7 +1629,7 @@ if target_stock:
             unsafe_allow_html=True,
         )
 
-    # --- 區塊一之五：四大輔助籌碼儀表板（去雜訊＋狀態標籤） ---
+    # --- 區塊一之五：四大輔助籌碼儀表板 ---
     st.markdown(
         _render_aux_dashboard(
             analysis.get("broker_diff_info"),
@@ -1605,7 +1698,7 @@ if target_stock:
         </table>
         """, unsafe_allow_html=True)
 
-    # --- 前三大波段券商分點主力明細（滾動 60 日，含贏家／週轉率資訊） ---
+    # --- 前三大波段券商分點主力明細 ---
     st.write("")
     top3_names = analysis.get("top3_names", [])
     if top3_names:
@@ -1678,7 +1771,7 @@ if target_stock:
             f'  <td style="text-align:right;">{_span_num(w["net_60d"], "")}</td>'
             f'</tr>'
             for w in winner_brokers
-        ]) or '<tr><td colspan="5" style="color:#94a3b8;">目前歷史樣本尚無同時滿足 20 日勝率 ≥ 60% 且均報 ≥ +3% 之分點</td></tr>'
+        ]) or '<tr><td colspan="5" style="color:#94a3b8;">目前歷史樣本尚無同時滿足 20 日勝率 ≥ 60% 且均報 ≥ +3% 之獨立贏家分點</td></tr>'
 
         r10_rows = "".join([
             f'<tr>'
@@ -1693,7 +1786,7 @@ if target_stock:
         st.markdown(
             f'<div class="smart-grid">'
             f'  <div class="smart-panel">'
-            f'    <div class="smart-title"><span>🏆 歷史高勝率「贏家分點」雷達（買後 20 日回測）</span><span style="font-size:0.74rem; color:#94a3b8;">已排除隔日沖</span></div>'
+            f'    <div class="smart-title"><span>🏆 歷史高勝率「贏家分點」雷達（獨立事件 20 日回測）</span><span style="font-size:0.74rem; color:#94a3b8;">已排除隔日沖</span></div>'
             f'    <table class="rank-table">'
             f'      <thead><tr><th>分點名稱</th><th style="text-align:right;">20日勝率</th><th style="text-align:right;">均報酬</th><th style="text-align:right;">近5日(張)</th><th style="text-align:right;">近60日(張)</th></tr></thead>'
             f'      <tbody>{w_rows}</tbody>'
@@ -1710,7 +1803,7 @@ if target_stock:
             unsafe_allow_html=True,
         )
 
-    # --- 四欄並排排行榜（支援切換近 60 日波段 vs 今年累計，並標註 🏆／⚡） ---
+    # --- 四欄並排排行榜 ---
     top_buyers_60d = analysis.get("top_buyers", {})
     top_sellers_60d = analysis.get("top_sellers", {})
     ytd_buyers = analysis.get("ytd_top_buyers", {})
@@ -1796,11 +1889,14 @@ if target_stock:
             key=ms_key,
         )
 
-    df_health = compute_daily_health_scores(
-        df_price_full=df_price_full,
-        df_chips_full=df_chips_full,
-        df_aux_full=df_aux_full,
-        tdcc_history=tdcc_history_saved,
+    df_health = _compute_daily_health_cached(
+        stock_id=target_stock,
+        cache_key=cache_key,
+        pending_chip_date=pending_chip_date,
+        _df_price_full=df_price_full,
+        _df_chips_full=df_chips_full,
+        _df_aux_full=df_aux_full,
+        _tdcc_history=tdcc_history_saved,
         issued_lots=issued_lots_saved,
     )
     has_health_series = (not df_health.empty) and df_health["health_score"].notna().any()
@@ -1847,7 +1943,7 @@ if target_stock:
     if not selected_brokers:
         st.warning("請至少選擇一個券商分點或「投信」來繪製圖表。")
     else:
-        price_cols = [c for c in ["date", "open", "high", "low", "close", "vwap"] if c in df_price_full.columns]
+        price_cols = [c for c in ["date", "open", "high", "low", "close", "vwap", "adj_factor"] if c in df_price_full.columns]
         df_plot = df_price_full[price_cols].merge(df_chips_full, on="date", how="left").fillna(0.0)
         if has_health_series:
             df_plot = df_plot.merge(df_health[["date", "health_score", "sub_type"]], on="date", how="left")
@@ -1947,7 +2043,6 @@ if target_stock:
                 row=1, col=1, secondary_y=False,
             )
 
-        # 統一 Hover 資訊（把收盤價與當日健康分數整合在同一行）
         price_hover_texts = []
         for cl_v, sc_v, st_v in zip(df_plot["close"], df_plot["health_score"], df_plot["sub_type"].fillna("")):
             if pd.notna(sc_v):
@@ -1959,7 +2054,6 @@ if target_stock:
             y_bull, y_neutral, y_bear, regime_bands = _split_price_by_health(
                 df_plot["close"], df_plot["health_score"]
             )
-            # 1) 透明主線負責承接統一 Hover 與「收盤價」圖例
             fig.add_trace(
                 go.Scatter(
                     x=df_plot["date"],
@@ -1972,7 +2066,6 @@ if target_stock:
                 ),
                 row=1, col=1, secondary_y=False,
             )
-            # 2) 三段無縫動態變色折線（hoverinfo="skip" 避免重覆彈出）
             fig.add_trace(
                 go.Scatter(
                     x=df_plot["date"],
@@ -2007,7 +2100,6 @@ if target_stock:
                 ),
                 row=1, col=1, secondary_y=False,
             )
-            # 3) 主圖背景紅／綠燈號色帶（以純交易日索引繪製）
             for b_start, b_end, b_reg in regime_bands:
                 band_color = "rgba(239, 83, 80, 0.13)" if b_reg == "bull" else "rgba(38, 166, 154, 0.13)"
                 fig.add_vrect(
@@ -2032,7 +2124,6 @@ if target_stock:
                 row=1, col=1, secondary_y=False,
             )
 
-        # 選配：主圖右軸疊加 5 日平滑健康分數曲線
         if show_health_curve and has_health_series:
             fig.add_trace(
                 go.Scatter(
@@ -2117,7 +2208,6 @@ if target_stock:
             fig.update_yaxes(title_text="融資餘額 (張)", row=3, col=1, secondary_y=False, showgrid=True, tickformat=",.0f")
             fig.update_yaxes(title_text="借券賣出 (張)", row=3, col=1, secondary_y=True, showgrid=False, tickformat=",.0f")
 
-        # 僅在多日統計區間（非「今日」、非「全部」）時顯示無文字的淡色範圍框，徹底移除右上角「統計區間(今日)」字樣
         if range_type not in ("全部", "今日") and start_filter != end_filter:
             date_list = df_plot["date"].tolist()
             match_indices = [i for i, d in enumerate(date_list) if start_filter <= d <= end_filter]
@@ -2131,7 +2221,7 @@ if target_stock:
                     line_color="rgba(255, 255, 255, 0.28)",
                 )
 
-        # --- X 軸純交易日設定（過濾非交易日並精簡日期刻度） ---
+        # --- X 軸純交易日設定 ---
         n_pts = len(df_plot)
         tick_step = max(1, n_pts // 10)
         tick_indices = list(range(0, n_pts, tick_step))
