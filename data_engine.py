@@ -158,7 +158,7 @@ def _parse_dj_date(date_str: str) -> str:
 
 def _parse_flexible_date(date_val, ref_dt: datetime | None = None) -> str:
     """支援 Unix 毫秒/秒時間戳、YYYY-MM-DD、YYYY/MM/DD、民國年 YYY/MM/DD、YYYYMMDD 與 MM/DD"""
-    if date_val is None:
+    if date_val is None or isinstance(date_val, bool):
         return ""
 
     if isinstance(date_val, (int, float)) or (isinstance(date_val, str) and re.match(r"^\d{10,13}$", date_val.strip())):
