@@ -972,6 +972,68 @@ def _render_rank_table(
     )
 
 
+def _split_price_by_health(closes: pd.Series, scores: pd.Series):
+    """
+    依每日籌碼健康分數將收盤價折線切分為三個無縫銜接的顏色序列：
+    - y_bull: >= 70 分（偏多共振，亮紅）
+    - y_neutral: 36 ~ 69 分或暖身期（中性拉鋸，金黃）
+    - y_bear: <= 35 分（偏空警戒，亮綠）
+    同時回傳連續紅／綠區間的索引起訖 (start_idx, end_idx, regime) 供主圖繪製背景色帶。
+    """
+    n = len(closes)
+    c_vals = closes.to_numpy(dtype=float)
+    s_vals = scores.to_numpy(dtype=float) if scores is not None else [float("nan")] * n
+
+    y_bull = [None] * n
+    y_neutral = [None] * n
+    y_bear = [None] * n
+    regimes = []
+
+    for i in range(n):
+        sc = s_vals[i]
+        if pd.notna(sc) and sc >= 70:
+            regimes.append("bull")
+        elif pd.notna(sc) and sc <= 35:
+            regimes.append("bear")
+        else:
+            regimes.append("neutral")
+
+    if n > 0:
+        if regimes[0] == "bull":
+            y_bull[0] = c_vals[0]
+        elif regimes[0] == "bear":
+            y_bear[0] = c_vals[0]
+        else:
+            y_neutral[0] = c_vals[0]
+
+    for i in range(1, n):
+        reg = regimes[i]
+        if reg == "bull":
+            y_bull[i - 1] = c_vals[i - 1]
+            y_bull[i] = c_vals[i]
+        elif reg == "bear":
+            y_bear[i - 1] = c_vals[i - 1]
+            y_bear[i] = c_vals[i]
+        else:
+            y_neutral[i - 1] = c_vals[i - 1]
+            y_neutral[i] = c_vals[i]
+
+    # 整理連續紅／綠背景色帶區間
+    bands = []
+    cur_reg = None
+    start_i = 0
+    for i, reg in enumerate(regimes):
+        if reg != cur_reg:
+            if cur_reg in ("bull", "bear"):
+                bands.append((start_i, i - 1, cur_reg))
+            cur_reg = reg
+            start_i = i
+    if cur_reg in ("bull", "bear"):
+        bands.append((start_i, n - 1, cur_reg))
+
+    return y_bull, y_neutral, y_bear, bands
+
+
 st.markdown("### 📈 台股主力分點吃貨／出貨追蹤系統")
 
 saved_list = get_saved_stocks()
@@ -1699,9 +1761,8 @@ if target_stock:
 
     st.divider()
 
-    # --- 區塊二：股價、10/20MA、VWAP 主力成本線 vs. 每日健康分數走勢 ＋ 籌碼流向 ---
-    chart_title_suffix = f"（標示區間：{period_label}）" if range_type != "全部" else f"（{period_label}）"
-    st.markdown(f"#### 📉 {stock_title} 股價、主力 VWAP 成本線與每日籌碼健康分數走勢{chart_title_suffix}")
+    # --- 區塊二：股價（含籌碼健康分數三色燈號）、10/20MA、VWAP 主力成本線 vs. 籌碼流向 ---
+    st.markdown(f"#### 📉 {stock_title} 股價、籌碼健康燈號與主力 VWAP 成本線走勢")
 
     available_brokers = [c for c in df_chips_full.columns if c != "date"]
     default_selected = [n for n in top3_names if n in available_brokers] or available_brokers[:1]
@@ -1744,16 +1805,24 @@ if target_stock:
     )
     has_health_series = (not df_health.empty) and df_health["health_score"].notna().any()
 
-    c_opt1, c_opt2, c_opt3, c_opt4 = st.columns([1.05, 1.35, 1.35, 1.8])
+    c_opt1, c_opt2, c_opt3, c_opt4, c_opt5 = st.columns([1.0, 1.35, 1.25, 1.25, 1.7])
     with c_opt1:
         show_ma = st.checkbox("顯示 10/20MA", value=True)
     with c_opt2:
-        show_health_chart = st.checkbox(
-            "顯示每日健康分數",
+        show_health_regime = st.checkbox(
+            "健康分數燈號背景",
             value=bool(has_health_series),
             disabled=not bool(has_health_series),
+            help="收盤價折線與主圖背景依每日健康分數動態變色：紅（≥70分偏多共振）、黃（中性）、綠（≤35分偏空警戒）",
         )
     with c_opt3:
+        show_health_curve = st.checkbox(
+            "疊加分數趨勢線",
+            value=False,
+            disabled=not bool(has_health_series),
+            help="在主圖右側副軸疊加 5 日平滑籌碼健康分數曲線（0～100分）",
+        )
+    with c_opt4:
         has_aux_series = (
             df_aux_full is not None
             and (
@@ -1766,7 +1835,7 @@ if target_stock:
             value=bool(has_aux_series),
             disabled=not bool(has_aux_series),
         )
-    with c_opt4:
+    with c_opt5:
         cost_basis = st.radio(
             "成本線計算基準",
             options=["近 60 日波段成本", "今年累計成本"],
@@ -1782,6 +1851,9 @@ if target_stock:
         df_plot = df_price_full[price_cols].merge(df_chips_full, on="date", how="left").fillna(0.0)
         if has_health_series:
             df_plot = df_plot.merge(df_health[["date", "health_score", "sub_type"]], on="date", how="left")
+        else:
+            df_plot["health_score"] = float("nan")
+            df_plot["sub_type"] = ""
         if df_aux_full is not None and not df_aux_full.empty:
             aux_cols = [c for c in ["date", "margin_bal", "sbl_bal"] if c in df_aux_full.columns]
             if len(aux_cols) > 1:
@@ -1789,6 +1861,7 @@ if target_stock:
 
         df_plot["ma10"] = df_plot["close"].rolling(10).mean()
         df_plot["ma20"] = df_plot["close"].rolling(20).mean()
+        df_plot["health_ma5"] = df_plot["health_score"].rolling(5, min_periods=1).mean()
 
         daily_net = df_plot[selected_brokers].sum(axis=1)
         cum_total = daily_net.cumsum()
@@ -1816,35 +1889,29 @@ if target_stock:
                 unsafe_allow_html=True,
             )
 
-        use_health_row = bool(show_health_chart and has_health_series)
         use_aux_row = bool(show_aux_chart and has_aux_series)
-
-        # 動態規劃子圖列數（Row 1: 股價/均線/成本；選配: 健康分數；主力買賣超；選配: 融資借券）
-        row_specs = [[{"secondary_y": False}]]
-        row_weights = [0.42]
-        if use_health_row:
-            row_specs.append([{"secondary_y": False}])
-            row_weights.append(0.18)
-        row_specs.append([{"secondary_y": True}])
-        row_weights.append(0.24)
         if use_aux_row:
-            row_specs.append([{"secondary_y": True}])
-            row_weights.append(0.16)
+            fig = make_subplots(
+                rows=3,
+                cols=1,
+                shared_xaxes=True,
+                vertical_spacing=0.05,
+                row_heights=[0.48, 0.30, 0.22],
+                specs=[[{"secondary_y": True}], [{"secondary_y": True}], [{"secondary_y": True}]],
+            )
+            chart_height = 740
+        else:
+            fig = make_subplots(
+                rows=2,
+                cols=1,
+                shared_xaxes=True,
+                vertical_spacing=0.06,
+                row_heights=[0.56, 0.44],
+                specs=[[{"secondary_y": True}], [{"secondary_y": True}]],
+            )
+            chart_height = 620
 
-        total_w = sum(row_weights)
-        row_heights = [round(w / total_w, 3) for w in row_weights]
-        chart_height = 580 + (110 if use_health_row else 0) + (110 if use_aux_row else 0)
-
-        fig = make_subplots(
-            rows=len(row_specs),
-            cols=1,
-            shared_xaxes=True,
-            vertical_spacing=0.045,
-            row_heights=row_heights,
-            specs=row_specs,
-        )
-
-        # --- Row 1：股價、10/20MA 與主力成本線 ---
+        # --- Row 1：股價（依健康分數三色變色）、10/20MA 與主力成本線 ---
         if show_ma:
             fig.add_trace(
                 go.Scatter(
@@ -1880,66 +1947,118 @@ if target_stock:
                 row=1, col=1, secondary_y=False,
             )
 
-        fig.add_trace(
-            go.Scatter(
-                x=df_plot["date"],
-                y=df_plot["close"],
-                name="收盤價 (元)",
-                line=dict(color="#FFD700", width=2.6),
-                hovertemplate="%{y:,.2f} 元<extra>收盤價</extra>",
-            ),
-            row=1, col=1, secondary_y=False,
-        )
-        fig.update_yaxes(title_text="股價／成本 (元)", row=1, col=1, showgrid=True)
+        # 統一 Hover 資訊（把收盤價與當日健康分數整合在同一行）
+        price_hover_texts = []
+        for cl_v, sc_v, st_v in zip(df_plot["close"], df_plot["health_score"], df_plot["sub_type"].fillna("")):
+            if pd.notna(sc_v):
+                price_hover_texts.append(f"{cl_v:,.2f} 元 ｜ 健康分數 {int(round(sc_v))} 分（{st_v}）")
+            else:
+                price_hover_texts.append(f"{cl_v:,.2f} 元")
 
-        cur_row = 2
-
-        # --- 選配 Row：每日籌碼健康分數 (0~100) ---
-        if use_health_row:
-            hover_txt = [
-                f"{int(sc)} 分（{st_lbl}）" if pd.notna(sc) else "暖身期"
-                for sc, st_lbl in zip(df_plot["health_score"], df_plot["sub_type"].fillna(""))
-            ]
+        if show_health_regime and has_health_series:
+            y_bull, y_neutral, y_bear, regime_bands = _split_price_by_health(
+                df_plot["close"], df_plot["health_score"]
+            )
+            # 1) 透明主線負責承接統一 Hover 與「收盤價」圖例
             fig.add_trace(
                 go.Scatter(
                     x=df_plot["date"],
-                    y=df_plot["health_score"],
-                    name="籌碼健康分數",
-                    line=dict(color="#f472b6", width=2.2),
-                    fill="tozeroy",
-                    fillcolor="rgba(244, 114, 182, 0.10)",
-                    text=hover_txt,
-                    hovertemplate="%{text}<extra>健康分數</extra>",
+                    y=df_plot["close"],
+                    name="收盤價 (中性)",
+                    line=dict(color="#FFD700", width=2.4),
+                    opacity=0.0,
+                    text=price_hover_texts,
+                    hovertemplate="%{text}<extra>收盤／健康</extra>",
                 ),
-                row=cur_row, col=1, secondary_y=False,
+                row=1, col=1, secondary_y=False,
             )
-            fig.add_hline(
-                y=70,
-                line_width=1,
-                line_dash="dot",
-                line_color="rgba(239, 83, 80, 0.65)",
-                row=cur_row,
-                col=1,
+            # 2) 三段無縫動態變色折線（hoverinfo="skip" 避免重覆彈出）
+            fig.add_trace(
+                go.Scatter(
+                    x=df_plot["date"],
+                    y=y_neutral,
+                    name="收盤價 (中性)",
+                    line=dict(color="#FFD700", width=2.5),
+                    connectgaps=False,
+                    showlegend=False,
+                    hoverinfo="skip",
+                ),
+                row=1, col=1, secondary_y=False,
             )
-            fig.add_hline(
-                y=35,
-                line_width=1,
-                line_dash="dot",
-                line_color="rgba(38, 166, 154, 0.65)",
-                row=cur_row,
-                col=1,
+            fig.add_trace(
+                go.Scatter(
+                    x=df_plot["date"],
+                    y=y_bull,
+                    name="偏多共振 (≥70分)",
+                    line=dict(color="#ef5350", width=3.1),
+                    connectgaps=False,
+                    hoverinfo="skip",
+                ),
+                row=1, col=1, secondary_y=False,
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=df_plot["date"],
+                    y=y_bear,
+                    name="偏空警戒 (≤35分)",
+                    line=dict(color="#26a69a", width=3.1),
+                    connectgaps=False,
+                    hoverinfo="skip",
+                ),
+                row=1, col=1, secondary_y=False,
+            )
+            # 3) 主圖背景紅／綠燈號色帶（以純交易日索引繪製）
+            for b_start, b_end, b_reg in regime_bands:
+                band_color = "rgba(239, 83, 80, 0.13)" if b_reg == "bull" else "rgba(38, 166, 154, 0.13)"
+                fig.add_vrect(
+                    x0=b_start - 0.5,
+                    x1=b_end + 0.5,
+                    fillcolor=band_color,
+                    line_width=0,
+                    layer="below",
+                    row=1,
+                    col=1,
+                )
+        else:
+            fig.add_trace(
+                go.Scatter(
+                    x=df_plot["date"],
+                    y=df_plot["close"],
+                    name="收盤價 (元)",
+                    line=dict(color="#FFD700", width=2.6),
+                    text=price_hover_texts,
+                    hovertemplate="%{text}<extra>收盤價</extra>",
+                ),
+                row=1, col=1, secondary_y=False,
+            )
+
+        # 選配：主圖右軸疊加 5 日平滑健康分數曲線
+        if show_health_curve and has_health_series:
+            fig.add_trace(
+                go.Scatter(
+                    x=df_plot["date"],
+                    y=df_plot["health_ma5"].round(1),
+                    name="健康分數 (5日均)",
+                    line=dict(color="rgba(244, 114, 182, 0.72)", width=1.6, dash="dot"),
+                    hovertemplate="%{y:.0f} 分<extra>健康分數(5日均)</extra>",
+                ),
+                row=1, col=1, secondary_y=True,
             )
             fig.update_yaxes(
-                title_text="健康分數",
+                title_text="健康分數 (5日均)",
                 range=[0, 105],
                 tickvals=[0, 35, 70, 100],
-                row=cur_row,
+                row=1,
                 col=1,
-                showgrid=True,
+                secondary_y=True,
+                showgrid=False,
             )
-            cur_row += 1
+        else:
+            fig.update_yaxes(row=1, col=1, secondary_y=True, visible=False)
 
-        # --- 主力買賣超長條圖 ＋ 累計張數折線 ---
+        fig.update_yaxes(title_text="股價／成本 (元)", row=1, col=1, secondary_y=False, showgrid=True)
+
+        # --- Row 2：主力買賣超長條圖 ＋ 累計張數折線 ---
         bar_colors = ["#ef5350" if v >= 0 else "#26a69a" for v in daily_net]
         bar_label = f"{selected_brokers[0]} 每日買賣超" if len(selected_brokers) == 1 else f"所選({len(selected_brokers)}個)合計每日買賣超"
         fig.add_trace(
@@ -1951,7 +2070,7 @@ if target_stock:
                 opacity=0.85,
                 hovertemplate="%{y:+,.0f} 張<extra>" + bar_label + "</extra>",
             ),
-            row=cur_row, col=1, secondary_y=False,
+            row=2, col=1, secondary_y=False,
         )
 
         line_label = f"{selected_brokers[0]} 累計張數" if len(selected_brokers) == 1 else f"所選({len(selected_brokers)}個)累計張數"
@@ -1963,14 +2082,13 @@ if target_stock:
                 line=dict(color="#00E5FF", width=2.4),
                 hovertemplate="%{y:+,.0f} 張<extra>" + line_label + "</extra>",
             ),
-            row=cur_row, col=1, secondary_y=True,
+            row=2, col=1, secondary_y=True,
         )
-        fig.add_hline(y=0, line_width=1, line_color="rgba(255, 255, 255, 0.25)", row=cur_row, col=1)
-        fig.update_yaxes(title_text="每日買賣超 (張)", row=cur_row, col=1, secondary_y=False, showgrid=True, zeroline=True, tickformat=",.0f")
-        fig.update_yaxes(title_text="統計張數 (累計張)", row=cur_row, col=1, secondary_y=True, showgrid=False, tickformat=",.0f")
-        cur_row += 1
+        fig.add_hline(y=0, line_width=1, line_color="rgba(255, 255, 255, 0.25)", row=2, col=1)
+        fig.update_yaxes(title_text="每日買賣超 (張)", row=2, col=1, secondary_y=False, showgrid=True, zeroline=True, tickformat=",.0f")
+        fig.update_yaxes(title_text="統計張數 (累計張)", row=2, col=1, secondary_y=True, showgrid=False, tickformat=",.0f")
 
-        # --- 選配 Row：融資餘額 vs 借券賣出餘額 ---
+        # --- Row 3（選配）：融資餘額 vs 借券賣出餘額 ---
         if use_aux_row:
             if "margin_bal" in df_plot.columns and df_plot["margin_bal"].notna().any():
                 fig.add_trace(
@@ -1982,7 +2100,7 @@ if target_stock:
                         connectgaps=True,
                         hovertemplate="%{y:,.0f} 張<extra>融資餘額</extra>",
                     ),
-                    row=cur_row, col=1, secondary_y=False,
+                    row=3, col=1, secondary_y=False,
                 )
             if "sbl_bal" in df_plot.columns and df_plot["sbl_bal"].notna().any():
                 fig.add_trace(
@@ -1994,34 +2112,41 @@ if target_stock:
                         connectgaps=True,
                         hovertemplate="%{y:,.0f} 張<extra>借券賣出餘額</extra>",
                     ),
-                    row=cur_row, col=1, secondary_y=True,
+                    row=3, col=1, secondary_y=True,
                 )
-            fig.update_yaxes(title_text="融資餘額 (張)", row=cur_row, col=1, secondary_y=False, showgrid=True, tickformat=",.0f")
-            fig.update_yaxes(title_text="借券賣出 (張)", row=cur_row, col=1, secondary_y=True, showgrid=False, tickformat=",.0f")
+            fig.update_yaxes(title_text="融資餘額 (張)", row=3, col=1, secondary_y=False, showgrid=True, tickformat=",.0f")
+            fig.update_yaxes(title_text="借券賣出 (張)", row=3, col=1, secondary_y=True, showgrid=False, tickformat=",.0f")
 
-        if range_type != "全部":
-            if start_filter == end_filter:
-                fig.add_vline(
-                    x=end_filter,
-                    line_width=2,
-                    line_dash="dash",
-                    line_color="rgba(255, 255, 255, 0.6)",
-                    annotation_text=f"統計區間 ({range_type})",
-                    annotation_position="top left",
-                    annotation_font_color="#e5e7eb",
-                )
-            else:
+        # 僅在多日統計區間（非「今日」、非「全部」）時顯示無文字的淡色範圍框，徹底移除右上角「統計區間(今日)」字樣
+        if range_type not in ("全部", "今日") and start_filter != end_filter:
+            date_list = df_plot["date"].tolist()
+            match_indices = [i for i, d in enumerate(date_list) if start_filter <= d <= end_filter]
+            if len(match_indices) >= 2:
                 fig.add_vrect(
-                    x0=start_filter,
-                    x1=end_filter,
-                    fillcolor="rgba(255, 255, 255, 0.12)",
+                    x0=match_indices[0] - 0.5,
+                    x1=match_indices[-1] + 0.5,
+                    fillcolor="rgba(255, 255, 255, 0.06)",
                     line_width=1,
-                    line_dash="dash",
-                    line_color="rgba(255, 255, 255, 0.45)",
-                    annotation_text=f"統計區間 ({range_type})",
-                    annotation_position="top left",
-                    annotation_font_color="#e5e7eb",
+                    line_dash="dot",
+                    line_color="rgba(255, 255, 255, 0.28)",
                 )
+
+        # --- X 軸純交易日設定（過濾非交易日並精簡日期刻度） ---
+        n_pts = len(df_plot)
+        tick_step = max(1, n_pts // 10)
+        tick_indices = list(range(0, n_pts, tick_step))
+        if (n_pts - 1) not in tick_indices:
+            tick_indices.append(n_pts - 1)
+        tick_vals = [df_plot["date"].iloc[i] for i in tick_indices]
+        tick_texts = [d[5:].replace("-", "/") for d in tick_vals]
+
+        fig.update_xaxes(
+            type="category",
+            tickmode="array",
+            tickvals=tick_vals,
+            ticktext=tick_texts,
+            showgrid=False,
+        )
 
         fig.update_layout(
             height=chart_height,
