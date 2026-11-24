@@ -13,6 +13,7 @@ from data_engine import (
     STRATEGY_PARAMS,
     update_stock_database,
     analyze_main_force,
+    compute_daily_health_scores,
     delete_stock_database,
     calculate_main_force_cost,
     fetch_stock_name,
@@ -776,10 +777,11 @@ def _format_conc_card(label: str, info: dict) -> str:
     else:
         color, badge_bg, badge_txt = "#cbd5e1", "rgba(148,163,184,0.14)", "⚪ 籌碼中性"
 
+    net_tag = f"（淨額 {net:+,} 張）" if net != 0 else ""
     return (
         f'<div class="conc-box">'
         f'  <div class="conc-box-left">'
-        f'    <span class="conc-period">{label}（淨額 {net:+,} 張）</span>'
+        f'    <span class="conc-period">{label}{net_tag}</span>'
         f'    <div class="conc-val-row">'
         f'      <span class="conc-val" style="color:{color};">{pct:+.2f}%</span>'
         f'      {_span_zscore(z_val, z_samples)}'
@@ -1007,7 +1009,7 @@ with st.sidebar:
         st.markdown(
             '<div class="sidebar-help-box">'
             '全部更新：近 3 日增量更新所有個股、融資借券與集保<br>'
-            '個股更新：全年度重抓校準（含近 60 日新主力與股本）'
+            '個股更新：全年度重抓校準（含近 60 日新主力與歷史集中度）'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -1077,7 +1079,7 @@ with st.sidebar:
                     if st.button(
                         "🔄",
                         key=f"upd_{sid}",
-                        help=f"全年度重抓校準 {display_name}（補齊 VWAP、近 60 日主力、融資借券與集保）",
+                        help=f"全年度重抓校準 {display_name}（補齊 VWAP、近 60 日主力、歷史集中度、融資借券與集保）",
                         width="stretch",
                     ):
                         with st.spinner(f"正在全年度重抓校準 {display_name}..."):
@@ -1107,7 +1109,7 @@ if target_stock:
     meta_path = os.path.join(DB_DIR, f"{target_stock}_meta.json")
 
     if (btn_add and input_stock) or not os.path.exists(price_path):
-        with st.spinner(f"正在抓取 {target_stock} 股價、投信、波段分點、融資借券與集保大戶資料..."):
+        with st.spinner(f"正在抓取 {target_stock} 股價、投信、波段分點、歷史集中度、融資借券與集保大戶資料..."):
             ok = update_stock_database(target_stock, incremental_days=None)
             if not ok:
                 st.error(f"找不到股票代號 `{target_stock}`，請確認是否為正確的上市櫃代號（目前不支援興櫃）。")
@@ -1187,7 +1189,7 @@ if target_stock:
         st.warning(f"在指定區間 `{start_filter} ~ {end_filter}` 內查無交易資料，請確認輸入的日期。")
         st.stop()
 
-    # 計算區間股價漲跌幅（若有今日盤中即時報價，卡片三顯示即時價與今日漲跌，其餘籌碼對齊昨日有效日）
+    # 計算區間股價漲跌幅
     chip_close = float(df_price.iloc[-1]["close"])
     if realtime_price_row is not None:
         display_close = float(realtime_price_row["close"])
@@ -1486,7 +1488,7 @@ if target_stock:
     # --- 區塊一之六：全市場前 15 大籌碼集中度橫條 ---
     conc_tip = (
         "計算公式：（該區間全市場前 15 大買超分點總張數 － 前 15 大賣超分點總張數）÷ 區間總成交量 × 100%。"
-        "為確保統計口徑完全一致，系統每日自動保存官方快照，累積滿 15 個交易日後即啟用 60 日滾動 Z-Score。"
+        "系統已自動保存每日官方快照，並計算相對於過去 60 個交易日的滾動 Z-Score 標準分數。"
     )
     st.markdown(
         f'<div class="conc-panel">'
@@ -1697,9 +1699,9 @@ if target_stock:
 
     st.divider()
 
-    # --- 區塊二：股價、10/20MA、VWAP 主力成本線 vs. 分點買賣超 ＋ 融資／借券副圖 ---
+    # --- 區塊二：股價、10/20MA、VWAP 主力成本線 vs. 每日健康分數走勢 ＋ 籌碼流向 ---
     chart_title_suffix = f"（標示區間：{period_label}）" if range_type != "全部" else f"（{period_label}）"
-    st.markdown(f"#### 📉 {stock_title} 股價、10/20MA 與主力 VWAP 成本線 vs. 籌碼流向{chart_title_suffix}")
+    st.markdown(f"#### 📉 {stock_title} 股價、主力 VWAP 成本線與每日籌碼健康分數走勢{chart_title_suffix}")
 
     available_brokers = [c for c in df_chips_full.columns if c != "date"]
     default_selected = [n for n in top3_names if n in available_brokers] or available_brokers[:1]
@@ -1733,10 +1735,25 @@ if target_stock:
             key=ms_key,
         )
 
-    c_opt1, c_opt2, c_opt3 = st.columns([1.1, 1.4, 2.0])
+    df_health = compute_daily_health_scores(
+        df_price_full=df_price_full,
+        df_chips_full=df_chips_full,
+        df_aux_full=df_aux_full,
+        tdcc_history=tdcc_history_saved,
+        issued_lots=issued_lots_saved,
+    )
+    has_health_series = (not df_health.empty) and df_health["health_score"].notna().any()
+
+    c_opt1, c_opt2, c_opt3, c_opt4 = st.columns([1.05, 1.35, 1.35, 1.8])
     with c_opt1:
         show_ma = st.checkbox("顯示 10/20MA", value=True)
     with c_opt2:
+        show_health_chart = st.checkbox(
+            "顯示每日健康分數",
+            value=bool(has_health_series),
+            disabled=not bool(has_health_series),
+        )
+    with c_opt3:
         has_aux_series = (
             df_aux_full is not None
             and (
@@ -1749,7 +1766,7 @@ if target_stock:
             value=bool(has_aux_series),
             disabled=not bool(has_aux_series),
         )
-    with c_opt3:
+    with c_opt4:
         cost_basis = st.radio(
             "成本線計算基準",
             options=["近 60 日波段成本", "今年累計成本"],
@@ -1763,6 +1780,8 @@ if target_stock:
     else:
         price_cols = [c for c in ["date", "open", "high", "low", "close", "vwap"] if c in df_price_full.columns]
         df_plot = df_price_full[price_cols].merge(df_chips_full, on="date", how="left").fillna(0.0)
+        if has_health_series:
+            df_plot = df_plot.merge(df_health[["date", "health_score", "sub_type"]], on="date", how="left")
         if df_aux_full is not None and not df_aux_full.empty:
             aux_cols = [c for c in ["date", "margin_bal", "sbl_bal"] if c in df_aux_full.columns]
             if len(aux_cols) > 1:
@@ -1797,29 +1816,35 @@ if target_stock:
                 unsafe_allow_html=True,
             )
 
-        use_3rows = bool(show_aux_chart and has_aux_series)
-        if use_3rows:
-            fig = make_subplots(
-                rows=3,
-                cols=1,
-                shared_xaxes=True,
-                vertical_spacing=0.05,
-                row_heights=[0.44, 0.34, 0.22],
-                specs=[[{"secondary_y": False}], [{"secondary_y": True}], [{"secondary_y": True}]],
-            )
-            chart_height = 760
-        else:
-            fig = make_subplots(
-                rows=2,
-                cols=1,
-                shared_xaxes=True,
-                vertical_spacing=0.06,
-                row_heights=[0.52, 0.48],
-                specs=[[{"secondary_y": False}], [{"secondary_y": True}]],
-            )
-            chart_height = 640
+        use_health_row = bool(show_health_chart and has_health_series)
+        use_aux_row = bool(show_aux_chart and has_aux_series)
 
-        # 上層：10MA 與 20MA 均線
+        # 動態規劃子圖列數（Row 1: 股價/均線/成本；選配: 健康分數；主力買賣超；選配: 融資借券）
+        row_specs = [[{"secondary_y": False}]]
+        row_weights = [0.42]
+        if use_health_row:
+            row_specs.append([{"secondary_y": False}])
+            row_weights.append(0.18)
+        row_specs.append([{"secondary_y": True}])
+        row_weights.append(0.24)
+        if use_aux_row:
+            row_specs.append([{"secondary_y": True}])
+            row_weights.append(0.16)
+
+        total_w = sum(row_weights)
+        row_heights = [round(w / total_w, 3) for w in row_weights]
+        chart_height = 580 + (110 if use_health_row else 0) + (110 if use_aux_row else 0)
+
+        fig = make_subplots(
+            rows=len(row_specs),
+            cols=1,
+            shared_xaxes=True,
+            vertical_spacing=0.045,
+            row_heights=row_heights,
+            specs=row_specs,
+        )
+
+        # --- Row 1：股價、10/20MA 與主力成本線 ---
         if show_ma:
             fig.add_trace(
                 go.Scatter(
@@ -1842,7 +1867,6 @@ if target_stock:
                 row=1, col=1, secondary_y=False,
             )
 
-        # 上層：主力成本線（亮橘虛線）
         if cost_series.notna().any():
             fig.add_trace(
                 go.Scatter(
@@ -1856,7 +1880,6 @@ if target_stock:
                 row=1, col=1, secondary_y=False,
             )
 
-        # 上層：收盤價折線（金黃色粗線置頂）
         fig.add_trace(
             go.Scatter(
                 x=df_plot["date"],
@@ -1867,8 +1890,56 @@ if target_stock:
             ),
             row=1, col=1, secondary_y=False,
         )
+        fig.update_yaxes(title_text="股價／成本 (元)", row=1, col=1, showgrid=True)
 
-        # 中層主軸：每日買賣超長條圖
+        cur_row = 2
+
+        # --- 選配 Row：每日籌碼健康分數 (0~100) ---
+        if use_health_row:
+            hover_txt = [
+                f"{int(sc)} 分（{st_lbl}）" if pd.notna(sc) else "暖身期"
+                for sc, st_lbl in zip(df_plot["health_score"], df_plot["sub_type"].fillna(""))
+            ]
+            fig.add_trace(
+                go.Scatter(
+                    x=df_plot["date"],
+                    y=df_plot["health_score"],
+                    name="籌碼健康分數",
+                    line=dict(color="#f472b6", width=2.2),
+                    fill="tozeroy",
+                    fillcolor="rgba(244, 114, 182, 0.10)",
+                    text=hover_txt,
+                    hovertemplate="%{text}<extra>健康分數</extra>",
+                ),
+                row=cur_row, col=1, secondary_y=False,
+            )
+            fig.add_hline(
+                y=70,
+                line_width=1,
+                line_dash="dot",
+                line_color="rgba(239, 83, 80, 0.65)",
+                row=cur_row,
+                col=1,
+            )
+            fig.add_hline(
+                y=35,
+                line_width=1,
+                line_dash="dot",
+                line_color="rgba(38, 166, 154, 0.65)",
+                row=cur_row,
+                col=1,
+            )
+            fig.update_yaxes(
+                title_text="健康分數",
+                range=[0, 105],
+                tickvals=[0, 35, 70, 100],
+                row=cur_row,
+                col=1,
+                showgrid=True,
+            )
+            cur_row += 1
+
+        # --- 主力買賣超長條圖 ＋ 累計張數折線 ---
         bar_colors = ["#ef5350" if v >= 0 else "#26a69a" for v in daily_net]
         bar_label = f"{selected_brokers[0]} 每日買賣超" if len(selected_brokers) == 1 else f"所選({len(selected_brokers)}個)合計每日買賣超"
         fig.add_trace(
@@ -1880,10 +1951,9 @@ if target_stock:
                 opacity=0.85,
                 hovertemplate="%{y:+,.0f} 張<extra>" + bar_label + "</extra>",
             ),
-            row=2, col=1, secondary_y=False,
+            row=cur_row, col=1, secondary_y=False,
         )
 
-        # 中層副軸：累計統計張數折線
         line_label = f"{selected_brokers[0]} 累計張數" if len(selected_brokers) == 1 else f"所選({len(selected_brokers)}個)累計張數"
         fig.add_trace(
             go.Scatter(
@@ -1893,11 +1963,15 @@ if target_stock:
                 line=dict(color="#00E5FF", width=2.4),
                 hovertemplate="%{y:+,.0f} 張<extra>" + line_label + "</extra>",
             ),
-            row=2, col=1, secondary_y=True,
+            row=cur_row, col=1, secondary_y=True,
         )
+        fig.add_hline(y=0, line_width=1, line_color="rgba(255, 255, 255, 0.25)", row=cur_row, col=1)
+        fig.update_yaxes(title_text="每日買賣超 (張)", row=cur_row, col=1, secondary_y=False, showgrid=True, zeroline=True, tickformat=",.0f")
+        fig.update_yaxes(title_text="統計張數 (累計張)", row=cur_row, col=1, secondary_y=True, showgrid=False, tickformat=",.0f")
+        cur_row += 1
 
-        # 下層（選配）：融資餘額 vs 借券賣出餘額
-        if use_3rows:
+        # --- 選配 Row：融資餘額 vs 借券賣出餘額 ---
+        if use_aux_row:
             if "margin_bal" in df_plot.columns and df_plot["margin_bal"].notna().any():
                 fig.add_trace(
                     go.Scatter(
@@ -1908,7 +1982,7 @@ if target_stock:
                         connectgaps=True,
                         hovertemplate="%{y:,.0f} 張<extra>融資餘額</extra>",
                     ),
-                    row=3, col=1, secondary_y=False,
+                    row=cur_row, col=1, secondary_y=False,
                 )
             if "sbl_bal" in df_plot.columns and df_plot["sbl_bal"].notna().any():
                 fig.add_trace(
@@ -1920,10 +1994,10 @@ if target_stock:
                         connectgaps=True,
                         hovertemplate="%{y:,.0f} 張<extra>借券賣出餘額</extra>",
                     ),
-                    row=3, col=1, secondary_y=True,
+                    row=cur_row, col=1, secondary_y=True,
                 )
-            fig.update_yaxes(title_text="融資餘額 (張)", row=3, col=1, secondary_y=False, showgrid=True, tickformat=",.0f")
-            fig.update_yaxes(title_text="借券賣出 (張)", row=3, col=1, secondary_y=True, showgrid=False, tickformat=",.0f")
+            fig.update_yaxes(title_text="融資餘額 (張)", row=cur_row, col=1, secondary_y=False, showgrid=True, tickformat=",.0f")
+            fig.update_yaxes(title_text="借券賣出 (張)", row=cur_row, col=1, secondary_y=True, showgrid=False, tickformat=",.0f")
 
         if range_type != "全部":
             if start_filter == end_filter:
@@ -1949,18 +2023,13 @@ if target_stock:
                     annotation_font_color="#e5e7eb",
                 )
 
-        fig.add_hline(y=0, line_width=1, line_color="rgba(255, 255, 255, 0.25)", row=2, col=1)
-
         fig.update_layout(
             height=chart_height,
             template="plotly_dark",
             hovermode="x unified",
-            legend=dict(orientation="h", yanchor="bottom", y=1.04, xanchor="left", x=0),
+            legend=dict(orientation="h", yanchor="bottom", y=1.03, xanchor="left", x=0),
             margin=dict(l=20, r=20, t=72, b=20),
         )
-        fig.update_yaxes(title_text="股價／均線／成本 (元)", row=1, col=1, showgrid=True)
-        fig.update_yaxes(title_text="每日買賣超 (張)", row=2, col=1, secondary_y=False, showgrid=True, zeroline=True, tickformat=",.0f")
-        fig.update_yaxes(title_text="統計張數 (累計張)", row=2, col=1, secondary_y=True, showgrid=False, tickformat=",.0f")
 
         st.plotly_chart(fig, width="stretch")
 else:
