@@ -1,7 +1,7 @@
 """
 strategy.py — 台股主力籌碼策略、分點行為畫像與多維度共振規則庫
 包含：
-1. 滾動 60 日波段主力篩選、行為式隔日沖偵測與贏家分點勝率標記
+1. 滾動 60 日波段主力篩選、行為式隔日沖偵測與獨立事件贏家分點勝率標記
 2. 金額防呆、60 日滾動 Z-Score 自適應門檻與五大實戰劇本判定（含成本區間下限與深套空頭判定）
 3. 投信買賣動向分色與持股水位、買賣家數差、融資浮額、借券賣出、集保歸戶大戶之共振驗證層
 4. 防接落刀之底部／高檔價量籌碼背離警報
@@ -56,7 +56,8 @@ STRATEGY_PARAMS = {
     "dt_reversal_rate_min": 0.45,    # 買超隔日立即反手賣超 >= 50% 之比例
     "dt_today_vol_warn_pct": 5.0,    # 當日隔日沖買超佔總成交量警戒門檻 (%)
     "dt_today_top15_warn_pct": 30.0, # 當日隔日沖佔前 15 大買超警戒門檻 (%)
-    "winner_min_signals": 3,         # 贏家分點最少顯著買超次數
+    "winner_cooldown_days": 10,      # 贏家分點獨立買超事件最小冷卻間隔（交易日，防連續買超重複計分）
+    "winner_min_signals": 3,         # 贏家分點最少獨立顯著買超次數
     "winner_min_win_rate": 60.0,     # 贏家分點 20 日勝率下限 (%)
     "winner_min_avg_ret": 3.0,       # 贏家分點 20 日平均報酬下限 (%)
 
@@ -191,7 +192,7 @@ def compute_rolling_zscore(
 
 
 # =====================================================================
-# 五、 分點行為畫像：隔日沖偵測、贏家勝率評分與滾動 60 日主力篩選
+# 五、 分點行為畫像：隔日沖偵測、贏家勝率評分（含事件去重）與滾動 60 日主力篩選
 # =====================================================================
 def profile_brokers(
     df_price_full: pd.DataFrame,
@@ -202,12 +203,13 @@ def profile_brokers(
     """
     以現有 price 與 chips 歷史明細，自動對所有券商分點建立行為畫像：
     1. 週轉係數 (churn_ratio) 與 隔日反手率 (reversal_rate) -> 行為式偵測隔日沖／假外資
-    2. 顯著買超後 20 日前瞻勝率與平均報酬 -> 自動標記 🏆 贏家分點
+    2. 顯著買超後 20 日前瞻勝率與平均報酬（套用事件冷卻期去重） -> 自動標記 🏆 贏家分點
     3. 同步回傳近 60 日（波段）、近 10 日（短線）、近 5 日、今日與今年累計淨張數
     """
     p = STRATEGY_PARAMS
     lb = lookback_days or p["wave_lookback_days"]
     fwd = forward_days or p["winner_forward_days"]
+    cooldown = int(p.get("winner_cooldown_days", 10))
 
     if df_price_full is None or df_price_full.empty or df_chips_full is None or df_chips_full.empty:
         return {}
@@ -279,7 +281,7 @@ def profile_brokers(
             is_day_trader = True
             dt_reason = f"高頻短沖（週轉 {churn_ratio:.1f}x／隔日反手 {int(reversal_rate * 100)}%）"
 
-        # --- 2. 贏家分點勝率（全歷史可驗證區間） ---
+        # --- 2. 贏家分點勝率（獨立事件去重，避免連續買超膨脹樣本與勝率） ---
         valid_mask = fwd_ret_s.notna() & (s_all > 0)
         win_rate = None
         avg_fwd_ret = None
@@ -288,9 +290,19 @@ def profile_brokers(
             pos_hist = s_all[valid_mask]
             q75 = float(pos_hist.quantile(0.75)) if len(pos_hist) >= 4 else float(pos_hist.median())
             sig_mask = valid_mask & (s_all >= max(q75, 5.0))
-            sig_rets = fwd_ret_s[sig_mask]
-            buy_signal_cnt = int(len(sig_rets))
+            raw_indices = np.where(sig_mask.to_numpy())[0]
+
+            # 事件冷卻期去重：兩次買超訊號至少間隔 cooldown 個交易日才視為獨立事件
+            declustered_indices = []
+            last_idx = -cooldown - 1
+            for idx in raw_indices:
+                if idx - last_idx >= cooldown:
+                    declustered_indices.append(idx)
+                    last_idx = idx
+
+            buy_signal_cnt = len(declustered_indices)
             if buy_signal_cnt >= 2:
+                sig_rets = fwd_ret_s.iloc[declustered_indices]
                 win_rate = round(float((sig_rets > 0).mean() * 100.0), 1)
                 avg_fwd_ret = round(float(sig_rets.mean()), 2)
 
@@ -807,7 +819,7 @@ def evaluate_chip_scenario(
         )
         action = "連波段主力都在停損結帳且月線失守，下方無大資金承接，切忌因主力帳面虧損而盲目攤平。"
 
-    # 情境 5B：空頭發散（主力深套／全市場集體倒貨）— 修正原三大主力凹單時誤落入「中性整理」之盲點
+    # 情境 5B：空頭發散（主力深套／全市場集體倒貨）
     elif (
         below_ma20
         and ma_bear_align
