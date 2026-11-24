@@ -36,7 +36,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO_NAME: ${{ github.repository }}
         run: |
-          python backfill_conc.py
+          python data_engine.py
 
       - name: Commit and push updated database files
         run: |
