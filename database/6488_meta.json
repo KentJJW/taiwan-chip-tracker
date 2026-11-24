@@ -13,7 +13,7 @@
     "type": "neutral",
     "sub_type": "籌碼分歧",
     "title": "⚡ 純籌碼狀態：4. 籌碼分歧（少數硬撐／短沖干擾）",
-    "desc": "全市場 5 日集中度 -6.3%（Z:+0.2σ）（10日 -1.7% ／ 20日 -5.8%），主力廣度 53%，近 60 日三大波段主力近 5 日淨額 +1,089 張（控盤率 +2.3%／Z:+0.8σ），但內部主力廣度、三大主力方向或隔日沖佔比出現明顯矛盾。",
+    "desc": "全市場 5 日集中度 -6.3%（Z:+0.2σ）（10日 -1.7% ／ 20日 -5.8%），主力廣度 52%，近 60 日三大波段主力近 5 日淨額 +1,089 張（控盤率 +2.3%／Z:+0.8σ），但內部主力廣度、三大主力方向或隔日沖佔比出現明顯矛盾。",
     "action": "表面集中度與內部大戶共識不一致，須提防少數主力硬撐失敗或隔日沖短線獲利了結。",
     "badges": [
       {
@@ -149,6 +149,12 @@
     ],
     "元大-土城永寧": [
       "⚡ 隔日沖"
+    ],
+    "法銀巴黎": [
+      "🌐 外資"
+    ],
+    "凱基-松山": [
+      "⚡ 隔日沖"
     ]
   },
   "top3_names": [
@@ -233,21 +239,21 @@
     }
   },
   "breadth_info": {
-    "breadth_5d": 53.1,
-    "buy_5d": 17,
-    "sell_5d": 15,
-    "active_5d": 32,
-    "breadth_1d": 65.5,
-    "buy_1d": 19,
-    "sell_1d": 10,
-    "active_1d": 29,
-    "foreign_breadth_5d": 55.6,
-    "foreign_buy_5d": 5,
+    "breadth_5d": 52.5,
+    "buy_5d": 21,
+    "sell_5d": 19,
+    "active_5d": 40,
+    "breadth_1d": 58.3,
+    "buy_1d": 21,
+    "sell_1d": 15,
+    "active_1d": 36,
+    "foreign_breadth_5d": 60.0,
+    "foreign_buy_5d": 6,
     "foreign_sell_5d": 4,
-    "foreign_active_5d": 9,
-    "high_streak": 1,
+    "foreign_active_5d": 10,
+    "high_streak": 0,
     "low_streak": 0,
-    "total_wave_brokers": 32,
+    "total_wave_brokers": 40,
     "few_holding_up": false
   },
   "broker_diff_info": null,
@@ -436,7 +442,7 @@
   "stock_name": "環球晶",
   "ticker_suffix": ".TWO",
   "issued_lots": 528113.72,
-  "broker_count": 40,
+  "broker_count": 49,
   "tracked_brokers": {
     "美商高盛": {
       "bhid": "1480",
@@ -597,6 +603,42 @@
     "元大-土城永寧": {
       "bhid": "9800",
       "b": "9875"
+    },
+    "兆豐-台中港": {
+      "bhid": "7000",
+      "b": "7005"
+    },
+    "富邦-虎尾": {
+      "bhid": "9600",
+      "b": "9697"
+    },
+    "台灣企銀-太平": {
+      "bhid": "1110",
+      "b": "1115"
+    },
+    "富邦-永和": {
+      "bhid": "9600",
+      "b": "9654"
+    },
+    "凱基-松山": {
+      "bhid": "9200",
+      "b": "9217"
+    },
+    "第一金-華江": {
+      "bhid": "5380",
+      "b": "0035003300380057"
+    },
+    "法銀巴黎": {
+      "bhid": "8900",
+      "b": "8900"
+    },
+    "富邦-台北": {
+      "bhid": "9600",
+      "b": "9623"
+    },
+    "富邦-台中": {
+      "bhid": "9600",
+      "b": "003900360035004b"
     }
   },
   "tdcc_history": [
@@ -607,7 +649,7 @@
       "total_holders": 179231
     }
   ],
-  "last_updated": "2026-11-25 00:51",
+  "last_updated": "2026-11-25 05:18",
   "debug_notes": [],
-  "github_sync": "✅ 已單次打包同步 4 個檔案至 GitHub database/"
+  "github_sync": "✅ GitHub Actions 自動增量同步（近 3 日）"
 }
