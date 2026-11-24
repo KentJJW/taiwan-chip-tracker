@@ -6,6 +6,7 @@ import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from strategy import build_z_tooltip_html
 from data_engine import (
     DB_DIR,
     SCENARIO_MATRIX,
@@ -1112,14 +1113,10 @@ if target_stock:
     else:
         score_col, score_lbl = "#94a3b8", "中性多空拉鋸"
 
-    # Z-Score 說明浮窗內容（放置於卡片二標題旁）
-    z_tip_html = (
-        "<b>Z（Z-Score 標準分數）意義：</b><br>"
-        "衡量近 5 日控盤力道相對於該股過去 60 個交易日常態的偏離倍數。<br><br>"
-        "• <b>Z = 0：</b>剛好等於過去 60 日的平均水準。<br>"
-        "• <b>-1.0σ ～ +1.0σ：</b>日常正常波動區間（涵蓋約 68% 交易日）。例如近 5 日控盤 +2.3% ｜ Z:+0.7σ，代表雖有買超，但對該股過去 60 天慣性來說只是「稍微偏多一點」，尚未達到暴力吸籌的異常水準。<br>"
-        "• <b>≥ +1.5σ 或 ≤ -1.5σ：</b>統計上的顯著異常區（約最極端的前／後 6.7%），用來幫大型權值股或高當沖股自動校準敏感度。"
-    )
+    # Z-Score 三段式動態說明浮窗（由 strategy.build_z_tooltip_html 產出）
+    ctrl5 = float(analysis.get("top3_5d_ctrl_pct", 0.0) or 0.0)
+    z5 = analysis.get("top3_5d_ctrl_z")
+    z_tip_html = build_z_tooltip_html(stock_title, ctrl5, z5)
 
     # 綜合籌碼健康分數說明浮窗內容（放置於卡片三標題旁）
     score_tip_html = (
@@ -1150,9 +1147,8 @@ if target_stock:
         </div>
         """, unsafe_allow_html=True)
     with c2:
-        z5 = analysis.get("top3_5d_ctrl_z")
         flt5 = analysis.get("top3_5d_float_pct")
-        extra_stat_parts = [f"近5日控盤 {analysis.get('top3_5d_ctrl_pct', 0.0):+.1f}%"]
+        extra_stat_parts = [f"近5日控盤 {ctrl5:+.1f}%"]
         if z5 is not None:
             extra_stat_parts.append(f"Z:{z5:+.1f}σ")
         if flt5 is not None:
@@ -1165,7 +1161,7 @@ if target_stock:
         <div class="summary-card">
             <div class="card-label">
                 <span>區間內三大波段主力狀態</span>
-                <span class="tip-wrap tip-down">ⓘ<span class="tip-box">{z_tip_html}</span></span>
+                <span class="tip-wrap tip-down">ⓘ<span class="tip-box tip-box-wide">{z_tip_html}</span></span>
             </div>
             <div class="card-value">{analysis.get("status_html", "N/A")}</div>
             {status_sub_html}
