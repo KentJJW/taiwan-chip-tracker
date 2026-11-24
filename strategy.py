@@ -5,6 +5,7 @@ strategy.py — 台股主力籌碼策略、分點行為畫像與多維度共振�
 2. 金額防呆、60 日滾動 Z-Score 自適應門檻與五大實戰劇本判定（含成本區間下限與深套空頭判定）
 3. 投信買賣動向分色與持股水位、買賣家數差、融資浮額、借券賣出、集保歸戶大戶之共振驗證層
 4. 防接落刀之底部／高檔價量籌碼背離警報
+5. Z-Score 三段式動態懸浮說明文案產生器
 """
 from __future__ import annotations
 
@@ -1052,3 +1053,78 @@ def evaluate_divergence_alert(
         }
 
     return None
+
+
+# =====================================================================
+# 九、 Z-Score 三段式動態懸浮說明文案
+# =====================================================================
+def build_z_tooltip_html(stock_title: str, ctrl5: float, z5: float | None) -> str:
+    """產出 Z-Score 三段式懸浮說明文案（1.意義 2.目前個股診斷 3.各區間含意）"""
+    z_bull = STRATEGY_PARAMS["z_bull_min"]
+    z_bear = STRATEGY_PARAMS["z_bear_max"]
+    ctrl5_col = "#ef5350" if ctrl5 > 0 else ("#26a69a" if ctrl5 < 0 else "#cbd5e1")
+
+    if z5 is not None:
+        if z5 >= z_bull:
+            z5_col = "#ef5350"
+            z_diag_desc = (
+                f"代表三大主力近 5 日買超力道已突破過去 60 天慣性的 {z_bull:.1f} 倍標準差，"
+                f"屬於罕見的<b style='color:#ef5350;'>「異常重手吃貨」</b>表態訊號。"
+            )
+        elif z5 >= 1.0:
+            z5_col = "#fbbf24"
+            z_diag_desc = (
+                "代表三大主力近 5 日買超力道已高於日常波動上緣，"
+                "屬於<b style='color:#fbbf24;'>「溫和偏多、積極建倉」</b>階段，但尚未達到暴力掃貨的異常水準。"
+            )
+        elif z5 <= z_bear:
+            z5_col = "#26a69a"
+            z_diag_desc = (
+                f"代表三大主力近 5 日賣超力道已跌破過去 60 天慣性的 {z_bear:.1f} 倍標準差，"
+                f"屬於罕見的<b style='color:#26a69a;'>「異常重手倒貨」</b>警戒訊號。"
+            )
+        elif z5 <= -1.0:
+            z5_col = "#26a69a"
+            z_diag_desc = (
+                "代表三大主力近 5 日賣壓已超出日常波動下緣，"
+                "屬於<b style='color:#26a69a;'>「溫和偏空、持續調節」</b>階段，但尚未達到恐慌性倒貨水準。"
+            )
+        else:
+            z5_col = "#cbd5e1"
+            if ctrl5 > 0:
+                z_diag_desc = (
+                    f"代表帳面雖有買超（{ctrl5:+.1f}%），但對照該股過去 60 天的波動慣性（{z5:+.1f}σ）"
+                    f"只是<b>「日常正常範圍內的稍微偏多」</b>，尚未達到異常吸籌水準。"
+                )
+            elif ctrl5 < 0:
+                z_diag_desc = (
+                    f"代表帳面雖有賣超（{ctrl5:+.1f}%），但對照該股過去 60 天的波動慣性（{z5:+.1f}σ）"
+                    f"只是<b>「日常正常範圍內的稍微偏空」</b>，尚未達到異常倒貨水準。"
+                )
+            else:
+                z_diag_desc = "代表近 5 日三大主力買賣超互相抵銷，完全貼近過去 60 天的平均常態水準。"
+
+        current_z_summary = (
+            f"<b>2️⃣ 目前 {stock_title} 數據診斷：</b><br>"
+            f"近 5 日控盤率 <b style='color:{ctrl5_col};'>{ctrl5:+.1f}%</b> ｜ "
+            f"<b style='color:{z5_col};'>Z:{z5:+.1f}σ</b><br>"
+            f"{z_diag_desc}<br><br>"
+        )
+    else:
+        current_z_summary = (
+            f"<b>2️⃣ 目前 {stock_title} 數據診斷：</b><br>"
+            f"近 5 日控盤率 <b style='color:{ctrl5_col};'>{ctrl5:+.1f}%</b> ｜ <b>Z：樣本累積中</b><br>"
+            f"該股歷史交易日樣本尚在累積中，暫無法計算 60 日滾動 Z-Score 偏離倍數。<br><br>"
+        )
+
+    return (
+        "<b>1️⃣ Z（Z-Score 標準分數）意義：</b><br>"
+        "衡量近 5 日控盤力道相對於該股過去 60 個交易日常態的偏離倍數。<br><br>"
+        f"{current_z_summary}"
+        "<b>3️⃣ Z 數值各區間含意：</b><br>"
+        f"• <b>≥ +{z_bull:.1f}σ（明顯偏多）：</b>最積極買超的前 6.7%，屬異常重手吃貨表態（可自動幫權值股／高當沖股校準門檻）。<br>"
+        f"• <b>+1.0σ ～ +{z_bull:.1f}σ（溫和偏多）：</b>買盤高於日常波動上緣，主力開始穩定建倉，但尚未暴力掃貨。<br>"
+        "• <b>-1.0σ ～ +1.0σ（中性盤整）：</b>涵蓋約 68% 交易日（Z = 0 為 60 日平均），屬日常正常換手波動。<br>"
+        f"• <b>{z_bear:.1f}σ ～ -1.0σ（溫和偏空）：</b>賣壓超出日常波動下緣，主力正在有節奏地逢高調節。<br>"
+        f"• <b>≤ {z_bear:.1f}σ（明顯偏空）：</b>賣最兇的後 6.7%，屬異常重手倒貨或停損砍倉警戒區。"
+    )
