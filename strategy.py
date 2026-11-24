@@ -270,7 +270,7 @@ def profile_brokers(
                         continue
                     c_now = close_arr[i]
                     c_fwd = close_arr[i + fwd_days]
-                    if np.notna(c_now) and np.notna(c_fwd) and c_now > 0:
+                    if pd.notna(c_now) and pd.notna(c_fwd) and c_now > 0:
                         fwd_rets.append((c_fwd - c_now) / c_now * 100.0)
                         last_sig_i = i
 
