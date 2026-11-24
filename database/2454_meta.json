@@ -1,111 +1,342 @@
 {
-  "main_force_html": "元大證券（今年 <span style=\"color:#ef5350; font-weight:700;\">+19,819 張</span>）",
+  "main_force_html": "元大證券 <span style=\"font-size:0.78rem; color:#fbbf24;\">🏆贏家(64%)</span>（近60日 <span style=\"color:#ef5350; font-weight:700;\">+6,400 張</span>）",
   "main_force_sub_lines": [
-    "今年累計買超 <span style=\"color:#ef5350; font-weight:700;\">+43,273 張</span> ／ 賣超 <span style=\"color:#26a69a; font-weight:700;\">-23,454 張</span>（淨額 <span style=\"color:#ef5350; font-weight:700;\">+19,819 張</span>）",
-    "目前庫存均價：<b style='color:#ffb74d;'>3,792.71 元</b>（帳面損益 <span style=\"color:#26a69a; font-weight:700;\">-2.84%</span>）"
+    "今年累計 <span style=\"color:#ef5350; font-weight:700;\">+19,819 張</span> ｜ 單一均價 <b>3,911.26 元</b>",
+    "三大主力合計成本：<b style='color:#ffb74d;'>3,877.36 元</b>（帳面 <span style=\"color:#ef5350; font-weight:700;\">+4.45%</span>）"
   ],
-  "status_html": "🟢 區間內今年三大主力吃貨中（<span style=\"color:#ef5350; font-weight:700;\">+32,189 張</span>）",
-  "status_sub": "三大主力名單：元大證券, 永豐金證券, 投信",
+  "status_html": "🔴 區間內三大波段主力吃貨中（<span style=\"color:#ef5350; font-weight:700;\">+28,785 張</span>）",
+  "status_sub": "近 60 日波段三大主力：元大證券, 臺銀, 永豐金證券",
   "divergence_alert": null,
   "scenario": {
     "id": 0,
     "type": "neutral",
+    "sub_type": "中性整理",
     "title": "⚪ 當前狀態：籌碼中性整理（尚未觸發五大關鍵劇本）",
-    "desc": "收盤價 3,685.00 元（10MA 3,812.00 ／ 20MA 3,810.50），三大主力近 5 日淨額 +4,608 張（控盤率 +5.6%），全市場 5 日集中度 +0.3%，處於多空均衡或橫盤整理階段。",
-    "action": "持續觀察收盤價與 10MA/20MA 位置、5 日集中度是否突破 ±5% 或三大主力控盤率表態。"
+    "desc": "收盤價 4,050.00 元（10MA 3,834.00 ／ 20MA 3,815.00），近 60 日三大波段主力近 5 日淨額 +6,302 張（控盤率 +9.2% / Z:+2.6σ、佔股本 +0.39%），全市場 5 日集中度 +1.1%，處於多空均衡或橫盤整理階段。",
+    "action": "持續觀察收盤價與 10MA/20MA 位置、5 日集中度或三大波段主力控盤率表態。",
+    "badges": [
+      {
+        "level": "warn",
+        "label": "👥 散戶同追（5日家數差 +9）",
+        "detail": "雖然集中度為正，但買超家數大於賣超家數，顯示散戶同步追價，籌碼略顯凌亂 (-4 分)。"
+      }
+    ],
+    "conviction_score": 46
   },
   "top3_names": [
     "元大證券",
-    "永豐金證券",
-    "投信"
+    "臺銀",
+    "永豐金證券"
   ],
-  "top3_header_md": "- 今年前三大主力（**元大證券, 永豐金證券, 投信**）本區間合計：:red[**+32,189 張**]（近 20 日合計：:red[**+18,859 張**]）",
+  "top3_period_net": 28785,
+  "top3_period_ctrl_pct": 1.3,
+  "top3_5d_ctrl_pct": 9.21,
+  "top3_5d_ctrl_z": 2.64,
+  "top3_5d_float_pct": 0.39,
+  "top3_cost": 3877.36,
+  "top3_inv": 15221,
+  "top3_pnl_pct": 4.45,
   "top3_rows": [
     {
       "name": "元大證券",
+      "net_60d": 6400,
       "ytd": 19819,
       "period": 19819,
-      "d1": 1915,
-      "d10": 697,
-      "d20": 3544,
-      "streak": 1,
-      "ctrl_pct": 0.9
+      "d1": 0,
+      "d10": 2220,
+      "d20": 2474,
+      "streak": 0,
+      "ctrl_pct": 0.9,
+      "tags": [
+        "🏆贏家(64%)"
+      ],
+      "win_rate": 64.3,
+      "avg_fwd_ret": 14.93,
+      "churn_ratio": 2.87
+    },
+    {
+      "name": "臺銀",
+      "net_60d": 4525,
+      "ytd": 2544,
+      "period": 2544,
+      "d1": 0,
+      "d10": 4418,
+      "d20": 4501,
+      "streak": 0,
+      "ctrl_pct": 0.1,
+      "tags": [],
+      "win_rate": 44.0,
+      "avg_fwd_ret": 8.21,
+      "churn_ratio": 1.04
     },
     {
       "name": "永豐金證券",
+      "net_60d": 4216,
       "ytd": 6422,
       "period": 6422,
-      "d1": 338,
-      "d10": 1306,
-      "d20": 3911,
-      "streak": 1,
-      "ctrl_pct": 0.3
-    },
-    {
-      "name": "投信",
-      "ytd": 5948,
-      "period": 5948,
-      "d1": 534,
-      "d10": 4172,
-      "d20": 11404,
-      "streak": 20,
-      "ctrl_pct": 0.3
+      "d1": 0,
+      "d10": 746,
+      "d20": 3638,
+      "streak": 0,
+      "ctrl_pct": 0.3,
+      "tags": [
+        "🏆贏家(68%)"
+      ],
+      "win_rate": 67.9,
+      "avg_fwd_ret": 25.25,
+      "churn_ratio": 1.91
     }
   ],
-  "remark_md": "- 💡 備註：本檢視區間買超第一名為 **元大證券**（:red[**+19,819 張**]） ｜ 賣超第一名為 **台灣摩根士丹利**（:green[**-16,743 張**]）",
+  "filtered_day_traders": [],
+  "day_trade_info": {
+    "is_heavy_day_trade": false,
+    "dt_vol_pct": 0.0,
+    "dt_top15_pct": 0.0,
+    "dt_buyers": [],
+    "dt_net_today": 0
+  },
+  "winner_brokers": [
+    {
+      "name": "永豐金-匯立",
+      "win_rate": 78.3,
+      "avg_fwd_ret": 14.95,
+      "buy_signals": 23,
+      "net_60d": -958,
+      "net_5d": 561,
+      "net_1d": 0
+    },
+    {
+      "name": "新加坡商瑞銀",
+      "win_rate": 78.3,
+      "avg_fwd_ret": 26.25,
+      "buy_signals": 23,
+      "net_60d": -1225,
+      "net_5d": 45,
+      "net_1d": 0
+    },
+    {
+      "name": "統一",
+      "win_rate": 70.8,
+      "avg_fwd_ret": 23.9,
+      "buy_signals": 24,
+      "net_60d": 1816,
+      "net_5d": 108,
+      "net_1d": 0
+    },
+    {
+      "name": "永豐金證券",
+      "win_rate": 67.9,
+      "avg_fwd_ret": 25.25,
+      "buy_signals": 28,
+      "net_60d": 4216,
+      "net_5d": 707,
+      "net_1d": 0
+    },
+    {
+      "name": "國票-敦北法人",
+      "win_rate": 65.5,
+      "avg_fwd_ret": 18.97,
+      "buy_signals": 29,
+      "net_60d": 1190,
+      "net_5d": 68,
+      "net_1d": 0
+    }
+  ],
+  "recent_10d_rising": {
+    "臺銀": 4418,
+    "元大證券": 2220,
+    "美林": 1370,
+    "永豐金-匯立": 1328,
+    "永豐金證券": 746
+  },
+  "broker_tags": {
+    "統一": [
+      "🏆贏家(71%)"
+    ],
+    "美林": [
+      "🏆贏家(60%)"
+    ],
+    "永豐金證券": [
+      "🏆贏家(68%)"
+    ],
+    "元大證券": [
+      "🏆贏家(64%)"
+    ],
+    "國票-敦北法人": [
+      "👀熱點鎖碼",
+      "🏆贏家(66%)"
+    ],
+    "新加坡商瑞銀": [
+      "🏆贏家(78%)"
+    ],
+    "凱基-台北": [
+      "⚡隔日沖"
+    ],
+    "香港上海匯豐": [
+      "🏆贏家(64%)"
+    ],
+    "富邦證券": [
+      "🏆贏家(88%)"
+    ],
+    "凱基": [
+      "🏆贏家(64%)"
+    ],
+    "台新-台北": [
+      "🏆贏家(78%)"
+    ],
+    "港商野村": [
+      "🏆贏家(65%)"
+    ],
+    "永豐金-匯立": [
+      "🏆贏家(78%)"
+    ],
+    "台新-五權西": [
+      "🏆贏家(62%)"
+    ],
+    "華南永昌": [
+      "🏆贏家(64%)"
+    ],
+    "宏遠證券": [
+      "🏆贏家(67%)"
+    ],
+    "美商高盛": [
+      "🏆贏家(70%)"
+    ],
+    "群益金鼎": [
+      "🏆贏家(62%)"
+    ],
+    "港商麥格理": [
+      "🏆贏家(60%)"
+    ],
+    "花旗環球": [
+      "🏆贏家(70%)"
+    ]
+  },
+  "remark_md": "- 💡 備註：本檢視區間分點買超第一名為 **元大證券**（:red[**+19,819 張**]） ｜ 分點賣超第一名為 **台灣摩根士丹利**（:green[**-16,743 張**]）",
+  "trust_info": {
+    "ytd": 5948,
+    "period": 5948,
+    "d1": 0,
+    "d5": 1175,
+    "d10": 3012,
+    "d20": 10729,
+    "streak": 0,
+    "ctrl_pct": 0.3,
+    "cost": 3990.87,
+    "inv": 15767,
+    "pnl_pct": 1.48,
+    "holding_lots": 112667,
+    "holding_pct": 7.05,
+    "phase": {
+      "tier_label": "中段持股水位 (7.05%)",
+      "tier_level": "info",
+      "momentum": "近 5 日偏買超",
+      "momentum_level": "bull",
+      "holding_pct": 7.05,
+      "d20": 10729
+    }
+  },
+  "broker_diff_info": {
+    "diff_1d": 0,
+    "diff_5d": 9,
+    "neg_streak": 0,
+    "source": "追蹤39分點"
+  },
+  "margin_info": {
+    "latest_bal": 11930,
+    "chg_1d": 1319,
+    "chg_5d": 520,
+    "chg_5d_pct": 4.56,
+    "short_bal": 64,
+    "short_chg_5d": -24,
+    "short_margin_ratio": 0.54
+  },
+  "sbl_info": {
+    "latest_bal": 7996,
+    "chg_1d": -5,
+    "chg_5d": 252,
+    "chg_5d_pct": 3.25
+  },
+  "tdcc_info": {
+    "date": "2026-11-20",
+    "whale_1000_pct": 61.27,
+    "whale_1000_chg_1w": null,
+    "whale_400_pct": 71.15,
+    "whale_400_chg_1w": null,
+    "total_holders": 817443,
+    "holders_chg_1w": null
+  },
+  "concentrations": {
+    "d5": {
+      "pct": 1.11,
+      "net": 762,
+      "buy15": 9508,
+      "sell15": 8746,
+      "z_score": null,
+      "z_samples": 1
+    },
+    "d10": {
+      "pct": 2.03,
+      "net": 2641,
+      "buy15": 13343,
+      "sell15": 10702,
+      "z_score": null,
+      "z_samples": 1
+    },
+    "d20": {
+      "pct": -5.36,
+      "net": -13511,
+      "buy15": 21315,
+      "sell15": 34826,
+      "z_score": null,
+      "z_samples": 1
+    }
+  },
+  "vol_ratio_5_20": 1.09,
+  "issued_lots": 1597129.82,
   "top_buyers": {
-    "元大證券": 19819,
-    "永豐金證券": 6422,
-    "投信": 5948,
-    "統一": 4064,
-    "國票-敦北法人": 2731
+    "元大證券": 6400,
+    "臺銀": 4525,
+    "永豐金證券": 4216,
+    "國泰證券": 1962,
+    "統一": 1816
   },
   "top_sellers": {
+    "富邦證券": -13488,
+    "台灣摩根士丹利": -13007,
+    "美商高盛": -8372,
+    "摩根大通": -6399,
+    "花旗環球": -6324
+  },
+  "ytd_top_buyers": {
+    "元大證券": 19819,
+    "永豐金證券": 6422,
+    "統一": 4172,
+    "國票-敦北法人": 2799,
+    "臺銀": 2544
+  },
+  "ytd_top_sellers": {
     "台灣摩根士丹利": -16743,
-    "花旗環球": -12674,
+    "花旗環球": -12617,
     "美林": -9953,
-    "法銀巴黎": -5954,
-    "新加坡商瑞銀": -5919
+    "新加坡商瑞銀": -6214,
+    "法銀巴黎": -6043
   },
-  "today_buyers": {
-    "元大證券": 1915,
-    "台灣摩根士丹利": 725,
-    "投信": 534,
-    "凱基-信義": 442,
-    "永豐金證券": 338
-  },
-  "today_sellers": {
-    "摩根大通": -1422,
-    "港商麥格理": -409,
-    "美商高盛": -289,
-    "元大-崇德": -265,
-    "花旗環球": -195
-  },
+  "today_buyers": {},
+  "today_sellers": {},
   "stock_id": "2454",
   "stock_name": "聯發科",
   "ticker_suffix": ".TW",
-  "broker_count": 49,
-  "concentrations": {
-    "d20": {
-      "pct": -5.63,
-      "net": -14862,
-      "buy15": 22131,
-      "sell15": 36993
-    },
-    "d10": {
-      "pct": 1.32,
-      "net": 1957,
-      "buy15": 12965,
-      "sell15": 11008
-    },
-    "d5": {
-      "pct": 0.31,
-      "net": 255,
-      "buy15": 10919,
-      "sell15": 10664
+  "broker_count": 39,
+  "tdcc_history": [
+    {
+      "date": "2026-11-20",
+      "whale_1000_pct": 61.27,
+      "whale_400_pct": 71.15,
+      "total_holders": 817443
     }
-  },
-  "last_updated": "2026-11-23 20:15",
+  ],
+  "last_updated": "2026-11-24 09:32",
   "debug_notes": [],
-  "github_sync": "✅ GitHub Actions 自動增量同步（近 3 日）"
+  "github_sync": "✅ 已同步至 GitHub database/"
 }
