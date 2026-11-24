@@ -895,8 +895,14 @@ def _render_aux_dashboard(
 ) -> str:
     p = STRATEGY_PARAMS
 
-    # 1. 買賣家數差（含過期延遲標示與樣本數防呆）
-    diff_tip = "計算公式：買超分點家數 － 賣超分點家數。負值（紅）代表籌碼由散戶流向少數主力；正值（綠）代表籌碼流向散戶、趨於發散。若外部資料延遲超過 1 個交易日，將不計入今日分數。"
+    # 1. 買賣家數差（含過期延遲標示、樣本數防呆與來源連線狀態）
+    diff_diag_str = str((broker_diff_info or {}).get("diag", "")).strip()
+    diff_diag_html = f"<br><br><span style='color:#94a3b8;'>來源狀態：{diff_diag_str}</span>" if diff_diag_str else ""
+    diff_tip = (
+        "計算公式：買超分點家數 － 賣超分點家數。負值（紅）代表籌碼由散戶流向少數主力；"
+        "正值（綠）代表籌碼流向散戶、趨於發散。若外部資料延遲超過 1 個交易日，將不計入今日分數。"
+        f"{diff_diag_html}"
+    )
     if broker_diff_info:
         d5 = broker_diff_info["diff_5d"]
         d5_samples = int(broker_diff_info.get("d5_samples", 5) or 5)
@@ -927,7 +933,7 @@ def _render_aux_dashboard(
         diff_card = (
             f'<div class="aux-card">'
             f'  <div class="aux-head">'
-            f'    <span class="aux-title">🧲 買賣家數差<span class="tip-wrap tip-down">ⓘ<span class="tip-box">{diff_tip}</span></span></span>'
+            f'    <span class="aux-title">🧲 買賣家數差<span class="tip-wrap tip-down">ⓘ<span class="tip-box tip-box-wide">{diff_tip}</span></span></span>'
             f'    {b_html}'
             f'  </div>'
             f'  <div class="aux-main">{main_lbl} {_span_num(d5, " 家", invert_color=True)}</div>'
@@ -937,7 +943,7 @@ def _render_aux_dashboard(
     else:
         diff_card = (
             f'<div class="aux-card">'
-            f'  <div class="aux-head"><span class="aux-title">🧲 買賣家數差<span class="tip-wrap tip-down">ⓘ<span class="tip-box">{diff_tip}</span></span></span>{_aux_badge("待更新", "info")}</div>'
+            f'  <div class="aux-head"><span class="aux-title">🧲 買賣家數差<span class="tip-wrap tip-down">ⓘ<span class="tip-box tip-box-wide">{diff_tip}</span></span></span>{_aux_badge("待更新", "info")}</div>'
             f'  <div class="aux-main" style="color:#94a3b8;">尚無資料</div>'
             f'  <div class="aux-sub">點擊左側「🔄」補齊</div>'
             f'</div>'
@@ -1475,6 +1481,7 @@ if target_stock:
         df_aux_full=df_aux_full,
         tdcc_history=tdcc_history_saved,
         issued_lots=issued_lots_saved,
+        broker_diff_diag=meta_saved.get("broker_diff_diag", ""),
     )
     broker_count = len([c for c in df_chips_full.columns if c not in ("date", "投信")])
     concentrations = analysis.get("concentrations") or concentrations_saved
