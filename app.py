@@ -1132,7 +1132,27 @@ if target_stock:
 
     stock_title = get_stock_display_label(target_stock)
 
-    # 計算統計區間起訖日
+    # --- 盤中／盤後籌碼未公布防呆：若最新交易日籌碼全為 0，籌碼統計自動退回前一個有效交易日 ---
+    realtime_price_row = None
+    pending_chip_date = None
+    chip_cols_all = [c for c in df_chips_full.columns if c != "date"]
+    if len(df_price_full) >= 2 and not df_chips_full.empty and chip_cols_all:
+        latest_p_date = str(df_price_full["date"].max())
+        last_chip_rows = df_chips_full[df_chips_full["date"] == latest_p_date]
+        has_valid_chips = False
+        if not last_chip_rows.empty:
+            abs_sum = float(last_chip_rows[chip_cols_all].fillna(0.0).abs().sum().sum())
+            has_valid_chips = (abs_sum > 0)
+
+        if not has_valid_chips:
+            pending_chip_date = latest_p_date
+            realtime_price_row = df_price_full[df_price_full["date"] == latest_p_date].iloc[-1].to_dict()
+            df_price_full = df_price_full[df_price_full["date"] < latest_p_date].reset_index(drop=True)
+            df_chips_full = df_chips_full[df_chips_full["date"] < latest_p_date].reset_index(drop=True)
+            if df_aux_full is not None and not df_aux_full.empty:
+                df_aux_full = df_aux_full[df_aux_full["date"] < latest_p_date].reset_index(drop=True)
+
+    # 計算統計區間起訖日（以有效籌碼交易日為基準）
     min_date = df_price_full["date"].min()
     max_date = df_price_full["date"].max()
     days_map = {"今日": 1, "5日": 5, "10日": 10, "20日": 20, "60日": 60}
@@ -1143,7 +1163,10 @@ if target_stock:
         start_filter = df_price["date"].min()
         end_filter = df_price["date"].max()
         df_chips = df_chips_full[(df_chips_full["date"] >= start_filter) & (df_chips_full["date"] <= end_filter)].copy()
-        period_label = f"今日（{end_filter}）" if n_days == 1 else f"近 {n_days} 日（{start_filter} ~ {end_filter}）"
+        if n_days == 1:
+            period_label = f"最近交易日（{end_filter}）" if pending_chip_date else f"今日（{end_filter}）"
+        else:
+            period_label = f"近 {n_days} 日（{start_filter} ~ {end_filter}）"
     elif range_type == "指定日期":
         start_filter = parse_manual_date(custom_start_str, min_date)
         end_filter = parse_manual_date(custom_end_str, max_date)
@@ -1164,11 +1187,21 @@ if target_stock:
         st.warning(f"在指定區間 `{start_filter} ~ {end_filter}` 內查無交易資料，請確認輸入的日期。")
         st.stop()
 
-    # 計算區間股價漲跌幅
-    latest_close = float(df_price.iloc[-1]["close"])
-    prior_rows = df_price_full[df_price_full["date"] < start_filter]
-    base_close = float(prior_rows.iloc[-1]["close"]) if not prior_rows.empty else float(df_price.iloc[0]["close"])
-    pct_change = ((latest_close - base_close) / base_close * 100.0) if base_close else 0.0
+    # 計算區間股價漲跌幅（若有今日盤中即時報價，卡片三顯示即時價與今日漲跌，其餘籌碼對齊昨日有效日）
+    chip_close = float(df_price.iloc[-1]["close"])
+    if realtime_price_row is not None:
+        display_close = float(realtime_price_row["close"])
+        display_close_label = f"即時／最新價（{pending_chip_date}）"
+        pct_change = ((display_close - chip_close) / chip_close * 100.0) if chip_close else 0.0
+        pct_prefix = "今日漲跌："
+    else:
+        display_close = chip_close
+        display_close_label = "最新收盤價與區間漲跌"
+        prior_rows = df_price_full[df_price_full["date"] < start_filter]
+        base_close = float(prior_rows.iloc[-1]["close"]) if not prior_rows.empty else float(df_price.iloc[0]["close"])
+        pct_change = ((display_close - base_close) / base_close * 100.0) if base_close else 0.0
+        pct_prefix = "區間漲跌："
+
     if pct_change > 0:
         pct_html = f'<span style="color:#ef5350; font-weight:700;">▲ {pct_change:+.2f}%</span>'
     elif pct_change < 0:
@@ -1202,7 +1235,10 @@ if target_stock:
     # --- 標題列 ---
     updated_str = meta_saved.get("last_updated", "")
     latest_trade_date = df_price_full["date"].max()
-    time_badge = f"🕒 更新時間：{updated_str}（最新交易日：{latest_trade_date}）" if updated_str else f"🕒 最新交易日：{latest_trade_date}"
+    if pending_chip_date:
+        time_badge = f"🕒 籌碼基準日：{latest_trade_date}（{pending_chip_date} 盤後籌碼尚未公布）"
+    else:
+        time_badge = f"🕒 更新時間：{updated_str}（最新交易日：{latest_trade_date}）" if updated_str else f"🕒 最新交易日：{latest_trade_date}"
 
     st.markdown(
         f'<div style="display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; gap:8px;">'
@@ -1280,7 +1316,7 @@ if target_stock:
         unsafe_allow_html=True,
     )
 
-    # --- 區塊一之二：精簡單行價量籌碼背離警示條（不重複長篇警語，細節收進 ⓘ） ---
+    # --- 區塊一之二：精簡單行價量籌碼背離警示條（ⓘ 詳情改放標題旁並向下彈出） ---
     div_alert = analysis.get("divergence_alert")
     if div_alert:
         alert_type = div_alert.get("type", "bull")
@@ -1309,7 +1345,6 @@ if target_stock:
     z5 = analysis.get("top3_5d_ctrl_z")
     z_tip_html = build_z_tooltip_html(stock_title, ctrl5, z5)
 
-    # 消除視覺訊號打架：大格局偏空或 Z 值屬日常波動時，將「吃貨中」柔化為黃色提示
     raw_status_html = analysis.get("status_html", "N/A")
     top3_period_net = int(analysis.get("top3_period_net", 0))
     if "吃貨中" in raw_status_html:
@@ -1359,9 +1394,9 @@ if target_stock:
     with c3:
         st.markdown(f"""
         <div class="summary-card">
-            <div class="card-label">最新收盤價與區間漲跌</div>
-            <div class="card-value">{latest_close:.2f} 元</div>
-            <div class="card-sub">區間漲跌：{pct_html}<br>更新：{updated_str[:16] if updated_str else latest_trade_date}</div>
+            <div class="card-label">{display_close_label}</div>
+            <div class="card-value">{display_close:.2f} 元</div>
+            <div class="card-sub">{pct_prefix}{pct_html}<br>籌碼日：{latest_trade_date}</div>
         </div>
         """, unsafe_allow_html=True)
 
