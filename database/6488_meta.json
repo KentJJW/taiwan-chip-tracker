@@ -23,21 +23,26 @@
       },
       {
         "level": "bear",
-        "label": "💸 籌碼渙散（5日家數差 +5）",
+        "label": "💸 籌碼渙散（5日家數差 +385）",
         "detail": "少數大戶賣出、多數散戶接手，典型籌碼發散格局 (-6 分)。"
       },
       {
-        "level": "bear",
-        "label": "🏦 投信結帳調節（連賣17日）",
-        "detail": "投信近 5 日賣超 -3,631 張（持股30.8%），法人籌碼持續流出 (-6 分)。"
+        "level": "bull",
+        "label": "🔥 投信初升認養（連買21日｜持股3.7%）",
+        "detail": "投信連續買超且真實持股仍在 5% 以下甜蜜區間，籌碼鎖定度高 (+6 分)。"
+      },
+      {
+        "level": "bull",
+        "label": "🚀 借券回補（5日 -1,397張 / -12.0%）",
+        "detail": "機構空方回補借券（-12.0%、佔5日量 3.6%），空單籌碼壓力顯著減輕 (+5 分)。"
       }
     ],
-    "conviction_score": 30,
+    "conviction_score": 47,
     "score_breakdown": {
       "base": 50,
       "conc_diff": -14,
-      "wave_trust": -6,
-      "credit_sbl": 0,
+      "wave_trust": 6,
+      "credit_sbl": 5,
       "tdcc": 0,
       "day_trade": 0
     },
@@ -105,9 +110,6 @@
     ],
     "凱基-市政": [
       "🏆贏家(70%)"
-    ],
-    "富邦-虎尾": [
-      "⚡隔日沖"
     ]
   },
   "top3_names": [
@@ -172,35 +174,52 @@
   ],
   "remark_md": "- 💡 備註：本檢視區間分點買超第一名為 **美商高盛**（:red[**+9,382 張**]） ｜ 分點賣超第一名為 **港商麥格理**（:green[**-10,632 張**]）",
   "trust_info": {
-    "ytd": 10378,
-    "period": 10378,
-    "d1": -130,
-    "d5": -3631,
-    "d10": -6250,
-    "d20": -13504,
-    "streak": -17,
-    "ctrl_pct": 0.6,
-    "cost": 0.0,
-    "inv": 0,
-    "pnl_pct": null,
-    "holding_pct": 30.82,
+    "ytd": 6678781,
+    "period": 6678781,
+    "d1": 19431,
+    "d5": 102303,
+    "d10": 225183,
+    "d20": 522912,
+    "streak": 21,
+    "ctrl_pct": 365.8,
+    "cost": 880.13,
+    "inv": 1860084,
+    "pnl_pct": -42.51,
+    "holding_pct": 3.68,
     "phase": {
-      "tier_label": "高水位警戒 (30.82%)",
-      "tier_level": "warn",
-      "momentum": "連賣 17 日調節／結帳",
-      "momentum_level": "bear",
-      "holding_pct": 30.82,
-      "d20": -13504
+      "tier_label": "初升認養甜蜜期 (3.68%)",
+      "tier_level": "bull",
+      "momentum": "連買 21 日認養中",
+      "momentum_level": "bull",
+      "holding_pct": 3.68,
+      "d20": 522912
     }
   },
   "broker_diff_info": {
-    "diff_5d": 5,
-    "diff_1d": -6,
-    "neg_streak": 1,
-    "source": "追蹤47分點"
+    "diff_5d": 385,
+    "diff_1d": 85,
+    "neg_streak": 0,
+    "source": "全市場家數差"
   },
-  "margin_info": null,
-  "sbl_info": null,
+  "margin_info": {
+    "latest_bal": 8327,
+    "chg_5d": -515,
+    "chg_5d_pct": -5.82,
+    "chg_5d_z": -0.18,
+    "chg_5d_vol_pct": 1.34,
+    "short_bal": 113,
+    "short_margin_ratio": 1.36,
+    "quadrant": 0,
+    "domestic_top_buy_5d": 1035
+  },
+  "sbl_info": {
+    "latest_bal": 10228,
+    "chg_5d": -1397,
+    "chg_5d_pct": -12.02,
+    "chg_5d_z": -0.18,
+    "chg_5d_vol_pct": 3.65,
+    "chg_1d": -485
+  },
   "tdcc_info": {
     "date": "2026-11-20",
     "whale_1000_pct": 65.59,
@@ -357,7 +376,7 @@
     "富邦證券": 80,
     "元大證券": 23,
     "新光": 5,
-    "國泰證券": 4
+    "玉山證券": 4
   },
   "today_sellers": {
     "永豐金證券": -130,
@@ -370,7 +389,7 @@
   "stock_name": "環球晶",
   "ticker_suffix": ".TWO",
   "issued_lots": 528113.72,
-  "broker_count": 47,
+  "broker_count": 38,
   "tracked_brokers": {
     "美商高盛": {
       "bhid": "1480",
@@ -523,42 +542,6 @@
     "凱基-市政": {
       "bhid": "9200",
       "b": "9239"
-    },
-    "日茂": {
-      "bhid": "5960",
-      "b": "5960"
-    },
-    "第一金-華江": {
-      "bhid": "5380",
-      "b": "0035003300380057"
-    },
-    "永全-南崁": {
-      "bhid": "6450",
-      "b": "6451"
-    },
-    "富邦-虎尾": {
-      "bhid": "9600",
-      "b": "9697"
-    },
-    "富邦-台中": {
-      "bhid": "9600",
-      "b": "003900360035004b"
-    },
-    "永豐金-忠孝": {
-      "bhid": "9A00",
-      "b": "0039004100390044"
-    },
-    "德信": {
-      "bhid": "6910",
-      "b": "6910"
-    },
-    "國泰-台中": {
-      "bhid": "8880",
-      "b": "8882"
-    },
-    "富邦-台北": {
-      "bhid": "9600",
-      "b": "9623"
     }
   },
   "tdcc_history": [
@@ -569,7 +552,7 @@
       "total_holders": 179231
     }
   ],
-  "last_updated": "2026-11-24 17:39",
+  "last_updated": "2026-11-24 18:04",
   "debug_notes": [],
-  "github_sync": "✅ 已單次打包同步（全部更新 1 檔）"
+  "github_sync": "✅ 準備打包同步至 GitHub database/"
 }
