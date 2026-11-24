@@ -91,6 +91,37 @@ def _fetch_dj_html(session: requests.Session, path_with_query: str, preferred_mi
     return "", None, " | ".join(errors[:2])
 
 
+def _fetch_dj_parsed(
+    session: requests.Session,
+    candidate_paths: list[str],
+    parser_fn,
+    preferred_mirror: str = None,
+    timeout: int = 6,
+):
+    """
+    依序嘗試多個候選網址與鏡像站，直到 parser_fn 成功解析出非空資料為止，
+    避免網站回傳 HTTP 200 的空表格框架時提早結束而跳過備援網址。
+    """
+    mirrors = [preferred_mirror] + [m for m in DJ_MIRRORS if m != preferred_mirror] if preferred_mirror else DJ_MIRRORS
+    last_err = ""
+    for path in candidate_paths:
+        for base_url in mirrors:
+            url = f"{base_url}{path}"
+            try:
+                resp = session.get(url, headers={"Referer": f"{base_url}/"}, timeout=timeout, verify=False)
+                if resp.status_code != 200 or len(resp.content) <= 500:
+                    last_err = f"{base_url}: HTTP {resp.status_code}"
+                    continue
+                resp.encoding = "cp950"
+                records = parser_fn(resp.text)
+                if records:
+                    return records, base_url, ""
+                last_err = f"{base_url}{path}: 表格無有效資料列"
+            except Exception as e:
+                last_err = f"{base_url}: {type(e).__name__}"
+    return [], preferred_mirror, last_err
+
+
 def _parse_dj_date(date_str: str) -> str:
     """同時支援西元年 (2026/11/20) 與民國年 (115/11/20)，統一轉為 YYYY-MM-DD"""
     s = date_str.strip().replace("-", "/")
@@ -200,7 +231,6 @@ def calculate_main_force_cost(
             cost_list.append(None)
             continue
 
-        # 偵測除權息日：若 adj_factor 發生跳變（> 0.1%），等比例調整既有庫存成本
         if prev_adj is not None and prev_adj > 0 and cur_adj > 0 and inv > 0 and avg_cost > 0:
             ratio = float(prev_adj) / float(cur_adj)
             if abs(ratio - 1.0) > 0.001:
@@ -444,61 +474,49 @@ def fetch_issued_lots(stock_id: str, preferred_suffix: str = None) -> float:
 def fetch_investment_trust_history(session: requests.Session, stock_id: str, start_date: str, end_date: str, mirror: str = None):
     """
     從 MoneyDJ zcl.djhtm 抓取「投信」每日淨買賣超(張)，
-    並透過動態表頭解析同步取得「投信真實持股張數 (trust_holding)」與「投信持股比率 (trust_holding_pct)」。
+    並同步取得「投信真實持股張數 (trust_holding)」與「投信持股比率 (trust_holding_pct)」。
     """
     s_fmt = _format_dj_date(start_date)
     e_fmt = _format_dj_date(end_date)
-    html, ok_mirror, err = _fetch_dj_html(session, f"/z/zc/zcl/zcl.djhtm?a={stock_id}&c={s_fmt}&d={e_fmt}", mirror)
-    if not html:
-        return pd.DataFrame(columns=["date", "投信", "trust_holding", "trust_holding_pct"]), mirror, err
+    candidate_paths = [
+        f"/z/zc/zcl/zcl.djhtm?a={stock_id}&b={s_fmt}&c={e_fmt}",
+        f"/z/zc/zcl/zcl.djhtm?a={stock_id}&c={s_fmt}&d={e_fmt}",
+        f"/z/zc/zcl/zcl.djhtm?a={stock_id}",
+    ]
 
-    soup = BeautifulSoup(html, "html.parser")
+    def _parse_zcl(html: str) -> list[dict]:
+        soup = BeautifulSoup(html, "html.parser")
+        rows = []
+        for tr in soup.find_all("tr"):
+            tds = [td.get_text(strip=True) for td in tr.find_all("td")]
+            if len(tds) < 4:
+                continue
+            ad_date = _parse_dj_date(tds[0])
+            if not (ad_date and start_date <= ad_date <= end_date):
+                continue
+            # MoneyDJ zcl.djhtm 資料列固定結構：
+            # [0]日期 [1]外資買賣超 [2]投信買賣超 [3]自營商買賣超 [4]合計
+            # [5]外資持股 [6]投信持股 [7]自營商持股 [8]外資持股比 [9]投信持股比
+            net_val = _to_clean_float(tds[2])
+            if net_val is None:
+                continue
+            hold_val = _to_clean_float(tds[6]) if len(tds) >= 10 else np.nan
+            pct_val = _to_clean_float(tds[9]) if len(tds) >= 10 else np.nan
+            if hold_val is not None and not pd.isna(hold_val) and hold_val < 0:
+                hold_val = np.nan
+            if pct_val is not None and not pd.isna(pct_val) and not (0.0 <= pct_val <= 100.0):
+                pct_val = np.nan
+            rows.append({
+                "date": ad_date,
+                "投信": net_val,
+                "trust_holding": hold_val if hold_val is not None else np.nan,
+                "trust_holding_pct": pct_val if pct_val is not None else np.nan,
+            })
+        return rows
 
-    idx_trust_net = 2
-    idx_trust_hold = None
-    idx_trust_pct = None
-
-    for tr in soup.find_all("tr"):
-        cells = [c.get_text(strip=True).replace(" ", "") for c in tr.find_all(["th", "td"])]
-        if any("日期" in c for c in cells) and any("投信" in c for c in cells):
-            for i, txt in enumerate(cells):
-                if "投信" in txt and ("買賣超" in txt or "買賣" in txt or txt == "投信"):
-                    idx_trust_net = i
-                elif "投信" in txt and ("持股" in txt or "庫存" in txt) and ("比" not in txt and "%" not in txt):
-                    idx_trust_hold = i
-                elif "投信" in txt and ("比" in txt or "%" in txt):
-                    idx_trust_pct = i
-            break
-
-    records = []
-    for tr in soup.find_all("tr"):
-        tds = [td.get_text(strip=True) for td in tr.find_all("td")]
-        if len(tds) <= idx_trust_net:
-            continue
-        ad_date = _parse_dj_date(tds[0])
-        if not (ad_date and start_date <= ad_date <= end_date):
-            continue
-        net_val = _to_clean_float(tds[idx_trust_net])
-        if net_val is None:
-            continue
-
-        hold_val = _to_clean_float(tds[idx_trust_hold]) if (idx_trust_hold is not None and idx_trust_hold < len(tds)) else np.nan
-        pct_val = _to_clean_float(tds[idx_trust_pct]) if (idx_trust_pct is not None and idx_trust_pct < len(tds)) else np.nan
-
-        if hold_val is not None and not pd.isna(hold_val) and hold_val < 0:
-            hold_val = np.nan
-        if pct_val is not None and not pd.isna(pct_val) and not (0.0 <= pct_val <= 100.0):
-            pct_val = np.nan
-
-        records.append({
-            "date": ad_date,
-            "投信": net_val,
-            "trust_holding": hold_val if hold_val is not None else np.nan,
-            "trust_holding_pct": pct_val if pct_val is not None else np.nan,
-        })
-
+    records, ok_mirror, err = _fetch_dj_parsed(session, candidate_paths, _parse_zcl, mirror)
     if not records:
-        return pd.DataFrame(columns=["date", "投信", "trust_holding", "trust_holding_pct"]), ok_mirror, "投信表格無資料"
+        return pd.DataFrame(columns=["date", "投信", "trust_holding", "trust_holding_pct"]), ok_mirror, err or "投信表格無資料"
 
     df = pd.DataFrame(records).drop_duplicates(subset=["date"], keep="last").sort_values("date").reset_index(drop=True)
     return df, ok_mirror, ""
@@ -684,105 +702,116 @@ def fetch_broker_diff_history(session: requests.Session, stock_id: str, start_da
     """從 MoneyDJ 抓取每日「買超家數 － 賣超家數」"""
     s_fmt = _format_dj_date(start_date)
     e_fmt = _format_dj_date(end_date)
-    html, _, _ = _fetch_dj_html(session, f"/z/zc/zco/zco2/zco2.djhtm?a={stock_id}&c={s_fmt}&d={e_fmt}", mirror, timeout=6)
-    if not html:
-        html, _, _ = _fetch_dj_html(session, f"/z/zc/zco/zco2/zco2.djhtm?a={stock_id}", mirror, timeout=6)
-    if not html:
-        return pd.DataFrame(columns=["date", "broker_diff"])
+    candidate_paths = [
+        f"/z/zc/zco/zco2/zco2.djhtm?a={stock_id}&c={s_fmt}&d={e_fmt}",
+        f"/z/zc/zco/zco2/zco2.djhtm?a={stock_id}",
+    ]
 
-    soup = BeautifulSoup(html, "html.parser")
-    records = []
-    for tr in soup.find_all("tr"):
-        tds = [td.get_text(strip=True) for td in tr.find_all("td")]
-        if len(tds) >= 4:
-            ad_date = _parse_dj_date(tds[0])
-            if ad_date and start_date <= ad_date <= end_date:
-                buy_cnt = _to_clean_float(tds[1])
-                sell_cnt = _to_clean_float(tds[2])
-                if buy_cnt is not None and sell_cnt is not None:
-                    records.append({"date": ad_date, "broker_diff": int(round(buy_cnt - sell_cnt))})
+    def _parse_zco2(html: str) -> list[dict]:
+        soup = BeautifulSoup(html, "html.parser")
+        rows = []
+        for tr in soup.find_all("tr"):
+            tds = [td.get_text(strip=True) for td in tr.find_all("td")]
+            if len(tds) >= 4:
+                ad_date = _parse_dj_date(tds[0])
+                if ad_date and start_date <= ad_date <= end_date:
+                    buy_cnt = _to_clean_float(tds[1])
+                    sell_cnt = _to_clean_float(tds[2])
+                    if buy_cnt is not None and sell_cnt is not None:
+                        rows.append({"date": ad_date, "broker_diff": int(round(buy_cnt - sell_cnt))})
+        return rows
 
+    records, _, _ = _fetch_dj_parsed(session, candidate_paths, _parse_zco2, mirror)
     if not records:
         return pd.DataFrame(columns=["date", "broker_diff"])
     return pd.DataFrame(records).drop_duplicates(subset=["date"]).sort_values("date").reset_index(drop=True)
 
 
 def fetch_margin_history(session: requests.Session, stock_id: str, start_date: str, end_date: str, mirror: str = None) -> pd.DataFrame:
-    """從 MoneyDJ 抓取每日融資餘額(張)與融券餘額(張)（動態表頭解析＋數值防呆）"""
+    """從 MoneyDJ 抓取每日融資餘額(張)與融券餘額(張)（支援多候補網址＋rowspan 表頭校準）"""
     s_fmt = _format_dj_date(start_date)
     e_fmt = _format_dj_date(end_date)
-    html, _, _ = _fetch_dj_html(session, f"/z/zc/zcn/zcn.djhtm?a={stock_id}&c={s_fmt}&d={e_fmt}", mirror, timeout=6)
-    if not html:
-        html, _, _ = _fetch_dj_html(session, f"/z/zc/zcn/zcn.djhtm?a={stock_id}", mirror, timeout=6)
-    if not html:
-        return pd.DataFrame(columns=["date", "margin_bal", "short_bal"])
+    candidate_paths = [
+        f"/z/zc/zcn/zcn.djhtm?a={stock_id}&b={s_fmt}&c={e_fmt}",
+        f"/z/zc/zcn/zcn.djhtm?a={stock_id}&c={s_fmt}&d={e_fmt}",
+        f"/z/zc/zcn/zcn.djhtm?a={stock_id}",
+    ]
 
-    soup = BeautifulSoup(html, "html.parser")
+    def _parse_zcn(html: str) -> list[dict]:
+        soup = BeautifulSoup(html, "html.parser")
+        # MoneyDJ zcn.djhtm 標準資料列：[0]日期 [1]買進 [2]賣出 [3]現償 [4]融資餘額 [5]增減 [6]使用率 [7]融券買進 [8]融券賣出 [9]券償 [10]融券餘額 ...
+        idx_margin = 4
+        idx_short = 10
+        for tr in soup.find_all("tr"):
+            cells = [c.get_text(strip=True).replace(" ", "") for c in tr.find_all(["th", "td"])]
+            if any("餘額" in c for c in cells) and len(cells) >= 10:
+                bal_indices = [i for i, txt in enumerate(cells) if "餘額" in txt and "增減" not in txt]
+                if len(bal_indices) >= 2:
+                    # 若表頭第一欄不含「日期」（代表「日期」在前一列使用 rowspan=2），欄位索引須 +1 對齊資料列
+                    offset = 0 if any("日期" in c for c in cells[:2]) else 1
+                    idx_margin = bal_indices[0] + offset
+                    idx_short = bal_indices[1] + offset
+                break
 
-    idx_margin = 4
-    idx_short = 11
-    for tr in soup.find_all("tr"):
-        cells = [c.get_text(strip=True).replace(" ", "") for c in tr.find_all(["th", "td"])]
-        if any("餘額" in c for c in cells) and len(cells) >= 10:
-            bal_indices = [i for i, txt in enumerate(cells) if "餘額" in txt and "增減" not in txt]
-            if len(bal_indices) >= 2:
-                idx_margin, idx_short = bal_indices[0], bal_indices[1]
-            break
+        rows = []
+        for tr in soup.find_all("tr"):
+            tds = [td.get_text(strip=True) for td in tr.find_all("td")]
+            if len(tds) <= max(idx_margin, idx_short):
+                continue
+            ad_date = _parse_dj_date(tds[0])
+            if ad_date and start_date <= ad_date <= end_date:
+                m_bal = _to_clean_float(tds[idx_margin])
+                s_bal = _to_clean_float(tds[idx_short])
+                if m_bal is not None and s_bal is not None and m_bal >= 0 and s_bal >= 0:
+                    rows.append({"date": ad_date, "margin_bal": m_bal, "short_bal": s_bal})
+        return rows
 
-    records = []
-    for tr in soup.find_all("tr"):
-        tds = [td.get_text(strip=True) for td in tr.find_all("td")]
-        if len(tds) <= max(idx_margin, idx_short):
-            continue
-        ad_date = _parse_dj_date(tds[0])
-        if ad_date and start_date <= ad_date <= end_date:
-            m_bal = _to_clean_float(tds[idx_margin])
-            s_bal = _to_clean_float(tds[idx_short])
-            if m_bal is not None and s_bal is not None and m_bal >= 0 and s_bal >= 0:
-                records.append({"date": ad_date, "margin_bal": m_bal, "short_bal": s_bal})
-
+    records, _, _ = _fetch_dj_parsed(session, candidate_paths, _parse_zcn, mirror)
     if not records:
         return pd.DataFrame(columns=["date", "margin_bal", "short_bal"])
     return pd.DataFrame(records).drop_duplicates(subset=["date"]).sort_values("date").reset_index(drop=True)
 
 
 def fetch_sbl_history(session: requests.Session, stock_id: str, start_date: str, end_date: str, mirror: str = None) -> pd.DataFrame:
-    """從 MoneyDJ 抓取每日借券賣出餘額(張)（動態表頭解析＋數值防呆）"""
+    """從 MoneyDJ 抓取每日借券賣出餘額(張)（支援多候補網址＋rowspan 表頭校準）"""
     s_fmt = _format_dj_date(start_date)
     e_fmt = _format_dj_date(end_date)
-    html, _, _ = _fetch_dj_html(session, f"/z/zc/zcn/zcn0.djhtm?a={stock_id}&c={s_fmt}&d={e_fmt}", mirror, timeout=6)
-    if not html:
-        html, _, _ = _fetch_dj_html(session, f"/z/zc/zcn/zcn0.djhtm?a={stock_id}", mirror, timeout=6)
-    if not html:
-        return pd.DataFrame(columns=["date", "sbl_bal"])
+    candidate_paths = [
+        f"/z/zc/zcn/zcn0.djhtm?a={stock_id}&b={s_fmt}&c={e_fmt}",
+        f"/z/zc/zcn/zcn0.djhtm?a={stock_id}&c={s_fmt}&d={e_fmt}",
+        f"/z/zc/zcn/zcn0.djhtm?a={stock_id}",
+    ]
 
-    soup = BeautifulSoup(html, "html.parser")
+    def _parse_zcn0(html: str) -> list[dict]:
+        soup = BeautifulSoup(html, "html.parser")
+        idx_sbl = 6
+        for tr in soup.find_all("tr"):
+            cells = [c.get_text(strip=True).replace(" ", "") for c in tr.find_all(["th", "td"])]
+            if any("餘額" in c for c in cells) and len(cells) >= 6:
+                offset = 0 if any("日期" in c for c in cells[:2]) else 1
+                for i, txt in enumerate(cells):
+                    if "借券" in txt and "餘額" in txt:
+                        idx_sbl = i + offset
+                        break
+                else:
+                    bal_indices = [i for i, txt in enumerate(cells) if "餘額" in txt and "增減" not in txt]
+                    if bal_indices:
+                        idx_sbl = bal_indices[-1] + offset
+                break
 
-    idx_sbl = 6
-    for tr in soup.find_all("tr"):
-        cells = [c.get_text(strip=True).replace(" ", "") for c in tr.find_all(["th", "td"])]
-        if any("日期" in c for c in cells) and any("餘額" in c for c in cells):
-            for i, txt in enumerate(cells):
-                if "借券" in txt and "餘額" in txt:
-                    idx_sbl = i
-                    break
-            else:
-                bal_indices = [i for i, txt in enumerate(cells) if "餘額" in txt]
-                if bal_indices:
-                    idx_sbl = bal_indices[-1]
-            break
+        rows = []
+        for tr in soup.find_all("tr"):
+            tds = [td.get_text(strip=True) for td in tr.find_all("td")]
+            if len(tds) <= idx_sbl:
+                continue
+            ad_date = _parse_dj_date(tds[0])
+            if ad_date and start_date <= ad_date <= end_date:
+                sbl_bal = _to_clean_float(tds[idx_sbl])
+                if sbl_bal is not None and sbl_bal >= 0:
+                    rows.append({"date": ad_date, "sbl_bal": sbl_bal})
+        return rows
 
-    records = []
-    for tr in soup.find_all("tr"):
-        tds = [td.get_text(strip=True) for td in tr.find_all("td")]
-        if len(tds) <= idx_sbl:
-            continue
-        ad_date = _parse_dj_date(tds[0])
-        if ad_date and start_date <= ad_date <= end_date:
-            sbl_bal = _to_clean_float(tds[idx_sbl])
-            if sbl_bal is not None and sbl_bal >= 0:
-                records.append({"date": ad_date, "sbl_bal": sbl_bal})
-
+    records, _, _ = _fetch_dj_parsed(session, candidate_paths, _parse_zcn0, mirror)
     if not records:
         return pd.DataFrame(columns=["date", "sbl_bal"])
     return pd.DataFrame(records).drop_duplicates(subset=["date"]).sort_values("date").reset_index(drop=True)
@@ -1139,7 +1168,6 @@ def analyze_main_force(
     broker_tags = {k: v["tags"] for k, v in profiles.items() if v.get("tags")}
     top3_names, filtered_dt = select_wave_main_forces(profiles, top_n=3, exclude_day_traders=True)
 
-    # 計算近 5 日前三大本土波段分點買超張數（排除外資與隔日沖，用於交叉確認「主力融資點火」）
     dom_5d_buys = sorted(
         [v["net_5d"] for v in profiles.values() if not v.get("is_foreign") and not v.get("is_day_trader") and v["net_5d"] > 0],
         reverse=True,
@@ -1283,7 +1311,6 @@ def analyze_main_force(
     rolling_5d_ctrl_series = (rolling_5d_net / rolling_5d_vol) * 100.0
     top3_5d_ctrl_z = compute_rolling_zscore(rolling_5d_ctrl_series, window=z_win, min_periods=15)
 
-    # 近 5 日漲跌幅僅供「價量背離視覺警示條」參考，不介入純籌碼評分
     price_5d_pct = 0.0
     if len(full_price) >= 5:
         close_now = float(full_price.iloc[-1]["close"])
@@ -1397,7 +1424,6 @@ def compute_daily_health_scores(
     """
     向量化回算今年每一個交易日的「純籌碼健康分數 (0~100)」與對應狀態：
     - 100% 撇除均線與漲跌，與即時看板套用同一套五層純籌碼評分規則
-    - 同步計入每日隔日沖佔比、融資四象限（含相對量能與本土買超）與借券 Z-Score
     """
     if df_price_full is None or df_price_full.empty or df_chips_full is None or df_chips_full.empty:
         return pd.DataFrame(columns=["date", "health_score", "scenario_id", "sub_type"])
@@ -1468,7 +1494,6 @@ def compute_daily_health_scores(
     z_win = STRATEGY_PARAMS["zscore_window"]
     tdcc_list = sorted(tdcc_history, key=lambda x: x.get("date", "")) if isinstance(tdcc_history, list) else []
 
-    # 預計算每日投信連買／連賣天數與家數差連負天數
     trust_streak_arr = np.zeros(n, dtype=int)
     diff_neg_streak_arr = np.zeros(n, dtype=int)
     cur_ts = 0
@@ -1504,7 +1529,6 @@ def compute_daily_health_scores(
             records.append({"date": dt_str, "health_score": np.nan, "scenario_id": 0, "sub_type": ""})
             continue
 
-        # 1. 當日滾動 60 日三大波段主力
         w_start = max(0, i - lb + 1)
         sum_60 = chips_mat[w_start : i + 1].sum(axis=0)
         pos_idx = np.where(sum_60 > 0)[0]
@@ -1523,7 +1547,6 @@ def compute_daily_health_scores(
         top3_5d_amt = float((top3_daily[s5_start : i + 1] * vwap_arr[s5_start : i + 1] * 1000.0).sum())
         top3_5d_flt = round((top3_5d / issued_lots * 100.0), 2) if issued_lots > 0 else None
 
-        # 向量化計算三大主力控盤率與 5 日集中度之 60 日 Z-Score
         top3_5d_z = None
         if i >= 14:
             z_s = max(4, i - z_win + 1)
@@ -1536,7 +1559,6 @@ def compute_daily_health_scores(
 
         c5_z = _slice_zscore(c5_arr, i)
 
-        # 2. 當日隔日沖佔比與近 5 日本土波段買超
         dt_info_i = None
         if dt_mat.shape[1] > 0 and vol_arr[i] > 0:
             row_dt = dt_mat[i]
@@ -1556,7 +1578,6 @@ def compute_daily_health_scores(
             if len(pos_dom) > 0:
                 dom_buy_5d = int(round(np.sort(pos_dom)[::-1][:3].sum()))
 
-        # 3. 投信當日狀態（採用真實持股比率）
         t_hold_i = None
         if not np.isnan(trust_pct_arr[i]):
             t_hold_i = round(float(trust_pct_arr[i]), 2)
@@ -1570,7 +1591,6 @@ def compute_daily_health_scores(
             "holding_pct": t_hold_i,
         }
 
-        # 4. 輔助籌碼當日狀態（含相對量能比率與 Z-Score）
         bd_i = None
         if not np.isnan(diff_arr[i]):
             sub_d = diff_arr[s5_start : i + 1]
