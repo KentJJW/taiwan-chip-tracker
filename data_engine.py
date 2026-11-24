@@ -19,6 +19,7 @@ from strategy import (
     DAY_TRADE_BROKERS,
     STRATEGY_PARAMS,
     SCENARIO_MATRIX,
+    is_foreign_broker,
     compute_rolling_zscore,
     profile_brokers,
     select_wave_main_forces,
@@ -169,7 +170,7 @@ def calculate_main_force_cost(
     window_days: int | None = None,
 ) -> tuple[pd.Series, float, float]:
     """
-    移動加權平均成本法：
+    移動加權平均成本法（純視覺參考線用）：
     - 優先使用每日真實 VWAP
     - 若 df_price 含有 adj_factor（來自還原權息比率），遇除權息日自動對歷史 avg_cost 做等比例校正
     """
@@ -453,7 +454,6 @@ def fetch_investment_trust_history(session: requests.Session, stock_id: str, sta
 
     soup = BeautifulSoup(html, "html.parser")
 
-    # 動態偵測欄位索引（預設相容標準 zcl.djhtm 結構）
     idx_trust_net = 2
     idx_trust_hold = None
     idx_trust_pct = None
@@ -485,7 +485,6 @@ def fetch_investment_trust_history(session: requests.Session, stock_id: str, sta
         hold_val = _to_clean_float(tds[idx_trust_hold]) if (idx_trust_hold is not None and idx_trust_hold < len(tds)) else np.nan
         pct_val = _to_clean_float(tds[idx_trust_pct]) if (idx_trust_pct is not None and idx_trust_pct < len(tds)) else np.nan
 
-        # 數值合理性防呆
         if hold_val is not None and not pd.isna(hold_val) and hold_val < 0:
             hold_val = np.nan
         if pct_val is not None and not pd.isna(pct_val) and not (0.0 <= pct_val <= 100.0):
@@ -720,7 +719,6 @@ def fetch_margin_history(session: requests.Session, stock_id: str, start_date: s
 
     soup = BeautifulSoup(html, "html.parser")
 
-    # 動態偵測「餘額」欄位索引（通常表頭會有兩次「餘額」：前者融資餘額、後者融券餘額）
     idx_margin = 4
     idx_short = 11
     for tr in soup.find_all("tr"):
@@ -919,7 +917,7 @@ def _populate_aux_concentrations(
 
 
 # =====================================================================
-# 核心分析引擎（單日診斷 ＋ 全年度每日健康分數向量化回算）
+# 核心分析引擎（純籌碼單日診斷 ＋ 全年度每日純籌碼健康分數向量化回算）
 # =====================================================================
 def analyze_main_force(
     df_price: pd.DataFrame,
@@ -932,7 +930,7 @@ def analyze_main_force(
     tdcc_history: list = None,
     issued_lots: float = 0.0,
 ) -> dict:
-    """整合滾動 60 日波段主力、投信獨立追蹤（真實持股比）、四大輔助籌碼、Z-Score 與五大劇本"""
+    """整合滾動 60 日波段主力、投信真實持股比、融資四象限、借券、集保與 100% 純籌碼健康評分"""
     all_cols = [c for c in df_chips.columns if c != "date"]
     pure_broker_cols = [c for c in all_cols if c != "投信"]
 
@@ -966,7 +964,13 @@ def analyze_main_force(
             "status_html": "⚪ 無法判定",
             "status_sub": "",
             "divergence_alert": None,
-            "scenario": {"id": 0, "type": "neutral", "sub_type": "無資料", "title": "⚪ 無資料", "desc": "", "action": "", "badges": [], "conviction_score": 50},
+            "scenario": {
+                "id": 0, "type": "neutral", "sub_type": "無資料",
+                "title": "⚪ 無資料", "desc": "", "action": "",
+                "badges": [], "conviction_score": 50,
+                "score_breakdown": {"base": 50, "conc_diff": 0, "wave_trust": 0, "credit_sbl": 0, "tdcc": 0, "day_trade": 0},
+                "margin_quadrant": 0,
+            },
             "concentrations": conc_out,
             "broker_tags": {},
             "top3_names": [],
@@ -994,8 +998,10 @@ def analyze_main_force(
         }
 
     period_vol = float(df_price["volume"].sum()) if "volume" in df_price.columns else 0.0
+    vol_5d = float(full_price.tail(5)["volume"].sum()) if "volume" in full_price.columns else 0.0
     latest_close_full = float(full_price.iloc[-1]["close"])
     lb_days = STRATEGY_PARAMS["wave_lookback_days"]
+    z_win = STRATEGY_PARAMS["zscore_window"]
 
     # --- 2. 投信獨立追蹤（優先採用 _aux.csv 的真實持股比率） ---
     trust_info = None
@@ -1013,7 +1019,6 @@ def analyze_main_force(
         _, t_cost, t_inv = calculate_main_force_cost(merged_trust, merged_trust["投信"], window_days=lb_days)
         t_pnl = round((latest_close_full - t_cost) / t_cost * 100.0, 2) if (t_cost > 0 and t_inv > 0) else None
 
-        # 優先讀取真實投信持股比率，其次以真實持股張數 ÷ 股本計算，最後才降級回 None（不再誤用 t_ytd）
         holding_pct = None
         if df_aux_full is not None and not df_aux_full.empty:
             if "trust_holding_pct" in df_aux_full.columns:
@@ -1041,7 +1046,7 @@ def analyze_main_force(
         }
         trust_info["phase"] = evaluate_trust_phase(trust_info)
 
-    # --- 3. 整理四大輔助籌碼 ---
+    # --- 3. 整理四大輔助籌碼（補齊 5 日佔成交量比率與 60 日 Z-Score） ---
     broker_diff_info = None
     margin_info = None
     sbl_info = None
@@ -1082,14 +1087,19 @@ def analyze_main_force(
                 base_m = float(s_m.iloc[-6]) if len(s_m) >= 6 else float(s_m.iloc[0])
                 chg_5d = int(round(latest_m - base_m))
                 chg_5d_pct = round((chg_5d / base_m * 100.0), 2) if base_m > 0 else 0.0
+                chg_5d_z = compute_rolling_zscore(s_m.diff(5), window=z_win, min_periods=15)
+                chg_5d_vol_pct = round((abs(chg_5d) / vol_5d * 100.0), 2) if vol_5d > 0 else None
                 latest_s = int(round(s_s.iloc[-1])) if not s_s.empty else 0
                 sm_ratio = round((latest_s / latest_m * 100.0), 2) if latest_m > 0 else 0.0
                 margin_info = {
                     "latest_bal": latest_m,
                     "chg_5d": chg_5d,
                     "chg_5d_pct": chg_5d_pct,
+                    "chg_5d_z": chg_5d_z,
+                    "chg_5d_vol_pct": chg_5d_vol_pct,
                     "short_bal": latest_s,
                     "short_margin_ratio": sm_ratio,
+                    "quadrant": 0,
                 }
 
         if "sbl_bal" in df_aux_full.columns and df_aux_full["sbl_bal"].notna().any():
@@ -1099,11 +1109,15 @@ def analyze_main_force(
                 base_sbl = float(s_sbl.iloc[-6]) if len(s_sbl) >= 6 else float(s_sbl.iloc[0])
                 chg_5d = int(round(latest_sbl - base_sbl))
                 chg_5d_pct = round((chg_5d / base_sbl * 100.0), 2) if base_sbl > 0 else 0.0
+                chg_5d_z = compute_rolling_zscore(s_sbl.diff(5), window=z_win, min_periods=15)
+                chg_5d_vol_pct = round((abs(chg_5d) / vol_5d * 100.0), 2) if vol_5d > 0 else None
                 chg_1d = int(round(latest_sbl - float(s_sbl.iloc[-2]))) if len(s_sbl) >= 2 else 0
                 sbl_info = {
                     "latest_bal": latest_sbl,
                     "chg_5d": chg_5d,
                     "chg_5d_pct": chg_5d_pct,
+                    "chg_5d_z": chg_5d_z,
+                    "chg_5d_vol_pct": chg_5d_vol_pct,
                     "chg_1d": chg_1d,
                 }
 
@@ -1124,6 +1138,15 @@ def analyze_main_force(
     profiles = profile_brokers(full_price, full_df, lookback_days=lb_days)
     broker_tags = {k: v["tags"] for k, v in profiles.items() if v.get("tags")}
     top3_names, filtered_dt = select_wave_main_forces(profiles, top_n=3, exclude_day_traders=True)
+
+    # 計算近 5 日前三大本土波段分點買超張數（排除外資與隔日沖，用於交叉確認「主力融資點火」）
+    dom_5d_buys = sorted(
+        [v["net_5d"] for v in profiles.values() if not v.get("is_foreign") and not v.get("is_day_trader") and v["net_5d"] > 0],
+        reverse=True,
+    )
+    domestic_top_buy_5d = int(sum(dom_5d_buys[:3])) if dom_5d_buys else 0
+    if margin_info is not None:
+        margin_info["domestic_top_buy_5d"] = domestic_top_buy_5d
 
     s_60d_all = pd.Series({k: v["net_60d"] for k, v in profiles.items()}).sort_values(ascending=False)
     s_ytd_all = pd.Series({k: v["net_ytd"] for k, v in profiles.items()}).sort_values(ascending=False)
@@ -1160,13 +1183,29 @@ def analyze_main_force(
     }
 
     if not top3_names:
+        scenario = evaluate_chip_scenario(
+            top3_5d=0,
+            top3_5d_ctrl_pct=0.0,
+            latest_close=latest_close_full,
+            conc=conc_out,
+            trust_info=trust_info,
+            broker_diff_info=broker_diff_info,
+            margin_info=margin_info,
+            sbl_info=sbl_info,
+            tdcc_info=tdcc_info,
+            day_trade_info=day_trade_info,
+            vol_5d=vol_5d,
+            domestic_top_buy_5d=domestic_top_buy_5d,
+        )
+        if margin_info is not None:
+            margin_info["quadrant"] = scenario.get("margin_quadrant", 0)
         return {
             "main_force_html": "無波段買超分點主力（偏空格局）",
             "main_force_sub_lines": ["近 60 日追蹤券商分點累計皆為淨賣超"],
             "status_html": "🟢 空方主導／出貨格局",
             "status_sub": "",
             "divergence_alert": None,
-            "scenario": {"id": 5, "type": "bear", "sub_type": "空方主導", "title": "🟢 當前劇本：5. 空方主導", "desc": "近 60 日主要券商分點皆為淨賣超。", "action": "避開空頭排列個股。", "badges": [], "conviction_score": 20},
+            "scenario": scenario,
             "concentrations": conc_out,
             "broker_tags": broker_tags,
             "top3_names": [],
@@ -1233,7 +1272,6 @@ def analyze_main_force(
 
     status_sub = f"近 60 日波段三大主力：{', '.join(top3_names)}"
 
-    vol_5d = float(full_price.tail(5)["volume"].sum()) if "volume" in full_price.columns else 0.0
     top3_5d_ctrl_pct = round((top3_5d / vol_5d * 100.0), 1) if vol_5d > 0 else 0.0
     top3_5d_float_pct = round((top3_5d / issued_lots * 100.0), 2) if issued_lots > 0 else None
 
@@ -1243,21 +1281,16 @@ def analyze_main_force(
     rolling_5d_net = top3_daily_series.rolling(5).sum()
     rolling_5d_vol = full_price["volume"].rolling(5).sum().replace(0, np.nan)
     rolling_5d_ctrl_series = (rolling_5d_net / rolling_5d_vol) * 100.0
-    top3_5d_ctrl_z = compute_rolling_zscore(rolling_5d_ctrl_series, window=STRATEGY_PARAMS["zscore_window"], min_periods=15)
+    top3_5d_ctrl_z = compute_rolling_zscore(rolling_5d_ctrl_series, window=z_win, min_periods=15)
 
-    latest_ma10 = round(float(full_price["close"].tail(10).mean()), 2)
-    latest_ma20 = round(float(full_price["close"].tail(20).mean()), 2)
-    vol_20d_avg = float(full_price["volume"].tail(20).mean()) if "volume" in full_price.columns else 0.0
-    vol_5d_avg = float(full_price["volume"].tail(5).mean()) if "volume" in full_price.columns else 0.0
-    vol_ratio_5_20 = round(vol_5d_avg / vol_20d_avg, 2) if vol_20d_avg > 0 else None
-
+    # 近 5 日漲跌幅僅供「價量背離視覺警示條」參考，不介入純籌碼評分
     price_5d_pct = 0.0
     if len(full_price) >= 5:
         close_now = float(full_price.iloc[-1]["close"])
         close_5d_ago = float(full_price.iloc[-6]["close"]) if len(full_price) >= 6 else float(full_price.iloc[0]["close"])
         price_5d_pct = ((close_now - close_5d_ago) / close_5d_ago * 100.0) if close_5d_ago > 0 else 0.0
 
-    # --- 6. 呼叫 strategy.py 判定背離警報與五大劇本 ---
+    # --- 6. 呼叫 strategy.py 判定視覺背離警報與 100% 純籌碼健康評分 ---
     c5_pct = conc_out.get("d5", {}).get("pct")
     divergence_alert = evaluate_divergence_alert(
         price_5d_pct=price_5d_pct,
@@ -1276,22 +1309,21 @@ def analyze_main_force(
         top3_5d=top3_5d,
         top3_5d_ctrl_pct=top3_5d_ctrl_pct,
         latest_close=latest_close_full,
-        ma10=latest_ma10,
-        ma20=latest_ma20,
-        top3_cost=top3_cost if top3_inv > 0 else 0.0,
-        price_5d_pct=price_5d_pct,
         conc=conc_out,
         top3_5d_amount_ntd=top3_5d_amount_ntd,
         top3_5d_ctrl_z=top3_5d_ctrl_z,
         top3_5d_float_pct=top3_5d_float_pct,
-        vol_ratio_5_20=vol_ratio_5_20,
         trust_info=trust_info,
         broker_diff_info=broker_diff_info,
         margin_info=margin_info,
         sbl_info=sbl_info,
         tdcc_info=tdcc_info,
         day_trade_info=day_trade_info,
+        vol_5d=vol_5d,
+        domestic_top_buy_5d=domestic_top_buy_5d,
     )
+    if margin_info is not None:
+        margin_info["quadrant"] = scenario.get("margin_quadrant", 0)
 
     # --- 7. 前三大波段主力明細列 ---
     top3_rows = []
@@ -1363,9 +1395,9 @@ def compute_daily_health_scores(
     min_warmup_days: int = 20,
 ) -> pd.DataFrame:
     """
-    向量化回算今年每一個交易日的「綜合籌碼健康分數 (0~100)」與對應劇本：
-    - 預先向量化計算 5 日成交量、各分點 5 日滾動淨額與投信真實持股比率，大幅加速回算
-    - 成本計算同步套用除權息因子 adj_factor
+    向量化回算今年每一個交易日的「純籌碼健康分數 (0~100)」與對應狀態：
+    - 100% 撇除均線與漲跌，與即時看板套用同一套五層純籌碼評分規則
+    - 同步計入每日隔日沖佔比、融資四象限（含相對量能與本土買超）與借券 Z-Score
     """
     if df_price_full is None or df_price_full.empty or df_chips_full is None or df_chips_full.empty:
         return pd.DataFrame(columns=["date", "health_score", "scenario_id", "sub_type"])
@@ -1387,10 +1419,17 @@ def compute_daily_health_scores(
         return pd.DataFrame(columns=["date", "health_score", "scenario_id", "sub_type"])
 
     wave_cols = [c for c in pure_cols if c not in DAY_TRADE_BROKERS] or pure_cols
-    chips_mat = df_c[wave_cols].to_numpy(dtype=float)
+    dt_cols = [c for c in pure_cols if c in DAY_TRADE_BROKERS]
+    dom_wave_cols = [c for c in wave_cols if not is_foreign_broker(c)]
 
-    # 預計算各分點 5 日滾動合計矩陣（消除內層逐日切片加總迴圈）
+    chips_mat = df_c[wave_cols].to_numpy(dtype=float)
     chips_5d_mat = pd.DataFrame(chips_mat).rolling(5, min_periods=1).sum().to_numpy(dtype=float)
+    dt_mat = df_c[dt_cols].to_numpy(dtype=float) if dt_cols else np.zeros((n, 0), dtype=float)
+    dom_5d_mat = (
+        pd.DataFrame(df_c[dom_wave_cols].to_numpy(dtype=float)).rolling(5, min_periods=1).sum().to_numpy(dtype=float)
+        if dom_wave_cols
+        else np.zeros((n, 0), dtype=float)
+    )
 
     close_arr = pd.to_numeric(df_p["close"], errors="coerce").to_numpy(dtype=float)
     vol_arr = pd.to_numeric(df_p["volume"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
@@ -1400,15 +1439,6 @@ def compute_daily_health_scores(
         if "vwap" in df_p.columns
         else close_arr
     )
-    adj_arr = (
-        pd.to_numeric(df_p["adj_factor"], errors="coerce").ffill().bfill().fillna(1.0).to_numpy(dtype=float)
-        if "adj_factor" in df_p.columns
-        else np.ones(n, dtype=float)
-    )
-    ma10_arr = pd.Series(close_arr).rolling(10).mean().to_numpy(dtype=float)
-    ma20_arr = pd.Series(close_arr).rolling(20).mean().to_numpy(dtype=float)
-    vol5_arr = pd.Series(vol_arr).rolling(5).mean().to_numpy(dtype=float)
-    vol20_arr = pd.Series(vol_arr).rolling(20).mean().to_numpy(dtype=float)
 
     trust_arr = pd.to_numeric(df_c["投信"], errors="coerce").fillna(0.0).to_numpy(dtype=float) if "投信" in df_c.columns else np.zeros(n)
     trust_5d_arr = pd.Series(trust_arr).rolling(5, min_periods=1).sum().to_numpy(dtype=float)
@@ -1431,27 +1461,46 @@ def compute_daily_health_scores(
     s_arr = pd.to_numeric(df_a["short_bal"], errors="coerce").to_numpy(dtype=float) if "short_bal" in df_a.columns else np.full(n, np.nan)
     sbl_arr = pd.to_numeric(df_a["sbl_bal"], errors="coerce").to_numpy(dtype=float) if "sbl_bal" in df_a.columns else np.full(n, np.nan)
 
+    m_diff5_arr = pd.Series(m_arr).diff(5).to_numpy(dtype=float)
+    sbl_diff5_arr = pd.Series(sbl_arr).diff(5).to_numpy(dtype=float)
+
     lb = STRATEGY_PARAMS["wave_lookback_days"]
     z_win = STRATEGY_PARAMS["zscore_window"]
     tdcc_list = sorted(tdcc_history, key=lambda x: x.get("date", "")) if isinstance(tdcc_history, list) else []
 
-    # 預計算每日投信連買／連賣天數
+    # 預計算每日投信連買／連賣天數與家數差連負天數
     trust_streak_arr = np.zeros(n, dtype=int)
-    cur_s = 0
+    diff_neg_streak_arr = np.zeros(n, dtype=int)
+    cur_ts = 0
+    cur_dn = 0
     for i in range(n):
         v = trust_arr[i]
         if v > 0:
-            cur_s = cur_s + 1 if cur_s > 0 else 1
+            cur_ts = cur_ts + 1 if cur_ts > 0 else 1
         elif v < 0:
-            cur_s = cur_s - 1 if cur_s < 0 else -1
+            cur_ts = cur_ts - 1 if cur_ts < 0 else -1
         else:
-            cur_s = 0
-        trust_streak_arr[i] = cur_s
+            cur_ts = 0
+        trust_streak_arr[i] = cur_ts
+
+        if not np.isnan(diff_arr[i]) and diff_arr[i] < 0:
+            cur_dn += 1
+        else:
+            cur_dn = 0
+        diff_neg_streak_arr[i] = cur_dn
+
+    def _slice_zscore(arr: np.ndarray, idx: int) -> float | None:
+        sl = arr[max(0, idx - z_win + 1) : idx + 1]
+        sl = sl[~np.isnan(sl)]
+        if len(sl) < 15:
+            return None
+        std_v = float(np.std(sl))
+        return round((float(sl[-1]) - float(np.mean(sl))) / std_v, 2) if std_v > 1e-9 else 0.0
 
     records = []
     for i in range(n):
         dt_str = str(df_p.loc[i, "date"])
-        if i + 1 < min_warmup_days or np.isnan(c5_arr[i]) or np.isnan(c10_arr[i]) or np.isnan(c20_arr[i]):
+        if i + 1 < min_warmup_days or np.isnan(c5_arr[i]):
             records.append({"date": dt_str, "health_score": np.nan, "scenario_id": 0, "sub_type": ""})
             continue
 
@@ -1474,7 +1523,7 @@ def compute_daily_health_scores(
         top3_5d_amt = float((top3_daily[s5_start : i + 1] * vwap_arr[s5_start : i + 1] * 1000.0).sum())
         top3_5d_flt = round((top3_5d / issued_lots * 100.0), 2) if issued_lots > 0 else None
 
-        # 向量化計算三大主力控盤率 60 日 Z-Score
+        # 向量化計算三大主力控盤率與 5 日集中度之 60 日 Z-Score
         top3_5d_z = None
         if i >= 14:
             z_s = max(4, i - z_win + 1)
@@ -1485,34 +1534,29 @@ def compute_daily_health_scores(
                 std_c = float(np.std(ctrl_hist))
                 top3_5d_z = round((float(ctrl_hist[-1]) - float(np.mean(ctrl_hist))) / std_c, 2) if std_c > 1e-9 else 0.0
 
-        c5_hist = c5_arr[max(0, i - z_win + 1) : i + 1]
-        c5_hist = c5_hist[~np.isnan(c5_hist)]
-        c5_z = None
-        if len(c5_hist) >= 15:
-            std_5 = float(np.std(c5_hist))
-            c5_z = round((float(c5_hist[-1]) - float(np.mean(c5_hist))) / std_5, 2) if std_5 > 1e-9 else 0.0
+        c5_z = _slice_zscore(c5_arr, i)
 
-        # 三大主力滾動 60 日移動加權成本（含除權息校正）
-        inv = 0.0
-        avg_c = 0.0
-        prev_a = None
-        for p_val, net_val, a_val in zip(vwap_arr[w_start : i + 1], top3_daily[w_start : i + 1], adj_arr[w_start : i + 1]):
-            if prev_a is not None and prev_a > 0 and a_val > 0 and inv > 0 and avg_c > 0:
-                ratio = prev_a / a_val
-                if abs(ratio - 1.0) > 0.001:
-                    avg_c *= ratio
-            prev_a = a_val if a_val > 0 else prev_a
-            if net_val > 0:
-                avg_c = (inv * avg_c + net_val * p_val) / (inv + net_val) if inv > 0 else p_val
-                inv += net_val
-            elif net_val < 0:
-                inv += net_val
-                if inv <= 0:
-                    inv = 0.0
-                    avg_c = 0.0
-        top3_cost_i = round(avg_c, 2) if inv > 0 else 0.0
+        # 2. 當日隔日沖佔比與近 5 日本土波段買超
+        dt_info_i = None
+        if dt_mat.shape[1] > 0 and vol_arr[i] > 0:
+            row_dt = dt_mat[i]
+            dt_pos = row_dt[row_dt > 0]
+            dt_pct_i = round(float(dt_pos.sum()) / float(vol_arr[i]) * 100.0, 1) if len(dt_pos) > 0 else 0.0
+            if dt_pct_i > 0:
+                dt_names_i = [dt_cols[k] for k in np.where(row_dt > 0)[0][:3]]
+                dt_info_i = {
+                    "is_heavy_day_trade": dt_pct_i >= STRATEGY_PARAMS["dt_today_vol_warn_pct"],
+                    "dt_vol_pct": dt_pct_i,
+                    "dt_buyers": dt_names_i,
+                }
 
-        # 2. 投信當日狀態（採用真實持股比率）
+        dom_buy_5d = 0
+        if dom_5d_mat.shape[1] > 0:
+            pos_dom = dom_5d_mat[i][dom_5d_mat[i] > 0]
+            if len(pos_dom) > 0:
+                dom_buy_5d = int(round(np.sort(pos_dom)[::-1][:3].sum()))
+
+        # 3. 投信當日狀態（採用真實持股比率）
         t_hold_i = None
         if not np.isnan(trust_pct_arr[i]):
             t_hold_i = round(float(trust_pct_arr[i]), 2)
@@ -1526,25 +1570,37 @@ def compute_daily_health_scores(
             "holding_pct": t_hold_i,
         }
 
-        # 3. 輔助籌碼當日狀態
+        # 4. 輔助籌碼當日狀態（含相對量能比率與 Z-Score）
         bd_i = None
         if not np.isnan(diff_arr[i]):
             sub_d = diff_arr[s5_start : i + 1]
             sub_d = sub_d[~np.isnan(sub_d)]
-            bd_i = {"diff_5d": int(round(sub_d.sum())), "neg_streak": 1 if diff_arr[i] < 0 else 0}
+            bd_i = {"diff_5d": int(round(sub_d.sum())), "neg_streak": int(diff_neg_streak_arr[i])}
 
         mg_i = None
         if not np.isnan(m_arr[i]) and i >= 5 and not np.isnan(m_arr[i - 5]) and m_arr[i - 5] > 0:
             chg_m = int(round(m_arr[i] - m_arr[i - 5]))
             chg_m_pct = round(chg_m / m_arr[i - 5] * 100.0, 2)
             sm_r = round(s_arr[i] / m_arr[i] * 100.0, 2) if (not np.isnan(s_arr[i]) and m_arr[i] > 0) else 0.0
-            mg_i = {"chg_5d": chg_m, "chg_5d_pct": chg_m_pct, "short_margin_ratio": sm_r}
+            mg_i = {
+                "chg_5d": chg_m,
+                "chg_5d_pct": chg_m_pct,
+                "chg_5d_z": _slice_zscore(m_diff5_arr, i),
+                "chg_5d_vol_pct": round(abs(chg_m) / vol_5d * 100.0, 2) if vol_5d > 0 else None,
+                "short_margin_ratio": sm_r,
+                "domestic_top_buy_5d": dom_buy_5d,
+            }
 
         sbl_i = None
         if not np.isnan(sbl_arr[i]) and i >= 5 and not np.isnan(sbl_arr[i - 5]) and sbl_arr[i - 5] > 0:
             chg_sbl = int(round(sbl_arr[i] - sbl_arr[i - 5]))
             chg_sbl_pct = round(chg_sbl / sbl_arr[i - 5] * 100.0, 2)
-            sbl_i = {"chg_5d": chg_sbl, "chg_5d_pct": chg_sbl_pct}
+            sbl_i = {
+                "chg_5d": chg_sbl,
+                "chg_5d_pct": chg_sbl_pct,
+                "chg_5d_z": _slice_zscore(sbl_diff5_arr, i),
+                "chg_5d_vol_pct": round(abs(chg_sbl) / vol_5d * 100.0, 2) if vol_5d > 0 else None,
+            }
 
         tdcc_i = None
         if tdcc_list:
@@ -1557,32 +1613,28 @@ def compute_daily_health_scores(
                     "holders_chg_1w": int(lt["total_holders"]) - int(pt["total_holders"]),
                 }
 
-        p5_pct = round((close_arr[i] - close_arr[i - 5]) / close_arr[i - 5] * 100.0, 2) if (i >= 5 and close_arr[i - 5] > 0) else 0.0
-        v_rat = round(vol5_arr[i] / vol20_arr[i], 2) if (not np.isnan(vol20_arr[i]) and vol20_arr[i] > 0) else None
         conc_i = {
             "d5": {"pct": round(float(c5_arr[i]), 2), "z_score": c5_z},
-            "d10": {"pct": round(float(c10_arr[i]), 2)},
-            "d20": {"pct": round(float(c20_arr[i]), 2)},
+            "d10": {"pct": round(float(c10_arr[i]), 2) if not np.isnan(c10_arr[i]) else None},
+            "d20": {"pct": round(float(c20_arr[i]), 2) if not np.isnan(c20_arr[i]) else None},
         }
 
         sc = evaluate_chip_scenario(
             top3_5d=top3_5d,
             top3_5d_ctrl_pct=top3_5d_ctrl_pct,
             latest_close=float(close_arr[i]),
-            ma10=float(ma10_arr[i]) if not np.isnan(ma10_arr[i]) else 0.0,
-            ma20=float(ma20_arr[i]) if not np.isnan(ma20_arr[i]) else 0.0,
-            top3_cost=top3_cost_i,
-            price_5d_pct=p5_pct,
             conc=conc_i,
             top3_5d_amount_ntd=top3_5d_amt,
             top3_5d_ctrl_z=top3_5d_z,
             top3_5d_float_pct=top3_5d_flt,
-            vol_ratio_5_20=v_rat,
             trust_info=t_info_i,
             broker_diff_info=bd_i,
             margin_info=mg_i,
             sbl_info=sbl_i,
             tdcc_info=tdcc_i,
+            day_trade_info=dt_info_i,
+            vol_5d=vol_5d,
+            domestic_top_buy_5d=dom_buy_5d,
         )
         records.append({
             "date": dt_str,
@@ -1614,7 +1666,6 @@ def sync_files_to_github_batch(file_pairs: list[tuple[str, str]], commit_message
     """
     透過 GitHub Git Data API（Blobs -> Tree -> Commit -> Ref）將多個檔案打包成單一 Commit 推送，
     大幅降低 API 次數與 Rate Limit 風險。
-    file_pairs: [(local_path, repo_path), ...]
     """
     token, repo = _get_github_config()
     if not token or not repo:
@@ -1631,13 +1682,11 @@ def sync_files_to_github_batch(file_pairs: list[tuple[str, str]], commit_message
     base_api = f"https://api.github.com/repos/{repo}"
 
     try:
-        # 1. 取得預設分支名稱
         repo_resp = requests.get(base_api, headers=headers, timeout=10)
         if repo_resp.status_code != 200:
             return False, f"讀取儲存庫失敗 (HTTP {repo_resp.status_code})"
         default_branch = repo_resp.json().get("default_branch", "main")
 
-        # 2. 取得目前 HEAD commit 與 base_tree
         ref_resp = requests.get(f"{base_api}/git/ref/heads/{default_branch}", headers=headers, timeout=10)
         if ref_resp.status_code != 200:
             return False, f"讀取分支 {default_branch} 失敗 (HTTP {ref_resp.status_code})"
@@ -1648,7 +1697,6 @@ def sync_files_to_github_batch(file_pairs: list[tuple[str, str]], commit_message
             return False, f"讀取 HEAD Commit 失敗 (HTTP {commit_resp.status_code})"
         base_tree_sha = commit_resp.json()["tree"]["sha"]
 
-        # 3. 逐檔建立 Blob 並組裝 Tree
         tree_items = []
         for local_path, repo_path in valid_pairs:
             with open(local_path, "rb") as f:
@@ -1668,7 +1716,6 @@ def sync_files_to_github_batch(file_pairs: list[tuple[str, str]], commit_message
                 "sha": blob_resp.json()["sha"],
             })
 
-        # 4. 建立新 Tree
         tree_resp = requests.post(
             f"{base_api}/git/trees",
             headers=headers,
@@ -1679,7 +1726,6 @@ def sync_files_to_github_batch(file_pairs: list[tuple[str, str]], commit_message
             return False, f"建立 Tree 失敗 (HTTP {tree_resp.status_code})"
         new_tree_sha = tree_resp.json()["sha"]
 
-        # 5. 建立新 Commit
         new_commit_resp = requests.post(
             f"{base_api}/git/commits",
             headers=headers,
@@ -1690,7 +1736,6 @@ def sync_files_to_github_batch(file_pairs: list[tuple[str, str]], commit_message
             return False, f"建立 Commit 失敗 (HTTP {new_commit_resp.status_code})"
         new_commit_sha = new_commit_resp.json()["sha"]
 
-        # 6. 更新分支指標
         patch_resp = requests.patch(
             f"{base_api}/git/refs/heads/{default_branch}",
             headers=headers,
