@@ -895,13 +895,26 @@ def _render_aux_dashboard(
 ) -> str:
     p = STRATEGY_PARAMS
 
-    # 1. 買賣家數差
-    diff_tip = "計算公式：買超分點家數 － 賣超分點家數。負值（紅）代表籌碼由散戶流向少數主力；正值（綠）代表籌碼流向散戶、趨於發散。"
+    # 1. 買賣家數差（含過期延遲標示與防誤計分提示）
+    diff_tip = "計算公式：買超分點家數 － 賣超分點家數。負值（紅）代表籌碼由散戶流向少數主力；正值（綠）代表籌碼流向散戶、趨於發散。若外部資料延遲超過 1 個交易日，將不計入今日分數。"
     if broker_diff_info:
         d5 = broker_diff_info["diff_5d"]
-        d1 = broker_diff_info["diff_1d"]
+        d1 = broker_diff_info.get("diff_1d")
+        d1_latest = broker_diff_info.get("diff_1d_latest", d1)
         neg_s = broker_diff_info["neg_streak"]
-        b_html = _aux_badge("🧲 籌碼集中", "bull") if d5 < 0 else (_aux_badge("📉 籌碼渙散", "bear") if d5 > 0 else _aux_badge("⚪ 持平", "info"))
+        bd_date = str(broker_diff_info.get("date", ""))
+        bd_short = bd_date[5:] if len(bd_date) >= 10 else bd_date
+        is_stale = bool(broker_diff_info.get("is_stale"))
+
+        if is_stale:
+            b_html = _aux_badge(f"⏳ 延遲({bd_short})", "warn")
+            latest_val_html = _span_num(d1_latest, " 家", invert_color=True) if d1_latest is not None else "—"
+            sub_txt = f"{bd_short} {latest_val_html} ｜ 延遲未計分"
+        else:
+            b_html = _aux_badge("🧲 籌碼集中", "bull") if d5 < 0 else (_aux_badge("📉 籌碼渙散", "bear") if d5 > 0 else _aux_badge("⚪ 持平", "info"))
+            today_txt = _span_num(d1, " 家", invert_color=True) if d1 is not None else f'<span style="color:#94a3b8;">待公布({bd_short})</span>'
+            sub_txt = f"今日 {today_txt} ｜ 連負 <b>{neg_s}</b> 日"
+
         diff_card = (
             f'<div class="aux-card">'
             f'  <div class="aux-head">'
@@ -909,7 +922,7 @@ def _render_aux_dashboard(
             f'    {b_html}'
             f'  </div>'
             f'  <div class="aux-main">5日 {_span_num(d5, " 家", invert_color=True)}</div>'
-            f'  <div class="aux-sub">今日 {_span_num(d1, " 家", invert_color=True)} ｜ 連負 <b>{neg_s}</b> 日</div>'
+            f'  <div class="aux-sub">{sub_txt}</div>'
             f'</div>'
         )
     else:
