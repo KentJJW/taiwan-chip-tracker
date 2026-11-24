@@ -895,25 +895,34 @@ def _render_aux_dashboard(
 ) -> str:
     p = STRATEGY_PARAMS
 
-    # 1. 買賣家數差（含過期延遲標示與防誤計分提示）
+    # 1. 買賣家數差（含過期延遲標示與樣本數防呆）
     diff_tip = "計算公式：買超分點家數 － 賣超分點家數。負值（紅）代表籌碼由散戶流向少數主力；正值（綠）代表籌碼流向散戶、趨於發散。若外部資料延遲超過 1 個交易日，將不計入今日分數。"
     if broker_diff_info:
         d5 = broker_diff_info["diff_5d"]
+        d5_samples = int(broker_diff_info.get("d5_samples", 5) or 5)
         d1 = broker_diff_info.get("diff_1d")
         d1_latest = broker_diff_info.get("diff_1d_latest", d1)
         neg_s = broker_diff_info["neg_streak"]
         bd_date = str(broker_diff_info.get("date", ""))
         bd_short = bd_date[5:] if len(bd_date) >= 10 else bd_date
+        is_latest = bool(broker_diff_info.get("is_latest", d1 is not None))
         is_stale = bool(broker_diff_info.get("is_stale"))
 
         if is_stale:
             b_html = _aux_badge(f"⏳ 延遲({bd_short})", "warn")
+            main_lbl = "近5筆"
             latest_val_html = _span_num(d1_latest, " 家", invert_color=True) if d1_latest is not None else "—"
-            sub_txt = f"{bd_short} {latest_val_html} ｜ 延遲未計分"
+            sub_txt = f'<span style="color:#fbbf24;">{bd_short}</span> {latest_val_html} ｜ 延遲未計分'
         else:
             b_html = _aux_badge("🧲 籌碼集中", "bull") if d5 < 0 else (_aux_badge("📉 籌碼渙散", "bear") if d5 > 0 else _aux_badge("⚪ 持平", "info"))
-            today_txt = _span_num(d1, " 家", invert_color=True) if d1 is not None else f'<span style="color:#94a3b8;">待公布({bd_short})</span>'
-            sub_txt = f"今日 {today_txt} ｜ 連負 <b>{neg_s}</b> 日"
+            main_lbl = "5日" if d5_samples >= 5 else f"近5日({d5_samples}筆)"
+            if is_latest and d1 is not None:
+                today_seg = f"今日 {_span_num(d1, ' 家', invert_color=True)}"
+            elif d1_latest is not None and bd_short:
+                today_seg = f'<span style="color:#fbbf24;">{bd_short}</span> {_span_num(d1_latest, " 家", invert_color=True)}'
+            else:
+                today_seg = '<span style="color:#94a3b8;">待公布</span>'
+            sub_txt = f"{today_seg} ｜ 連負 <b>{neg_s}</b> 日"
 
         diff_card = (
             f'<div class="aux-card">'
@@ -921,7 +930,7 @@ def _render_aux_dashboard(
             f'    <span class="aux-title">🧲 買賣家數差<span class="tip-wrap tip-down">ⓘ<span class="tip-box">{diff_tip}</span></span></span>'
             f'    {b_html}'
             f'  </div>'
-            f'  <div class="aux-main">5日 {_span_num(d5, " 家", invert_color=True)}</div>'
+            f'  <div class="aux-main">{main_lbl} {_span_num(d5, " 家", invert_color=True)}</div>'
             f'  <div class="aux-sub">{sub_txt}</div>'
             f'</div>'
         )
@@ -934,7 +943,7 @@ def _render_aux_dashboard(
             f'</div>'
         )
 
-    # 2. 融資融券（升級四象限交叉判定＋相對量能濾網）
+    # 2. 融資融券（升級四象限交叉判定＋相對量能濾網＋日期防呆）
     margin_tip = (
         "<b>融資四象限交叉判讀（須通過 5 日變動佔 5 日總量 ≥ 3% 濾網）：</b><br>"
         "• <b>🔥 主力融資點火 (+3分)：</b>融資大增＋集中度正＋家數差負（籌碼往少數人集中）。<br>"
@@ -950,24 +959,28 @@ def _render_aux_dashboard(
         sm_rat = margin_info["short_margin_ratio"]
         s_bal = margin_info["short_bal"]
         quad = int(margin_info.get("quadrant", 0) or 0)
+        m_is_latest = bool(margin_info.get("is_latest", True))
+        m_date = str(margin_info.get("date", ""))
+        m_short = m_date[5:] if len(m_date) >= 10 else m_date
 
         if quad == 1:
             m_badge = _aux_badge("🔥 主力融資點火", "bull")
-            inv_col = False  # 融資增加為偏多紅
+            inv_col = False
         elif quad == 2:
             m_badge = _aux_badge("⚠️ 散戶融資過熱", "bear")
-            inv_col = True   # 融資增加為偏空綠
+            inv_col = True
         elif quad == 3:
             m_badge = _aux_badge("🧹 融資清洗", "bull")
-            inv_col = True   # 融資減少為偏多紅
+            inv_col = True
         elif quad == 4:
             m_badge = _aux_badge("💨 融資退場發散", "bear")
-            inv_col = False  # 融資減少為偏空綠
+            inv_col = False
         else:
             m_badge = _aux_badge("⚪ 信用中性", "info")
             inv_col = True
 
         vol_seg = f" ｜ 佔量 <b>{m_vol_pct:.1f}%</b>" if m_vol_pct is not None else ""
+        date_seg = f' ｜ <span style="color:#fbbf24;">截至 {m_short}</span>' if (not m_is_latest and m_short) else ""
         margin_card = (
             f'<div class="aux-card">'
             f'  <div class="aux-head">'
@@ -975,7 +988,7 @@ def _render_aux_dashboard(
             f'    {m_badge}'
             f'  </div>'
             f'  <div class="aux-main">5日 {_span_num(m_5d, " 張", invert_color=inv_col)} ({_span_float(m_5d_pct, "%", invert_color=inv_col)})</div>'
-            f'  <div class="aux-sub">餘額 <b>{m_bal:,}</b> 張{vol_seg} ｜ 券資比 <b style="color:#fbbf24;">{sm_rat:.1f}%</b> ({s_bal:,}張)</div>'
+            f'  <div class="aux-sub">餘額 <b>{m_bal:,}</b> 張{vol_seg} ｜ 券資比 <b style="color:#fbbf24;">{sm_rat:.1f}%</b> ({s_bal:,}張){date_seg}</div>'
             f'</div>'
         )
     else:
@@ -987,9 +1000,9 @@ def _render_aux_dashboard(
             f'</div>'
         )
 
-    # 3. 借券賣出餘額（對齊相對量能濾網與 Z-Score）
+    # 3. 借券賣出餘額（官方直抓＋相對量能濾網＋日期防呆）
     sbl_tip = (
-        "外資與機構法人的真實放空水位（須通過 5 日變動佔 5 日總量 ≥ 3% 濾網才計分）。"
+        "外資與機構法人的真實放空水位（近 3 日優先直抓證交所／櫃買中心官方數據；須通過 5 日變動佔 5 日總量 ≥ 3% 濾網才計分）。"
         "餘額顯著減少（紅）代表空方回補 (+5分)；餘額顯著大增（綠）代表空單加壓 (-5分)。"
     )
     if sbl_info:
@@ -999,6 +1012,9 @@ def _render_aux_dashboard(
         sbl_z = sbl_info.get("chg_5d_z")
         sbl_vol_pct = sbl_info.get("chg_5d_vol_pct")
         sbl_1d = sbl_info["chg_1d"]
+        sbl_is_latest = bool(sbl_info.get("is_latest", True))
+        sbl_date = str(sbl_info.get("date", ""))
+        sbl_short = sbl_date[5:] if len(sbl_date) >= 10 else sbl_date
         sbl_vol_ok = True if sbl_vol_pct is None else (sbl_vol_pct >= p["credit_vol_ratio_min"])
 
         if sbl_vol_ok and sbl_5d < 0 and (sbl_pct <= p["sbl_cover_5d_pct"] or (sbl_z is not None and sbl_z <= p["z_bear_max"])):
@@ -1009,6 +1025,12 @@ def _render_aux_dashboard(
             sbl_badge = _aux_badge("⚪ 空單持平", "info")
 
         vol_seg = f" ｜ 佔量 <b>{sbl_vol_pct:.1f}%</b>" if sbl_vol_pct is not None else ""
+        if sbl_is_latest:
+            day_seg = f"今日 {_span_num(sbl_1d, ' 張', invert_color=True)}"
+        else:
+            dt_lbl = sbl_short or "前日"
+            day_seg = f'<span style="color:#fbbf24;">{dt_lbl}</span> {_span_num(sbl_1d, " 張", invert_color=True)}'
+
         sbl_card = (
             f'<div class="aux-card">'
             f'  <div class="aux-head">'
@@ -1016,7 +1038,7 @@ def _render_aux_dashboard(
             f'    {sbl_badge}'
             f'  </div>'
             f'  <div class="aux-main">5日 {_span_num(sbl_5d, " 張", invert_color=True)} ({_span_float(sbl_pct, "%", invert_color=True)})</div>'
-            f'  <div class="aux-sub">餘額 <b>{sbl_bal:,}</b> 張{vol_seg} ｜ 今日 {_span_num(sbl_1d, " 張", invert_color=True)}</div>'
+            f'  <div class="aux-sub">餘額 <b>{sbl_bal:,}</b> 張{vol_seg} ｜ {day_seg}</div>'
             f'</div>'
         )
     else:
