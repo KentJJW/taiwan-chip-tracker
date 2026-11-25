@@ -2093,7 +2093,7 @@ if target_stock:
     )
     has_health_series = (not df_health.empty) and df_health["health_score"].notna().any()
 
-    c_opt1, c_opt2, c_opt3, c_opt4, c_opt5 = st.columns([1.25, 1.3, 1.2, 1.25, 1.6])
+    c_opt1, c_opt2, c_opt3, c_opt4 = st.columns([1.3, 1.35, 1.35, 1.8])
     with c_opt1:
         show_ma = st.checkbox(
             "顯示 10/20MA (純參考)",
@@ -2108,13 +2108,6 @@ if target_stock:
             help="收盤價折線與主圖背景 100% 依每日純籌碼健康分數動態變色：紅（≥70分強力集中）、黃（中性）、綠（≤35分明顯發散）",
         )
     with c_opt3:
-        show_health_curve = st.checkbox(
-            "疊加分數趨勢線",
-            value=False,
-            disabled=not bool(has_health_series),
-            help="在主圖右側副軸疊加 5 日平滑純籌碼健康分數曲線（0～100分）",
-        )
-    with c_opt4:
         has_aux_series = (
             df_aux_full is not None
             and (
@@ -2127,7 +2120,7 @@ if target_stock:
             value=bool(has_aux_series),
             disabled=not bool(has_aux_series),
         )
-    with c_opt5:
+    with c_opt4:
         cost_basis = st.radio(
             "成本線計算基準",
             options=["近 60 日波段成本", "今年累計成本"],
@@ -2157,7 +2150,6 @@ if target_stock:
 
         df_plot["ma10"] = df_plot["close"].rolling(10).mean()
         df_plot["ma20"] = df_plot["close"].rolling(20).mean()
-        df_plot["health_ma5"] = df_plot["health_score"].rolling(5, min_periods=1).mean()
 
         daily_net = df_plot[selected_brokers].sum(axis=1)
         cum_total = daily_net.cumsum()
@@ -2324,29 +2316,7 @@ if target_stock:
                 row=1, col=1, secondary_y=False,
             )
 
-        if show_health_curve and has_health_series:
-            fig.add_trace(
-                go.Scatter(
-                    x=df_plot["date"],
-                    y=df_plot["health_ma5"].round(1),
-                    name="純籌碼分數 (5日均)",
-                    line=dict(color="rgba(244, 114, 182, 0.72)", width=1.6, dash="dot"),
-                    hovertemplate="%{y:.0f} 分<extra>純籌碼分數(5日均)</extra>",
-                ),
-                row=1, col=1, secondary_y=True,
-            )
-            fig.update_yaxes(
-                title_text="純籌碼分數 (5日均)",
-                range=[0, 105],
-                tickvals=[0, 35, 70, 100],
-                row=1,
-                col=1,
-                secondary_y=True,
-                showgrid=False,
-            )
-        else:
-            fig.update_yaxes(row=1, col=1, secondary_y=True, visible=False)
-
+        fig.update_yaxes(row=1, col=1, secondary_y=True, visible=False)
         fig.update_yaxes(title_text="股價／成本 (元)", row=1, col=1, secondary_y=False, showgrid=True)
 
         # --- Row 2：主力買賣超長條圖 ＋ 累計張數折線 ---
