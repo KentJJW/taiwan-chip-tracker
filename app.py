@@ -665,6 +665,12 @@ st.markdown("""
     line-height: 1.5;
     margin-bottom: 8px;
 }
+.snap-bar-label {
+    font-size: 0.82rem;
+    color: #94a3b8;
+    padding-top: 8px;
+    font-weight: 600;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -843,7 +849,7 @@ def _format_conc_card(label: str, info: dict) -> str:
             f'<div class="conc-box">'
             f'  <div class="conc-box-left"><span class="conc-period">{label}</span>'
             f'  <span class="conc-val" style="color:#94a3b8;">待更新</span></div>'
-            f'  <span class="conc-badge" style="background:#262e40; color:#94a3b8;">請點左側更新</span>'
+            f'  <span class="conc-badge" style="background:#262e40; color:#94a3b8;">尚未公布</span>'
             f'</div>'
         )
 
@@ -892,6 +898,7 @@ def _render_aux_dashboard(
     margin_info: dict | None,
     sbl_info: dict | None,
     tdcc_info: dict | None,
+    day_word: str = "今日",
 ) -> str:
     p = STRATEGY_PARAMS
 
@@ -943,7 +950,7 @@ def _render_aux_dashboard(
         else:
             f_seg = "外資無進出"
 
-        today_seg = f" ｜ 今日 <b>{b1:.0f}%</b>" if b1 is not None else ""
+        today_seg = f" ｜ {day_word} <b>{b1:.0f}%</b>" if b1 is not None else ""
         breadth_card = (
             f'<div class="aux-card">'
             f'  <div class="aux-head">'
@@ -957,13 +964,13 @@ def _render_aux_dashboard(
     else:
         breadth_card = (
             f'<div class="aux-card">'
-            f'  <div class="aux-head"><span class="aux-title">🧭 主力分點廣度<span class="tip-wrap tip-down">ⓘ<span class="tip-box tip-box-wide">{breadth_tip}</span></span></span>{_aux_badge("待更新", "info")}</div>'
-            f'  <div class="aux-main" style="color:#94a3b8;">尚無資料</div>'
-            f'  <div class="aux-sub">點擊左側「🔄」補齊分點資料</div>'
+            f'  <div class="aux-head"><span class="aux-title">🧭 主力分點廣度<span class="tip-wrap tip-down">ⓘ<span class="tip-box tip-box-wide">{breadth_tip}</span></span></span>{_aux_badge("⏳ 待更新", "warn")}</div>'
+            f'  <div class="aux-main" style="color:#94a3b8;">待更新</div>'
+            f'  <div class="aux-sub">尚未公布</div>'
             f'</div>'
         )
 
-    # 2. 融資融券（升級四象限交叉判定＋相對量能濾網＋日期防呆）
+    # 2. 融資融券（嚴格比對基準日，未公布時直接顯示待更新／尚未公布）
     margin_tip = (
         "<b>融資四象限交叉判讀（須通過 5 日變動佔 5 日總量 ≥ 3% 濾網）：</b><br>"
         "• <b>🔥 主力融資點火 (+3分)：</b>融資大增＋集中度正＋本土波段買盤達融資增量 50%（或主力廣度 ≥ 55%）。<br>"
@@ -979,9 +986,6 @@ def _render_aux_dashboard(
         sm_rat = margin_info["short_margin_ratio"]
         s_bal = margin_info["short_bal"]
         quad = int(margin_info.get("quadrant", 0) or 0)
-        m_is_latest = bool(margin_info.get("is_latest", True))
-        m_date = str(margin_info.get("date", ""))
-        m_short = m_date[5:] if len(m_date) >= 10 else m_date
 
         if quad == 1:
             m_badge = _aux_badge("🔥 主力融資點火", "bull")
@@ -1000,7 +1004,6 @@ def _render_aux_dashboard(
             inv_col = True
 
         vol_seg = f" ｜ 佔量 <b>{m_vol_pct:.1f}%</b>" if m_vol_pct is not None else ""
-        date_seg = f' ｜ <span style="color:#fbbf24;">截至 {m_short}</span>' if (not m_is_latest and m_short) else ""
         margin_card = (
             f'<div class="aux-card">'
             f'  <div class="aux-head">'
@@ -1008,19 +1011,19 @@ def _render_aux_dashboard(
             f'    {m_badge}'
             f'  </div>'
             f'  <div class="aux-main">5日 {_span_num(m_5d, " 張", invert_color=inv_col)} ({_span_float(m_5d_pct, "%", invert_color=inv_col)})</div>'
-            f'  <div class="aux-sub">餘額 <b>{m_bal:,}</b> 張{vol_seg} ｜ 券資比 <b style="color:#fbbf24;">{sm_rat:.1f}%</b> ({s_bal:,}張){date_seg}</div>'
+            f'  <div class="aux-sub">餘額 <b>{m_bal:,}</b> 張{vol_seg} ｜ 券資比 <b style="color:#fbbf24;">{sm_rat:.1f}%</b> ({s_bal:,}張)</div>'
             f'</div>'
         )
     else:
         margin_card = (
             f'<div class="aux-card">'
-            f'  <div class="aux-head"><span class="aux-title">🧹 融資四象限／券資比<span class="tip-wrap tip-down">ⓘ<span class="tip-box tip-box-wide">{margin_tip}</span></span></span>{_aux_badge("待更新", "info")}</div>'
-            f'  <div class="aux-main" style="color:#94a3b8;">尚無資料</div>'
-            f'  <div class="aux-sub">點擊左側「🔄」補抓信用交易</div>'
+            f'  <div class="aux-head"><span class="aux-title">🧹 融資四象限／券資比<span class="tip-wrap tip-down">ⓘ<span class="tip-box tip-box-wide">{margin_tip}</span></span></span>{_aux_badge("⏳ 待更新", "warn")}</div>'
+            f'  <div class="aux-main" style="color:#94a3b8;">待更新</div>'
+            f'  <div class="aux-sub">尚未公布</div>'
             f'</div>'
         )
 
-    # 3. 借券賣出餘額（官方直抓＋相對量能濾網＋日期防呆）
+    # 3. 借券賣出餘額（嚴格比對基準日，未公布時直接顯示待更新／尚未公布）
     sbl_tip = (
         "外資與機構法人的真實放空水位（近 3 日優先直抓證交所／櫃買中心官方數據；須通過 5 日變動佔 5 日總量 ≥ 3% 濾網才計分）。"
         "餘額顯著減少（紅）代表空方回補 (+5分)；餘額顯著大增（綠）代表空單加壓 (-5分)。"
@@ -1032,9 +1035,6 @@ def _render_aux_dashboard(
         sbl_z = sbl_info.get("chg_5d_z")
         sbl_vol_pct = sbl_info.get("chg_5d_vol_pct")
         sbl_1d = sbl_info["chg_1d"]
-        sbl_is_latest = bool(sbl_info.get("is_latest", True))
-        sbl_date = str(sbl_info.get("date", ""))
-        sbl_short = sbl_date[5:] if len(sbl_date) >= 10 else sbl_date
         sbl_vol_ok = True if sbl_vol_pct is None else (sbl_vol_pct >= p["credit_vol_ratio_min"])
 
         if sbl_vol_ok and sbl_5d < 0 and (sbl_pct <= p["sbl_cover_5d_pct"] or (sbl_z is not None and sbl_z <= p["z_bear_max"])):
@@ -1045,12 +1045,6 @@ def _render_aux_dashboard(
             sbl_badge = _aux_badge("⚪ 空單持平", "info")
 
         vol_seg = f" ｜ 佔量 <b>{sbl_vol_pct:.1f}%</b>" if sbl_vol_pct is not None else ""
-        if sbl_is_latest:
-            day_seg = f"今日 {_span_num(sbl_1d, ' 張', invert_color=True)}"
-        else:
-            dt_lbl = sbl_short or "前日"
-            day_seg = f'<span style="color:#fbbf24;">{dt_lbl}</span> {_span_num(sbl_1d, " 張", invert_color=True)}'
-
         sbl_card = (
             f'<div class="aux-card">'
             f'  <div class="aux-head">'
@@ -1058,15 +1052,15 @@ def _render_aux_dashboard(
             f'    {sbl_badge}'
             f'  </div>'
             f'  <div class="aux-main">5日 {_span_num(sbl_5d, " 張", invert_color=True)} ({_span_float(sbl_pct, "%", invert_color=True)})</div>'
-            f'  <div class="aux-sub">餘額 <b>{sbl_bal:,}</b> 張{vol_seg} ｜ {day_seg}</div>'
+            f'  <div class="aux-sub">餘額 <b>{sbl_bal:,}</b> 張{vol_seg} ｜ {day_word} {_span_num(sbl_1d, " 張", invert_color=True)}</div>'
             f'</div>'
         )
     else:
         sbl_card = (
             f'<div class="aux-card">'
-            f'  <div class="aux-head"><span class="aux-title">🐻 借券賣出餘額<span class="tip-wrap tip-down">ⓘ<span class="tip-box">{sbl_tip}</span></span></span>{_aux_badge("待更新", "info")}</div>'
-            f'  <div class="aux-main" style="color:#94a3b8;">尚無資料</div>'
-            f'  <div class="aux-sub">點擊左側「🔄」補抓借券資料</div>'
+            f'  <div class="aux-head"><span class="aux-title">🐻 借券賣出餘額<span class="tip-wrap tip-down">ⓘ<span class="tip-box">{sbl_tip}</span></span></span>{_aux_badge("⏳ 待更新", "warn")}</div>'
+            f'  <div class="aux-main" style="color:#94a3b8;">待更新</div>'
+            f'  <div class="aux-sub">尚未公布</div>'
             f'</div>'
         )
 
@@ -1102,7 +1096,7 @@ def _render_aux_dashboard(
             f'<div class="aux-card">'
             f'  <div class="aux-head"><span class="aux-title">🐋 TDCC 集保大戶<span class="tip-wrap tip-down-left">ⓘ<span class="tip-box">{tdcc_tip}</span></span></span>{_aux_badge("每週更新", "info")}</div>'
             f'  <div class="aux-main" style="color:#94a3b8;">尚無資料</div>'
-            f'  <div class="aux-sub">點擊左側「🔄」同步集保歸戶</div>'
+            f'  <div class="aux-sub">尚未公布</div>'
             f'</div>'
         )
 
@@ -1398,9 +1392,9 @@ if target_stock:
 
     cache_key = _get_stock_cache_key(target_stock)
     df_price_raw, df_chips_raw, df_aux_raw, meta_saved = _load_stock_data_cached(target_stock, cache_key)
-    df_price_full = df_price_raw.copy()
-    df_chips_full = df_chips_raw.copy()
-    df_aux_full = df_aux_raw.copy() if df_aux_raw is not None else None
+    df_price_full = df_price_raw.sort_values("date").reset_index(drop=True).copy()
+    df_chips_full = df_chips_raw.sort_values("date").reset_index(drop=True).copy()
+    df_aux_full = df_aux_raw.sort_values("date").reset_index(drop=True).copy() if df_aux_raw is not None else None
 
     stock_title = get_stock_display_label(target_stock)
 
@@ -1424,35 +1418,68 @@ if target_stock:
             if df_aux_full is not None and not df_aux_full.empty:
                 df_aux_full = df_aux_full[df_aux_full["date"] < latest_p_date].reset_index(drop=True)
 
-    # 計算統計區間起訖日（以有效籌碼交易日為基準）
-    min_date = df_price_full["date"].min()
-    max_date = df_price_full["date"].max()
+    # --- 基準日回放狀態（前天 / 昨天 / 今天，預設看今天） ---
+    valid_dates = df_price_full["date"].astype(str).tolist()
+    n_valid = len(valid_dates)
+    snap_options = []
+    if n_valid >= 3:
+        snap_options.append((-2, "前天", valid_dates[-3]))
+    if n_valid >= 2:
+        snap_options.append((-1, "昨天", valid_dates[-2]))
+    snap_options.append((0, "今天", valid_dates[-1]))
+
+    snap_key = f"snap_offset_{target_stock}"
+    valid_offsets = [opt[0] for opt in snap_options]
+    if snap_key not in st.session_state or st.session_state[snap_key] not in valid_offsets:
+        st.session_state[snap_key] = 0
+
+    active_offset = int(st.session_state[snap_key])
+    active_snap_item = next(opt for opt in snap_options if opt[0] == active_offset)
+    snap_rel_name = active_snap_item[1]  # "前天" / "昨天" / "今天"
+    anchor_date = active_snap_item[2]
+    day_word = "今日" if active_offset == 0 else "當日"
+
+    # 依所選基準日切出診斷用資料（主圖仍保留全年度完整走勢）
+    df_price_snap = df_price_full[df_price_full["date"] <= anchor_date].reset_index(drop=True)
+    df_chips_snap = df_chips_full[df_chips_full["date"] <= anchor_date].reset_index(drop=True)
+    df_aux_snap = (
+        df_aux_full[df_aux_full["date"] <= anchor_date].reset_index(drop=True)
+        if (df_aux_full is not None and not df_aux_full.empty)
+        else None
+    )
+
+    # 計算統計區間起訖日（以目前所選基準日為終點）
+    min_date = df_price_snap["date"].min()
+    max_date = df_price_snap["date"].max()
     days_map = {"今日": 1, "5日": 5, "10日": 10, "20日": 20, "60日": 60}
 
     if range_type in days_map:
         n_days = days_map[range_type]
-        df_price = df_price_full.tail(n_days).copy()
+        df_price = df_price_snap.tail(n_days).copy()
         start_filter = df_price["date"].min()
         end_filter = df_price["date"].max()
-        df_chips = df_chips_full[(df_chips_full["date"] >= start_filter) & (df_chips_full["date"] <= end_filter)].copy()
+        df_chips = df_chips_snap[(df_chips_snap["date"] >= start_filter) & (df_chips_snap["date"] <= end_filter)].copy()
         if n_days == 1:
-            period_label = f"最近交易日（{end_filter}）" if pending_chip_date else f"今日（{end_filter}）"
+            if active_offset == 0:
+                period_label = f"最近交易日（{end_filter}）" if pending_chip_date else f"今日（{end_filter}）"
+            else:
+                period_label = f"{snap_rel_name}（{end_filter}）"
         else:
             period_label = f"近 {n_days} 日（{start_filter} ~ {end_filter}）"
     elif range_type == "指定日期":
         start_filter = parse_manual_date(custom_start_str, min_date)
-        end_filter = parse_manual_date(custom_end_str, max_date)
+        end_filter = min(parse_manual_date(custom_end_str, max_date), max_date)
         if start_filter > end_filter:
-            st.error("起始日期不可晚於結束日期，請重新輸入。")
+            st.error("起始日期不可晚於結束日期（或目前基準日），請重新輸入。")
             st.stop()
-        df_price = df_price_full[(df_price_full["date"] >= start_filter) & (df_price_full["date"] <= end_filter)].copy()
-        df_chips = df_chips_full[(df_chips_full["date"] >= start_filter) & (df_chips_full["date"] <= end_filter)].copy()
+        df_price = df_price_snap[(df_price_snap["date"] >= start_filter) & (df_price_snap["date"] <= end_filter)].copy()
+        df_chips = df_chips_snap[(df_chips_snap["date"] >= start_filter) & (df_chips_snap["date"] <= end_filter)].copy()
         period_label = f"{start_filter} ~ {end_filter}"
     else:
         start_filter = min_date
         end_filter = max_date
-        df_price = df_price_full.copy()
-        df_chips = df_chips_full.copy()
+        df_price = df_price_snap.copy()
+        df_chips = df_chips_snap.copy()
         period_label = f"{min_date} ~ {max_date}（全部）"
 
     if df_price.empty:
@@ -1461,15 +1488,15 @@ if target_stock:
 
     # 計算區間股價漲跌幅（純視覺參考）
     chip_close = float(df_price.iloc[-1]["close"])
-    if realtime_price_row is not None:
+    if active_offset == 0 and realtime_price_row is not None:
         display_close = float(realtime_price_row["close"])
         display_close_label = f"即時／最新價（{pending_chip_date}）"
         pct_change = ((display_close - chip_close) / chip_close * 100.0) if chip_close else 0.0
         pct_prefix = "今日漲跌："
     else:
         display_close = chip_close
-        display_close_label = "最新收盤價與區間漲跌"
-        prior_rows = df_price_full[df_price_full["date"] < start_filter]
+        display_close_label = "最新收盤價與區間漲跌" if active_offset == 0 else f"{snap_rel_name}收盤價與區間漲跌"
+        prior_rows = df_price_snap[df_price_snap["date"] < start_filter]
         base_close = float(prior_rows.iloc[-1]["close"]) if not prior_rows.empty else float(df_price.iloc[0]["close"])
         pct_change = ((display_close - base_close) / base_close * 100.0) if base_close else 0.0
         pct_prefix = "區間漲跌："
@@ -1481,7 +1508,8 @@ if target_stock:
     else:
         pct_html = '<span style="color:#cbd5e1; font-weight:700;">0.00%</span>'
 
-    concentrations_saved = meta_saved.get("concentrations", {})
+    # 僅在檢視「今天」時沿用 meta_saved 的集中度張數明細；切到前天／昨天時直接由 _aux.csv 對應基準日重算
+    concentrations_for_snap = meta_saved.get("concentrations", {}) if active_offset == 0 else {}
     tdcc_history_saved = meta_saved.get("tdcc_history", [])
     issued_lots_saved = float(meta_saved.get("issued_lots", 0.0) or 0.0)
 
@@ -1489,15 +1517,15 @@ if target_stock:
         df_price,
         df_chips,
         period_label,
-        df_chips_full=df_chips_full,
-        df_price_full=df_price_full,
-        concentrations=concentrations_saved,
-        df_aux_full=df_aux_full,
+        df_chips_full=df_chips_snap,
+        df_price_full=df_price_snap,
+        concentrations=concentrations_for_snap,
+        df_aux_full=df_aux_snap,
         tdcc_history=tdcc_history_saved,
         issued_lots=issued_lots_saved,
     )
     broker_count = len([c for c in df_chips_full.columns if c not in ("date", "投信")])
-    concentrations = analysis.get("concentrations") or concentrations_saved
+    concentrations = analysis.get("concentrations") or {}
     scenario = analysis.get("scenario", {})
     broker_tags = analysis.get("broker_tags", {})
 
@@ -1507,7 +1535,9 @@ if target_stock:
     # --- 標題列 ---
     updated_str = meta_saved.get("last_updated", "")
     latest_trade_date = df_price_full["date"].max()
-    if pending_chip_date:
+    if active_offset != 0:
+        time_badge = f"⏪ 歷史回放基準日：{anchor_date}（{snap_rel_name}｜最新交易日：{latest_trade_date}）"
+    elif pending_chip_date:
         time_badge = f"🕒 籌碼基準日：{latest_trade_date}（{pending_chip_date} 盤後籌碼尚未公布）"
     else:
         time_badge = f"🕒 更新時間：{updated_str}（最新交易日：{latest_trade_date}）" if updated_str else f"🕒 最新交易日：{latest_trade_date}"
@@ -1521,6 +1551,23 @@ if target_stock:
     )
     if meta_saved.get("github_sync"):
         st.caption(f"雲端資料庫狀態：{meta_saved['github_sync']}")
+
+    # --- 基準日快速切換列：前天 / 昨天 / 今天（預設今天） ---
+    snap_cols = st.columns([1.15] + [1.15] * len(snap_options) + [3.6])
+    with snap_cols[0]:
+        st.markdown('<div class="snap-bar-label">📅 籌碼基準日：</div>', unsafe_allow_html=True)
+    for idx_opt, (off_val, rel_lbl, dt_val) in enumerate(snap_options):
+        short_d = dt_val[5:].replace("-", "/") if len(dt_val) >= 10 else dt_val
+        is_sel = (off_val == active_offset)
+        with snap_cols[idx_opt + 1]:
+            if st.button(
+                f"{rel_lbl} ({short_d})",
+                key=f"btn_snap_{target_stock}_{off_val}",
+                type="primary" if is_sel else "secondary",
+                width="stretch",
+            ):
+                st.session_state[snap_key] = off_val
+                st.rerun()
 
     # =====================================================================
     # 區塊一：核心決策總結看板（100% 純籌碼健康分數 ＋ 五層拆解 ＋ 狀態 ＋ 徽章）
@@ -1540,7 +1587,7 @@ if target_stock:
         "以 <b>50 分</b>為多空中性基準，依五大純籌碼維度累計加減（最高 ±50 分）：<br>"
         "• <b>全市場集中度 (±12)＋主力分點廣度含外資共識 (±6)：</b>±18 分<br>"
         "• <b>60日三大波段主力 (±8)＋投信真實水位 (±6)：</b>±14 分<br>"
-        "• <b>融資四象限 (±5)＋借券賣出 (±5)（含相對量能濾網）：</b>±10 分<br>"
+        "• <b>融資四象限 (±5)＋借券賣出 (±5)（含相對量能濾網；未公布時暫以 0 分計）：</b>±10 分<br>"
         "• <b>TDCC 集保大戶週歸戶驗證：</b>±8 分<br>"
         "• <b>當日隔日沖灌水濾網（偏多時單向扣分）：</b>0 ～ -10 分<br>"
         '<table class="tip-mini-tbl">'
@@ -1632,7 +1679,7 @@ if target_stock:
         )
 
     # =====================================================================
-    # 區塊一之三：三大核心卡片（最大分點主力 ／ 三大波段主力狀態 ／ 最新收盤價）
+    # 區塊一之三：三大核心卡片（最大分點主力 ／ 三大波段主力狀態 ／ 收盤價）
     # =====================================================================
     ctrl5 = float(analysis.get("top3_5d_ctrl_pct", 0.0) or 0.0)
     z5 = analysis.get("top3_5d_ctrl_z")
@@ -1689,7 +1736,7 @@ if target_stock:
         <div class="summary-card">
             <div class="card-label">{display_close_label}</div>
             <div class="card-value">{display_close:.2f} 元</div>
-            <div class="card-sub">{pct_prefix}{pct_html}<br>籌碼日：{latest_trade_date}</div>
+            <div class="card-sub">{pct_prefix}{pct_html}<br>籌碼日：{anchor_date}</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -1753,7 +1800,7 @@ if target_stock:
             f'      <span><span class="trust-lbl">近 5 日</span>{_span_num(trust_info.get("d5", 0))}</span>'
             f'    </div>'
             f'    <div class="trust-secondary">'
-            f'      <span><span class="trust-lbl">今日</span>{_span_num(trust_info["d1"])}</span>'
+            f'      <span><span class="trust-lbl">{day_word}</span>{_span_num(trust_info["d1"])}</span>'
             f'      <span><span class="trust-lbl">區間</span>{_span_num(trust_info["period"])}</span>'
             f'      <span><span class="trust-lbl">近 20 日</span>{_span_num(trust_info["d20"])}</span>'
             f'      <span><span class="trust-lbl">今年</span>{_span_num(trust_info["ytd"])}</span>'
@@ -1772,6 +1819,7 @@ if target_stock:
             analysis.get("margin_info"),
             analysis.get("sbl_info"),
             analysis.get("tdcc_info"),
+            day_word=day_word,
         ),
         unsafe_allow_html=True,
     )
@@ -1779,7 +1827,7 @@ if target_stock:
     # --- 區塊一之六：全市場前 15 大籌碼集中度橫條 ---
     conc_tip = (
         "計算公式：（該區間全市場前 15 大買超分點總張數 － 前 15 大賣超分點總張數）÷ 區間總成交量 × 100%。"
-        "系統已自動保存每日官方快照，並計算相對於過去 60 個交易日的滾動 Z-Score 標準分數。"
+        "採區間歸戶重排口徑，並自動保存每日官方快照計算過去 60 個交易日的滾動 Z-Score 標準分數。"
     )
     st.markdown(
         f'<div class="conc-panel">'
@@ -1787,7 +1835,7 @@ if target_stock:
         f'    <div class="conc-title">'
         f'      📊 全市場前 15 大籌碼集中度'
         f'      <span class="tip-wrap tip-right">ⓘ<span class="tip-box">{conc_tip}</span></span>'
-        f'      <span class="conc-sub-tag">短中線全市場視角（純官方口徑）</span>'
+        f'      <span class="conc-sub-tag">短中線全市場視角（基準日：{anchor_date}）</span>'
         f'    </div>'
         f'  </div>'
         f'  <div class="conc-grid">'
@@ -1887,7 +1935,7 @@ if target_stock:
                 f'  <div class="mf-name" title="{name_title}">◦ {r["name"]} {tag_html}</div>'
                 f'  <div class="mf-cell"><span class="mf-lbl">近 60 日</span>{_span_num(r["net_60d"])}</div>'
                 f'  <div class="mf-cell"><span class="mf-lbl">本區間</span>{_span_num(r["period"])}</div>'
-                f'  <div class="mf-cell"><span class="mf-lbl">今日</span>{_span_num(r["d1"])}</div>'
+                f'  <div class="mf-cell"><span class="mf-lbl">{day_word}</span>{_span_num(r["d1"])}</div>'
                 f'  <div class="mf-cell"><span class="mf-lbl">近 10 日</span>{_span_num(r["d10"])}</div>'
                 f'  <div class="mf-cell"><span class="mf-lbl">近 20 日</span>{_span_num(r["d20"])}</div>'
                 f'  <div class="mf-cell" style="justify-content:center;">{_span_streak(r["streak"])}</div>'
@@ -1973,16 +2021,16 @@ if target_stock:
         right_sellers = top_sellers_60d if rank_mode == "近 60 日波段" else ytd_sellers
         right_lbl = "近 60 日" if rank_mode == "近 60 日波段" else "今年"
 
-        short_dt = latest_trade_date[5:] if len(latest_trade_date) >= 10 else latest_trade_date
+        short_dt = anchor_date[5:] if len(anchor_date) >= 10 else anchor_date
         col_tb, col_ts, col_yb, col_ys = st.columns(4)
         with col_tb:
             st.markdown(
-                _render_rank_table(f"🔴 今日分點買超前 5 大（{short_dt}）", today_buyers, "#ef5350", "今日無淨買超分點", broker_tags),
+                _render_rank_table(f"🔴 {day_word}分點買超前 5 大（{short_dt}）", today_buyers, "#ef5350", f"{day_word}無淨買超分點", broker_tags),
                 unsafe_allow_html=True,
             )
         with col_ts:
             st.markdown(
-                _render_rank_table(f"🟢 今日分點賣超前 5 大（{short_dt}）", today_sellers, "#26a69a", "今日無淨賣超分點", broker_tags),
+                _render_rank_table(f"🟢 {day_word}分點賣超前 5 大（{short_dt}）", today_sellers, "#26a69a", f"{day_word}無淨賣超分點", broker_tags),
                 unsafe_allow_html=True,
             )
         with col_yb:
@@ -2360,8 +2408,8 @@ if target_stock:
             fig.update_yaxes(title_text="融資餘額 (張)", row=3, col=1, secondary_y=False, showgrid=True, tickformat=",.0f")
             fig.update_yaxes(title_text="借券賣出 (張)", row=3, col=1, secondary_y=True, showgrid=False, tickformat=",.0f")
 
+        date_list = df_plot["date"].tolist()
         if range_type not in ("全部", "今日") and start_filter != end_filter:
-            date_list = df_plot["date"].tolist()
             match_indices = [i for i, d in enumerate(date_list) if start_filter <= d <= end_filter]
             if len(match_indices) >= 2:
                 fig.add_vrect(
@@ -2372,6 +2420,16 @@ if target_stock:
                     line_dash="dot",
                     line_color="rgba(255, 255, 255, 0.28)",
                 )
+
+        # 若目前在回放「前天／昨天」，在走勢圖上加上垂直虛線標示基準日位置
+        if active_offset != 0 and anchor_date in date_list:
+            anchor_idx = date_list.index(anchor_date)
+            fig.add_vline(
+                x=anchor_idx,
+                line_width=1.4,
+                line_dash="dash",
+                line_color="rgba(251, 191, 36, 0.75)",
+            )
 
         # --- X 軸純交易日設定 ---
         n_pts = len(df_plot)
