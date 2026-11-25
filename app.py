@@ -434,7 +434,7 @@ st.markdown("""
     color: #cbd5e1;
 }
 
-/* --- 分數區間勝率回測面板 --- */
+/* --- 分數區間勝率與濾網回測面板 --- */
 .bt-panel {
     background-color: #161b26;
     border: 1px solid #2d364a;
@@ -454,6 +454,12 @@ st.markdown("""
     font-size: 0.94rem;
     font-weight: 700;
     color: #f8fafc;
+}
+.bt-sub-title {
+    font-size: 0.86rem;
+    font-weight: 700;
+    color: #e2e8f0;
+    margin: 14px 0 7px 0;
 }
 .bt-meta {
     font-size: 0.78rem;
@@ -1199,7 +1205,7 @@ def _render_aux_dashboard(
 
 
 def _render_backtest_panel(bt_res: dict, stock_title: str) -> str:
-    """渲染今年度「純籌碼分數區間勝率回測表」"""
+    """渲染今年度「純籌碼分數區間勝率回測」與「進場濾網實戰對照表」"""
     if not bt_res or not bt_res.get("rows") or bt_res.get("total_scored_days", 0) == 0:
         return (
             f'<div class="bt-panel">'
@@ -1242,6 +1248,23 @@ def _render_backtest_panel(bt_res: dict, stock_title: str) -> str:
         s_col = "#26a69a" if swr >= 55.0 else ("#ef5350" if swr <= 40.0 else "#cbd5e1")
         return f'<span style="color:{s_col}; font-weight:700;">{swr:.1f}%</span> <span style="color:#64748b; font-size:0.74rem;">({cnt})</span>'
 
+    def _fmt_filter_cell(st_dict: dict) -> str:
+        cnt = int(st_dict.get("count", 0) or 0)
+        wr = st_dict.get("win_rate")
+        s_ret = st_dict.get("strat_ret")
+        if cnt == 0 or wr is None or s_ret is None:
+            return '<span style="color:#64748b;">—</span>'
+        if cnt < 3:
+            return f'<span style="color:#64748b;">{wr:.0f}% ｜ {s_ret:+.1f}% ({cnt}筆)</span>'
+        r_col = "#ef5350" if s_ret > 0 else ("#26a69a" if s_ret < 0 else "#cbd5e1")
+        wr_col = "#fca5a5" if wr >= 60.0 else ("#80cbc4" if wr < 45.0 else "#cbd5e1")
+        return (
+            f'<span style="color:{wr_col}; font-weight:700;">{wr:.1f}%</span>'
+            f' <span style="color:#475569;">｜</span> '
+            f'<span style="color:{r_col}; font-weight:700;">{s_ret:+.2f}%</span>'
+            f' <span style="color:#64748b; font-size:0.74rem;">({cnt})</span>'
+        )
+
     rows_html = []
     for row in bt_res["rows"]:
         col = lvl_color_map.get(row.get("level", "info"), "#cbd5e1")
@@ -1255,6 +1278,43 @@ def _render_backtest_panel(bt_res: dict, stock_title: str) -> str:
             f'  <td>{_fmt_horizon_cell(stats.get(20, {}))}</td>'
             f'  <td>{_fmt_short20_cell(stats.get(20, {}))}</td>'
             f'</tr>'
+        )
+
+    filter_block_html = ""
+    filter_rows = bt_res.get("filter_rows") or []
+    if filter_rows:
+        f_rows_html = []
+        for fr in filter_rows:
+            col = lvl_color_map.get(fr.get("level", "info"), "#cbd5e1")
+            dir_badge = (
+                '<span style="font-size:0.71rem; padding:1px 6px; border-radius:4px; background:rgba(239,83,80,0.16); color:#fca5a5; margin-right:6px;">做多</span>'
+                if fr.get("direction") == "long"
+                else '<span style="font-size:0.71rem; padding:1px 6px; border-radius:4px; background:rgba(38,166,154,0.16); color:#80cbc4; margin-right:6px;">放空</span>'
+            )
+            stats = fr.get("stats") or {}
+            f_rows_html.append(
+                f'<tr>'
+                f'  <td style="color:{col};">{dir_badge}{fr["label"]}</td>'
+                f'  <td>{fr["days"]} 日</td>'
+                f'  <td>{_fmt_filter_cell(stats.get(5, {}))}</td>'
+                f'  <td>{_fmt_filter_cell(stats.get(10, {}))}</td>'
+                f'  <td>{_fmt_filter_cell(stats.get(20, {}))}</td>'
+                f'</tr>'
+            )
+        filter_block_html = (
+            f'<div class="bt-sub-title">🧪 進場濾網實戰對照（做多門檻 ≥ 55 分 ／ 放空門檻 ≤ 35 分）</div>'
+            f'<table class="bt-table">'
+            f'  <thead>'
+            f'    <tr>'
+            f'      <th>濾網條件（策略方向）</th>'
+            f'      <th>觸發天數</th>'
+            f'      <th>後 5 日（策略勝率｜策略均報）</th>'
+            f'      <th>後 10 日（策略勝率｜策略均報）</th>'
+            f'      <th>後 20 日（策略勝率｜策略均報）</th>'
+            f'    </tr>'
+            f'  </thead>'
+            f'  <tbody>{"".join(f_rows_html)}</tbody>'
+            f'</table>'
         )
 
     verdict_html = (
@@ -1282,9 +1342,10 @@ def _render_backtest_panel(bt_res: dict, stock_title: str) -> str:
         f'    </thead>'
         f'    <tbody>{"".join(rows_html)}</tbody>'
         f'  </table>'
+        f'  {filter_block_html}'
         f'  <div class="bt-note">'
-        f'    判讀說明：「均報」為以當日收盤價持有 5／10／20 個交易日之平均漲跌幅（正值紅字利多、負值綠字利空）；'
-        f'    最右欄為「20 日後股價下跌（放空獲利）之勝率」。若某區間有效樣本少於 3 筆，數值以灰字顯示僅供參考。'
+        f'    判讀說明：上表「均報」為買進持有 5／10／20 日平均漲跌幅；下表「策略均報」已依做多／放空方向換算（放空策略為負漲跌幅，正值紅字代表該方向獲利）。'
+        f'    若某條件有效樣本少於 3 筆，數值以灰字顯示僅供參考。'
         f'  </div>'
         f'</div>'
     )
@@ -1323,16 +1384,24 @@ def _render_rank_table(
     )
 
 
-def _split_price_by_health(closes: pd.Series, scores: pd.Series):
+def _split_price_by_health(
+    closes: pd.Series,
+    scores: pd.Series,
+    ma20: pd.Series | None = None,
+    use_ma20_filter: bool = False,
+    bull_min: int = 55,
+    bear_max: int = 35,
+):
     """
-    依每日純籌碼健康分數將收盤價折線切分為三個無縫銜接的顏色序列：
-    - y_bull: >= 70 分（強力籌碼集中，亮紅）
-    - y_neutral: 36 ~ 69 分或暖身期（中性／溫和，金黃）
-    - y_bear: <= 35 分（籌碼明顯發散，亮綠）
+    依每日純籌碼健康分數（並可選配 20MA 趨勢濾網）將收盤價折線切分為三個無縫銜接的顏色序列：
+    - y_bull: >= bull_min（預設 55 分，若啟用 20MA 濾網則須同步收盤 > 20MA），亮紅
+    - y_neutral: 中性區、被濾網過濾日或暖身期，金黃
+    - y_bear: <= bear_max（預設 35 分，若啟用 20MA 濾網則須同步收盤 < 20MA），亮綠
     """
     n = len(closes)
     c_vals = closes.to_numpy(dtype=float)
     s_vals = scores.to_numpy(dtype=float) if scores is not None else [float("nan")] * n
+    m_vals = ma20.to_numpy(dtype=float) if ma20 is not None else [float("nan")] * n
 
     y_bull = [None] * n
     y_neutral = [None] * n
@@ -1341,10 +1410,18 @@ def _split_price_by_health(closes: pd.Series, scores: pd.Series):
 
     for i in range(n):
         sc = s_vals[i]
-        if pd.notna(sc) and sc >= 70:
-            regimes.append("bull")
-        elif pd.notna(sc) and sc <= 35:
-            regimes.append("bear")
+        cl = c_vals[i]
+        mv = m_vals[i]
+        if pd.notna(sc) and sc >= bull_min:
+            if (not use_ma20_filter) or (pd.notna(mv) and cl > mv):
+                regimes.append("bull")
+            else:
+                regimes.append("neutral")
+        elif pd.notna(sc) and sc <= bear_max:
+            if (not use_ma20_filter) or (pd.notna(mv) and cl < mv):
+                regimes.append("bear")
+            else:
+                regimes.append("neutral")
         else:
             regimes.append("neutral")
 
@@ -1757,20 +1834,24 @@ if target_stock:
                 st.rerun()
 
     # =====================================================================
-    # 區塊一：核心決策總結看板（趨勢 60% ＋ 動能 40% 純籌碼健康分數）
+    # 區塊一：核心決策總結看板（趨勢 60% ＋ 動能 40%，做多門檻 ≥ 55 分）
     # =====================================================================
+    bull_min = int(STRATEGY_PARAMS.get("bull_score_min", 55))
+    strong_bull_min = int(STRATEGY_PARAMS.get("strong_bull_score_min", 70))
+    bear_max = int(STRATEGY_PARAMS.get("bear_score_max", 35))
+
     conv_score = int(scenario.get("conviction_score", 50))
-    if conv_score >= 70:
-        score_col, score_lbl = "#ef5350", "強力籌碼集中"
-    elif conv_score >= 55:
-        score_col, score_lbl = "#f59e0b", "溫和偏多集中"
-    elif conv_score <= 35:
-        score_col, score_lbl = "#26a69a", "籌碼明顯發散"
+    if conv_score >= strong_bull_min:
+        score_col, score_lbl = "#ef5350", f"強力籌碼集中 (≥{strong_bull_min})"
+    elif conv_score >= bull_min:
+        score_col, score_lbl = "#fb7185", f"偏多進場甜蜜區 ({bull_min}~{strong_bull_min - 1})"
+    elif conv_score <= bear_max:
+        score_col, score_lbl = "#26a69a", f"籌碼明顯發散 (≤{bear_max})"
     else:
         score_col, score_lbl = "#94a3b8", "籌碼中性／分歧"
 
     score_tip_html = (
-        "<b>純籌碼健康分數（0～100 分｜趨勢 60% ＋ 動能 40%｜排除均線與漲跌）</b><br>"
+        f"<b>純籌碼健康分數（0～100 分｜趨勢 60% ＋ 動能 40%｜做多門檻 ≥ {bull_min} 分）</b><br>"
         "以 <b>50 分</b>為多空中性基準，分兩層累計加減（最高 ±50 分）：<br>"
         "• <b>一、中線趨勢面 (±30 分，佔 60%)：</b><br>"
         "&nbsp;&nbsp;◦ 全體波段分點合力 20/60 日控盤與庫存均線 (±14)<br>"
@@ -1783,10 +1864,10 @@ if target_stock:
         '<table class="tip-mini-tbl">'
         '  <thead><tr><th>分數區間</th><th>燈號狀態</th><th>純籌碼含義</th></tr></thead>'
         '  <tbody>'
-        '    <tr><td style="white-space:nowrap;"><b>70 ～ 100 分</b></td><td style="color:#ef5350; font-weight:700; white-space:nowrap;">強力籌碼集中（紅）</td><td>波段趨勢與短線動能高度共振，屬主升鎖碼或強勢建倉格局。</td></tr>'
-        '    <tr><td style="white-space:nowrap;"><b>55 ～ 69 分</b></td><td style="color:#f59e0b; font-weight:700; white-space:nowrap;">溫和偏多集中（橘）</td><td>全體波段分點籌碼轉佳或緩步沉澱，尚未全面爆發共振。</td></tr>'
-        '    <tr><td style="white-space:nowrap;"><b>36 ～ 54 分</b></td><td style="color:#94a3b8; font-weight:700; white-space:nowrap;">籌碼中性／分歧（灰）</td><td>多空力道抵銷，或趨勢與動能方向衝突／少數硬撐。</td></tr>'
-        '    <tr><td style="white-space:nowrap;"><b>0 ～ 35 分</b></td><td style="color:#26a69a; font-weight:700; white-space:nowrap;">籌碼明顯發散（綠）</td><td>全體波段分點持續倒貨且外圍發散，籌碼明確流向散戶。</td></tr>'
+        f'    <tr><td style="white-space:nowrap;"><b>{strong_bull_min} ～ 100 分</b></td><td style="color:#ef5350; font-weight:700; white-space:nowrap;">強力共振（紅）</td><td>波段趨勢與短線動能高度共振，屬主升鎖碼格局；乖離大時宜等拉回。</td></tr>'
+        f'    <tr><td style="white-space:nowrap;"><b>{bull_min} ～ {strong_bull_min - 1} 分</b></td><td style="color:#fb7185; font-weight:700; white-space:nowrap;">偏多甜蜜區（紅）</td><td>已達做多門檻且尚未短線過熱，搭配站上 20MA 勝率與期望值最佳。</td></tr>'
+        f'    <tr><td style="white-space:nowrap;"><b>{bear_max + 1} ～ {bull_min - 1} 分</b></td><td style="color:#94a3b8; font-weight:700; white-space:nowrap;">中性／分歧（黃）</td><td>多空力道抵銷，或趨勢與動能方向衝突／少數硬撐，宜觀望。</td></tr>'
+        f'    <tr><td style="white-space:nowrap;"><b>0 ～ {bear_max} 分</b></td><td style="color:#26a69a; font-weight:700; white-space:nowrap;">明顯發散（綠）</td><td>全體波段分點持續倒貨，應避開做多；跌破 20MA 符合偏空條件。</td></tr>'
         '  </tbody>'
         '</table>'
     )
@@ -1885,7 +1966,7 @@ if target_stock:
     raw_status_html = analysis.get("status_html", "N/A")
     top3_period_net = int(analysis.get("top3_period_net", 0))
     if "吃貨中" in raw_status_html:
-        if conv_score <= 35:
+        if conv_score <= bear_max:
             display_status_html = f'🟡 區間逆勢承接（{_span_num(top3_period_net)}｜整體籌碼偏發散）'
         elif z5 is not None and abs(z5) < 1.0:
             display_status_html = f'🟡 區間小幅買超（{_span_num(top3_period_net)}｜屬日常波動）'
@@ -2055,9 +2136,9 @@ if target_stock:
         unsafe_allow_html=True,
     )
 
-    # --- 可收合抽屜：純籌碼結構 5 大狀態判讀矩陣（100% 撇除均線） ---
+    # --- 可收合抽屜：純籌碼結構 5 大狀態判讀矩陣（做多門檻 ≥ 55 分） ---
     matched_id = scenario.get("id", 0)
-    with st.expander("📖 純籌碼結構 5 大狀態判讀矩陣（趨勢 60% ＋ 動能 40%）", expanded=False):
+    with st.expander("📖 純籌碼結構 5 大狀態判讀矩陣（趨勢 60% ＋ 動能 40%｜做多門檻 ≥ 55 分）", expanded=False):
         m_rows = []
         for item in SCENARIO_MATRIX:
             is_match = (item["id"] == matched_id)
@@ -2308,21 +2389,28 @@ if target_stock:
     )
     has_health_series = (not df_health.empty) and df_health["health_score"].notna().any()
 
-    c_opt1, c_opt2, c_opt3, c_opt4 = st.columns([1.3, 1.35, 1.35, 1.8])
+    c_opt1, c_opt2, c_opt3, c_opt4, c_opt5 = st.columns([1.15, 1.35, 1.25, 1.2, 1.55])
     with c_opt1:
         show_ma = st.checkbox(
-            "顯示 10/20MA (純參考)",
+            "顯示 10/20MA",
             value=False,
-            help="均線僅供主圖視覺對照，已完全排除於純籌碼評分之外",
+            help="在主圖顯示 10MA 與 20MA 均線作為視覺對照",
         )
     with c_opt2:
         show_health_regime = st.checkbox(
-            "純籌碼燈號背景",
+            f"純籌碼燈號 (≥{bull_min}/≤{bear_max})",
             value=bool(has_health_series),
             disabled=not bool(has_health_series),
-            help="收盤價折線與主圖背景 100% 依每日純籌碼健康分數動態變色：紅（≥70分強力集中）、黃（中性）、綠（≤35分明顯發散）",
+            help=f"收盤價折線與主圖背景依每日純籌碼分數動態變色：紅（≥{bull_min}分偏多）、黃（中性）、綠（≤{bear_max}分偏空）",
         )
     with c_opt3:
+        use_ma20_filter = st.checkbox(
+            "套用 20MA 趨勢濾網",
+            value=False,
+            disabled=not (bool(has_health_series) and show_health_regime),
+            help=f"開啟後主圖紅燈須同時滿足「分數≥{bull_min} 且 收盤>20MA」、綠燈須同時滿足「分數≤{bear_max} 且 收盤<20MA」，濾除左側接刀與急軋空",
+        )
+    with c_opt4:
         has_aux_series = (
             df_aux_full is not None
             and (
@@ -2335,7 +2423,7 @@ if target_stock:
             value=bool(has_aux_series),
             disabled=not bool(has_aux_series),
         )
-    with c_opt4:
+    with c_opt5:
         cost_basis = st.radio(
             "成本線計算基準",
             options=["近 60 日波段成本", "今年累計成本"],
@@ -2423,13 +2511,13 @@ if target_stock:
             )
             chart_height = 620
 
-        # --- Row 1：股價（依純籌碼健康分數三色變色）、選配 10/20MA 與主力成本線 ---
+        # --- Row 1：股價（依純籌碼分數 ± 20MA 濾網三色變色）、選配 10/20MA 與主力成本線 ---
         if show_ma:
             fig.add_trace(
                 go.Scatter(
                     x=df_plot["date"],
                     y=df_plot["ma10"],
-                    name="10MA (參考)",
+                    name="10MA",
                     line=dict(color="rgba(56, 189, 248, 0.78)", width=1.3),
                     hovertemplate="%{y:,.2f} 元<extra>10MA</extra>",
                 ),
@@ -2439,8 +2527,19 @@ if target_stock:
                 go.Scatter(
                     x=df_plot["date"],
                     y=df_plot["ma20"],
-                    name="20MA (參考)",
-                    line=dict(color="rgba(192, 132, 252, 0.78)", width=1.3),
+                    name="20MA",
+                    line=dict(color="rgba(192, 132, 252, 0.85)", width=1.5),
+                    hovertemplate="%{y:,.2f} 元<extra>20MA</extra>",
+                ),
+                row=1, col=1, secondary_y=False,
+            )
+        elif use_ma20_filter:
+            fig.add_trace(
+                go.Scatter(
+                    x=df_plot["date"],
+                    y=df_plot["ma20"],
+                    name="20MA (濾網基準)",
+                    line=dict(color="rgba(192, 132, 252, 0.82)", width=1.4, dash="dot"),
                     hovertemplate="%{y:,.2f} 元<extra>20MA</extra>",
                 ),
                 row=1, col=1, secondary_y=False,
@@ -2468,28 +2567,40 @@ if target_stock:
 
         if show_health_regime and has_health_series:
             y_bull, y_neutral, y_bear, regime_bands = _split_price_by_health(
-                df_plot["close"], df_plot["health_score"]
+                df_plot["close"],
+                df_plot["health_score"],
+                ma20=df_plot["ma20"],
+                use_ma20_filter=use_ma20_filter,
+                bull_min=bull_min,
+                bear_max=bear_max,
             )
+            neutral_legend = "收盤價 (觀望/濾除)" if use_ma20_filter else "收盤價 (中性)"
+            bull_legend = f"偏多+站上20MA (≥{bull_min}分)" if use_ma20_filter else f"偏多集中 (≥{bull_min}分)"
+            bear_legend = f"偏空+跌破20MA (≤{bear_max}分)" if use_ma20_filter else f"明顯發散 (≤{bear_max}分)"
+
+            # 隱形懸浮專用線（showlegend=False，避免圖例出現空白無色線段）
             fig.add_trace(
                 go.Scatter(
                     x=df_plot["date"],
                     y=df_plot["close"],
-                    name="收盤價 (中性)",
+                    name="收盤價懸浮",
                     line=dict(color="#FFD700", width=2.4),
                     opacity=0.0,
+                    showlegend=False,
                     text=price_hover_texts,
                     hovertemplate="%{text}<extra>收盤／純籌碼</extra>",
                 ),
                 row=1, col=1, secondary_y=False,
             )
+            # 真正顯示於圖面與圖例的黃色中性折線
             fig.add_trace(
                 go.Scatter(
                     x=df_plot["date"],
                     y=y_neutral,
-                    name="收盤價 (中性)",
+                    name=neutral_legend,
                     line=dict(color="#FFD700", width=2.5),
                     connectgaps=False,
-                    showlegend=False,
+                    showlegend=True,
                     hoverinfo="skip",
                 ),
                 row=1, col=1, secondary_y=False,
@@ -2498,7 +2609,7 @@ if target_stock:
                 go.Scatter(
                     x=df_plot["date"],
                     y=y_bull,
-                    name="強力集中 (≥70分)",
+                    name=bull_legend,
                     line=dict(color="#ef5350", width=3.1),
                     connectgaps=False,
                     hoverinfo="skip",
@@ -2509,7 +2620,7 @@ if target_stock:
                 go.Scatter(
                     x=df_plot["date"],
                     y=y_bear,
-                    name="明顯發散 (≤35分)",
+                    name=bear_legend,
                     line=dict(color="#26a69a", width=3.1),
                     connectgaps=False,
                     hoverinfo="skip",
@@ -2652,7 +2763,7 @@ if target_stock:
 
         st.plotly_chart(fig, width="stretch")
 
-    # --- 區塊三：今年度純籌碼分數區間勝率回測表 ---
+    # --- 區塊三：今年度純籌碼分數區間勝率與進場濾網實戰對照回測表 ---
     if has_health_series:
         bt_res = compute_score_backtest(df_price_full, df_health, horizons=(5, 10, 20))
         st.markdown(_render_backtest_panel(bt_res, stock_title), unsafe_allow_html=True)
