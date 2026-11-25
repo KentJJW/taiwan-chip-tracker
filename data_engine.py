@@ -1178,7 +1178,11 @@ def analyze_main_force(
     issued_lots: float = 0.0,
     broker_diff_diag: str = "",
 ) -> dict:
-    """整合滾動 60 日波段主力、主力分點廣度比(含外資共識)、投信真實持股比、融資四象限、借券、集保與純籌碼健康評分"""
+    """
+    整合滾動 60 日波段主力、主力分點廣度比(含外資共識)、投信真實持股比、融資四象限、借券、集保與純籌碼健康評分：
+    - 嚴格以 full_price 最後一筆交易日作為基準日 (anchor_date)，支援前天／昨天／今天即時回放
+    - 基準日當天若資券或借券尚未公布，不混用前一日數據且不計分（回傳 None 供前端顯示待更新／尚未公布）
+    """
     _ = broker_diff_diag
     all_cols = [c for c in df_chips.columns if c != "date"]
     pure_broker_cols = [c for c in all_cols if c != "投信"]
@@ -1186,7 +1190,15 @@ def analyze_main_force(
     full_df = df_chips_full if df_chips_full is not None else df_chips
     full_price = df_price_full if df_price_full is not None else df_price
 
-    # --- 1. 整理集中度並結合 _aux.csv 歷史序列計算 60 日滾動 Z-Score ---
+    aux_aligned = None
+    if not full_price.empty and df_aux_full is not None and not df_aux_full.empty:
+        aux_aligned = full_price[["date"]].merge(
+            df_aux_full.drop_duplicates(subset=["date"], keep="last"),
+            on="date",
+            how="left",
+        )
+
+    # --- 1. 整理集中度並結合基準日之 _aux.csv 歷史序列計算 60 日滾動 Z-Score ---
     conc_out = {}
     raw_conc = concentrations if isinstance(concentrations, dict) else {}
     aux_conc_map = {"d5": "conc_5d", "d10": "conc_10d", "d20": "conc_20d"}
@@ -1194,14 +1206,16 @@ def analyze_main_force(
         base_item = dict(raw_conc.get(k, {})) if isinstance(raw_conc.get(k), dict) else {}
         z_val = base_item.get("z_score")
         z_samples = int(base_item.get("z_samples", 0) or 0)
-        if df_aux_full is not None and not df_aux_full.empty and aux_col in df_aux_full.columns:
-            s_clean = pd.to_numeric(df_aux_full[aux_col], errors="coerce").dropna()
+        if aux_aligned is not None and aux_col in aux_aligned.columns:
+            s_raw = pd.to_numeric(aux_aligned[aux_col], errors="coerce")
+            s_clean = s_raw.dropna()
             z_samples = len(s_clean)
-            if base_item.get("pct") is None and not s_clean.empty:
-                base_item["pct"] = round(float(s_clean.iloc[-1]), 2)
-            z_calc = compute_rolling_zscore(s_clean, window=STRATEGY_PARAMS["zscore_window"], min_periods=15)
-            if z_calc is not None:
-                z_val = z_calc
+            if base_item.get("pct") is None and pd.notna(s_raw.iloc[-1]):
+                base_item["pct"] = round(float(s_raw.iloc[-1]), 2)
+            if pd.notna(s_raw.iloc[-1]):
+                z_calc = compute_rolling_zscore(s_clean, window=STRATEGY_PARAMS["zscore_window"], min_periods=15)
+                if z_calc is not None:
+                    z_val = z_calc
         base_item["z_score"] = z_val
         base_item["z_samples"] = z_samples
         conc_out[k] = base_item
@@ -1247,13 +1261,14 @@ def analyze_main_force(
             "today_sellers": {},
         }
 
+    anchor_date = str(full_price["date"].iloc[-1])
     period_vol = float(df_price["volume"].sum()) if "volume" in df_price.columns else 0.0
     vol_5d = float(full_price.tail(5)["volume"].sum()) if "volume" in full_price.columns else 0.0
     latest_close_full = float(full_price.iloc[-1]["close"])
     lb_days = STRATEGY_PARAMS["wave_lookback_days"]
     z_win = STRATEGY_PARAMS["zscore_window"]
 
-    # --- 2. 投信獨立追蹤（優先採用 _aux.csv 的真實持股比率） ---
+    # --- 2. 投信獨立追蹤（嚴格對齊基準日之真實持股比率） ---
     trust_info = None
     if "投信" in full_df.columns:
         t_ytd = int(round(full_df["投信"].sum()))
@@ -1270,13 +1285,13 @@ def analyze_main_force(
         t_pnl = round((latest_close_full - t_cost) / t_cost * 100.0, 2) if (t_cost > 0 and t_inv > 0) else None
 
         holding_pct = None
-        if df_aux_full is not None and not df_aux_full.empty:
-            if "trust_holding_pct" in df_aux_full.columns:
-                s_tpct = pd.to_numeric(df_aux_full["trust_holding_pct"], errors="coerce").dropna()
+        if aux_aligned is not None:
+            if "trust_holding_pct" in aux_aligned.columns:
+                s_tpct = pd.to_numeric(aux_aligned["trust_holding_pct"], errors="coerce").dropna()
                 if not s_tpct.empty:
                     holding_pct = round(float(s_tpct.iloc[-1]), 2)
-            if holding_pct is None and "trust_holding" in df_aux_full.columns and issued_lots > 0:
-                s_thold = pd.to_numeric(df_aux_full["trust_holding"], errors="coerce").dropna()
+            if holding_pct is None and "trust_holding" in aux_aligned.columns and issued_lots > 0:
+                s_thold = pd.to_numeric(aux_aligned["trust_holding"], errors="coerce").dropna()
                 if not s_thold.empty:
                     holding_pct = round(float(s_thold.iloc[-1]) / issued_lots * 100.0, 2)
 
@@ -1296,38 +1311,33 @@ def analyze_main_force(
         }
         trust_info["phase"] = evaluate_trust_phase(trust_info)
 
-    # --- 3. 整理信用交易與集保輔助籌碼（嚴格對齊交易日並計算 lag_days 與 is_latest） ---
+    # --- 3. 整理信用交易與集保輔助籌碼（嚴格檢核基準日當天是否已公布，絕不混用前一日數值） ---
     margin_info = None
     sbl_info = None
     tdcc_info = None
 
-    if df_aux_full is not None and not df_aux_full.empty:
-        aux_aligned = full_price[["date"]].merge(
-            df_aux_full.drop_duplicates(subset=["date"], keep="last"),
-            on="date",
-            how="left",
-        )
-        last_idx_all = len(aux_aligned) - 1
-
-        if "margin_bal" in aux_aligned.columns and aux_aligned["margin_bal"].notna().any():
-            s_m = pd.to_numeric(aux_aligned["margin_bal"], errors="coerce").dropna()
-            s_s = pd.to_numeric(aux_aligned["short_bal"], errors="coerce").dropna() if "short_bal" in aux_aligned.columns else pd.Series(dtype=float)
-            if not s_m.empty:
-                m_last_pos = int(s_m.index[-1])
-                m_lag = last_idx_all - m_last_pos
-                m_date = str(aux_aligned.loc[m_last_pos, "date"])
-                latest_m = int(round(s_m.iloc[-1]))
+    if aux_aligned is not None:
+        if "margin_bal" in aux_aligned.columns:
+            s_m_raw = pd.to_numeric(aux_aligned["margin_bal"], errors="coerce")
+            if pd.notna(s_m_raw.iloc[-1]):
+                s_m = s_m_raw.dropna()
+                s_s_raw = (
+                    pd.to_numeric(aux_aligned["short_bal"], errors="coerce")
+                    if "short_bal" in aux_aligned.columns
+                    else pd.Series(dtype=float)
+                )
+                latest_m = int(round(float(s_m.iloc[-1])))
                 base_m = float(s_m.iloc[-6]) if len(s_m) >= 6 else float(s_m.iloc[0])
                 chg_5d = int(round(latest_m - base_m))
                 chg_5d_pct = round((chg_5d / base_m * 100.0), 2) if base_m > 0 else 0.0
                 chg_5d_z = compute_rolling_zscore(s_m.diff(5), window=z_win, min_periods=15)
                 chg_5d_vol_pct = round((abs(chg_5d) / vol_5d * 100.0), 2) if vol_5d > 0 else None
-                latest_s = int(round(s_s.iloc[-1])) if not s_s.empty else 0
+                latest_s = int(round(float(s_s_raw.iloc[-1]))) if (len(s_s_raw) > 0 and pd.notna(s_s_raw.iloc[-1])) else 0
                 sm_ratio = round((latest_s / latest_m * 100.0), 2) if latest_m > 0 else 0.0
                 margin_info = {
-                    "date": m_date,
-                    "lag_days": m_lag,
-                    "is_latest": (m_lag == 0),
+                    "date": anchor_date,
+                    "lag_days": 0,
+                    "is_latest": True,
                     "latest_bal": latest_m,
                     "chg_5d": chg_5d,
                     "chg_5d_pct": chg_5d_pct,
@@ -1338,13 +1348,11 @@ def analyze_main_force(
                     "quadrant": 0,
                 }
 
-        if "sbl_bal" in aux_aligned.columns and aux_aligned["sbl_bal"].notna().any():
-            s_sbl = pd.to_numeric(aux_aligned["sbl_bal"], errors="coerce").dropna()
-            if not s_sbl.empty:
-                sbl_last_pos = int(s_sbl.index[-1])
-                sbl_lag = last_idx_all - sbl_last_pos
-                sbl_date = str(aux_aligned.loc[sbl_last_pos, "date"])
-                latest_sbl = int(round(s_sbl.iloc[-1]))
+        if "sbl_bal" in aux_aligned.columns:
+            s_sbl_raw = pd.to_numeric(aux_aligned["sbl_bal"], errors="coerce")
+            if pd.notna(s_sbl_raw.iloc[-1]):
+                s_sbl = s_sbl_raw.dropna()
+                latest_sbl = int(round(float(s_sbl.iloc[-1])))
                 base_sbl = float(s_sbl.iloc[-6]) if len(s_sbl) >= 6 else float(s_sbl.iloc[0])
                 chg_5d = int(round(latest_sbl - base_sbl))
                 chg_5d_pct = round((chg_5d / base_sbl * 100.0), 2) if base_sbl > 0 else 0.0
@@ -1352,9 +1360,9 @@ def analyze_main_force(
                 chg_5d_vol_pct = round((abs(chg_5d) / vol_5d * 100.0), 2) if vol_5d > 0 else None
                 chg_1d = int(round(latest_sbl - float(s_sbl.iloc[-2]))) if len(s_sbl) >= 2 else 0
                 sbl_info = {
-                    "date": sbl_date,
-                    "lag_days": sbl_lag,
-                    "is_latest": (sbl_lag == 0),
+                    "date": anchor_date,
+                    "lag_days": 0,
+                    "is_latest": True,
                     "latest_bal": latest_sbl,
                     "chg_5d": chg_5d,
                     "chg_5d_pct": chg_5d_pct,
@@ -1364,17 +1372,22 @@ def analyze_main_force(
                 }
 
     if isinstance(tdcc_history, list) and tdcc_history:
-        latest_t = tdcc_history[-1]
-        prev_t = tdcc_history[-2] if len(tdcc_history) >= 2 else None
-        tdcc_info = {
-            "date": latest_t.get("date", ""),
-            "whale_1000_pct": float(latest_t.get("whale_1000_pct", 0.0)),
-            "whale_400_pct": float(latest_t.get("whale_400_pct", 0.0)),
-            "total_holders": int(latest_t.get("total_holders", 0)),
-            "whale_1000_chg_1w": round(float(latest_t["whale_1000_pct"]) - float(prev_t["whale_1000_pct"]), 2) if prev_t else None,
-            "whale_400_chg_1w": round(float(latest_t["whale_400_pct"]) - float(prev_t["whale_400_pct"]), 2) if prev_t else None,
-            "holders_chg_1w": int(latest_t["total_holders"]) - int(prev_t["total_holders"]) if prev_t else None,
-        }
+        valid_tdcc = sorted(
+            [t for t in tdcc_history if str(t.get("date", "")) <= anchor_date],
+            key=lambda x: x.get("date", ""),
+        )
+        if valid_tdcc:
+            latest_t = valid_tdcc[-1]
+            prev_t = valid_tdcc[-2] if len(valid_tdcc) >= 2 else None
+            tdcc_info = {
+                "date": latest_t.get("date", ""),
+                "whale_1000_pct": float(latest_t.get("whale_1000_pct", 0.0)),
+                "whale_400_pct": float(latest_t.get("whale_400_pct", 0.0)),
+                "total_holders": int(latest_t.get("total_holders", 0)),
+                "whale_1000_chg_1w": round(float(latest_t["whale_1000_pct"]) - float(prev_t["whale_1000_pct"]), 2) if prev_t else None,
+                "whale_400_chg_1w": round(float(latest_t["whale_400_pct"]) - float(prev_t["whale_400_pct"]), 2) if prev_t else None,
+                "holders_chg_1w": int(latest_t["total_holders"]) - int(prev_t["total_holders"]) if prev_t else None,
+            }
 
     # --- 4. 分點行為畫像、主力分點廣度比（含外資共識）與 60 日波段主力篩選 ---
     profiles = profile_brokers(full_price, full_df, lookback_days=lb_days)
@@ -1716,7 +1729,6 @@ def compute_daily_health_scores(
     high_thresh = STRATEGY_PARAMS["breadth_streak_pct"]
     tdcc_list = sorted(tdcc_history, key=lambda x: x.get("date", "")) if isinstance(tdcc_history, list) else []
 
-    # 預計算每日投信連買／連賣天數與波段分點廣度連強天數
     trust_streak_arr = np.zeros(n, dtype=int)
     breadth_high_streak_arr = np.zeros(n, dtype=int)
     cur_ts = 0
@@ -1756,7 +1768,6 @@ def compute_daily_health_scores(
             records.append({"date": dt_str, "health_score": np.nan, "scenario_id": 0, "sub_type": ""})
             continue
 
-        # 1. 當日滾動 60 日三大波段主力
         w_start = max(0, i - lb + 1)
         sum_60 = chips_mat[w_start : i + 1].sum(axis=0)
         pos_idx = np.where(sum_60 > 0)[0]
@@ -1787,7 +1798,6 @@ def compute_daily_health_scores(
 
         c5_z = _slice_zscore(c5_arr, i)
 
-        # 2. 當日近 5 日主力分點廣度比（含外資共識）
         row5 = chips_5d_mat[i]
         b5_i = int((row5 > 0).sum())
         s5_i = int((row5 < 0).sum())
@@ -1816,7 +1826,6 @@ def compute_daily_health_scores(
             "high_streak": int(breadth_high_streak_arr[i]),
         }
 
-        # 3. 當日隔日沖佔比與近 5 日本土波段買超
         dt_info_i = None
         if dt_mat.shape[1] > 0 and vol_arr[i] > 0:
             row_dt = dt_mat[i]
@@ -1836,7 +1845,6 @@ def compute_daily_health_scores(
             if len(pos_dom) > 0:
                 dom_buy_5d = int(round(np.sort(pos_dom)[::-1][:3].sum()))
 
-        # 4. 投信當日狀態
         t_hold_i = None
         if not np.isnan(trust_pct_arr[i]):
             t_hold_i = round(float(trust_pct_arr[i]), 2)
@@ -1850,7 +1858,6 @@ def compute_daily_health_scores(
             "holding_pct": t_hold_i,
         }
 
-        # 5. 融資四象限、借券賣出與集保大戶當日狀態
         mg_i = None
         if not np.isnan(m_arr[i]) and i >= 5 and not np.isnan(m_arr[i - 5]) and m_arr[i - 5] > 0:
             chg_m = int(round(m_arr[i] - m_arr[i - 5]))
