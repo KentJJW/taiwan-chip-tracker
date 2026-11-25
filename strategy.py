@@ -47,7 +47,7 @@ FOREIGN_BROKER_KEYWORDS = (
     "巴克萊",
 )
 
-# 100% 純籌碼策略參數集中管理
+# 100% 純籌碼策略參數集中管理（趨勢 60% ＋ 動能 40%）
 STRATEGY_PARAMS = {
     # 滾動視窗與 Z-Score 門檻
     "wave_lookback_days": 60,
@@ -55,9 +55,19 @@ STRATEGY_PARAMS = {
     "z_bull_min": 1.0,
     "z_bear_max": -1.0,
 
-    # 集中度與波段三大主力門檻
+    # 全體波段分點合力控盤率門檻（趨勢核心）
+    "wave_agg_20d_strong_pct": 4.0,
+    "wave_agg_20d_mod_pct": 1.5,
+    "wave_agg_20d_mild_pct": 0.3,
+    "wave_agg_60d_mod_pct": 1.0,
+
+    # 集中度與前三大波段主力門檻
     "conc_strong_pct": 10.0,
     "conc_mod_pct": 3.0,
+    "conc_20d_strong_pct": 8.0,
+    "conc_20d_mod_pct": 2.0,
+    "conc_10d_strong_pct": 5.0,
+    "conc_10d_mod_pct": 1.5,
     "top3_ctrl_strong_pct": 5.0,
     "top3_ctrl_mod_pct": 2.0,
     "top3_min_amount_ntd": 30_000_000.0,
@@ -73,7 +83,7 @@ STRATEGY_PARAMS = {
     "foreign_breadth_bull_pct": 70.0,
     "foreign_breadth_bear_pct": 30.0,
 
-    # 信用交易（融資四象限與借券賣出）門檻與相對量能防呆
+    # 信用交易（融資四象限與情境借券）門檻與相對量能防呆
     "credit_vol_ratio_min": 3.0,
     "margin_surge_5d_pct": 5.0,
     "margin_clean_5d_pct": -5.0,
@@ -100,52 +110,52 @@ STRATEGY_PARAMS = {
     "winner_min_avg_ret": 3.0,
 }
 
-# 純籌碼結構 5 大狀態判讀矩陣（100% 撇除均線與漲跌）
+# 純籌碼結構 5 大狀態判讀矩陣（趨勢 60% ＋ 動能 40%，100% 撇除均線與漲跌）
 SCENARIO_MATRIX = [
     {
         "id": 1,
         "type": "bull",
-        "name": "🔥 1. 全面共振吸籌",
-        "main_cond": "60日三大波段主力近 5 日積極買超（控盤 ≥ 2% 或 Z ≥ +1.0σ）",
-        "conc_cond": "5日集中度為正（且多週期偏多）＋ 主力廣度 ≥ 65%（大戶齊心／外資共識）",
-        "aux_cond": "投信連買、融資清洗或點火、借券回補或集保大戶增持；純籌碼分數 ≥ 70",
-        "action": "點、面、輔助籌碼高度共振，屬籌碼最紮實的多方鎖碼或主升建倉結構。",
+        "name": "🔥 1. 波段趨勢強多共振",
+        "main_cond": "全體波段分點 20/60 日合力明確偏多，累計庫存站上 20 日庫存均線",
+        "conc_cond": "10/20 日中線集中度與 5 日集中度同向偏多 ＋ 主力廣度 ≥ 65%（大戶／外資齊心）",
+        "aux_cond": "投信 20 日偏多、融資清洗或點火、多頭借券回補或集保大戶增持；純籌碼分數 ≥ 70",
+        "action": "趨勢面與動能面高度共振，屬籌碼最紮實的主升鎖碼或波段建倉格局。",
     },
     {
         "id": 2,
         "type": "bull",
-        "name": "📈 2. 隱性吸籌／洗盤沉澱",
-        "main_cond": "波段主力溫和買超或鎖碼未出，投信或特定贏家分點開始低檔承接",
-        "conc_cond": "集中度溫和偏正或轉強，主力廣度未跌破 40%（無少數硬撐跡象）",
-        "aux_cond": "常見融資清洗（散戶退場）或借券回補；純籌碼分數 55 ～ 69",
-        "action": "籌碼正逐步沉澱集中，但尚未全面爆發共振，可列入觀察並追蹤廣度與集中度是否續強。",
+        "name": "📈 2. 波段溫和吸籌／沉澱",
+        "main_cond": "全體波段分點合力轉正或庫存穩步墊高，大戶籌碼逐步由空翻多",
+        "conc_cond": "中線集中度溫和偏正或止跌收斂，主力廣度未跌破 40%（無少數硬撐跡象）",
+        "aux_cond": "常見融資清洗或投信／大戶緩步承接；純籌碼分數 55 ～ 69",
+        "action": "中線籌碼結構轉佳但尚未全面爆發共振，可納入觀察並追蹤廣度與集中度是否放大。",
     },
     {
         "id": 3,
         "type": "neutral",
         "name": "⚪ 3. 籌碼中性／換手觀望",
-        "main_cond": "波段主力進出幅度不大，或買賣力道接近日常波動（|Z| < 1.0σ）",
-        "conc_cond": "集中度介於 -3% ～ +3%，主力廣度落於 40% ～ 65% 中性區間",
-        "aux_cond": "信用交易、借券與投信方向不明顯或彼此抵銷；純籌碼分數 36 ～ 54",
-        "action": "籌碼處於正常換手與平衡狀態，缺乏明確大資金方向，宜等待新主導力量表態。",
+        "main_cond": "全體波段分點 20 日淨進出幅度不大，累計庫存貼近 20 日均線橫向整理",
+        "conc_cond": "10/20 日集中度介於 -2% ～ +2%，主力廣度落於 40% ～ 65% 中性區間",
+        "aux_cond": "趨勢面與動能面互相抵銷，大資金未展現壓倒性方向；純籌碼分數 36 ～ 54",
+        "action": "籌碼處於正常換手與平衡期，缺乏明確波段方向，宜等待新主導力量表態。",
     },
     {
         "id": 4,
         "type": "neutral",
         "name": "⚡ 4. 籌碼分歧／少數硬撐",
-        "main_cond": "三大波段主力與全市場集中度方向相反，或當日隔日沖買盤佔比過高（≥ 8%）",
-        "conc_cond": "集中度為正但主力廣度 ≤ 40%（少數大戶硬撐、多數大戶偷跑），或外資與本土對作",
-        "aux_cond": "可能伴隨散戶融資過熱或高水位投信逢高調節；籌碼內部存在矛盾",
-        "action": "表面數據與內部廣度出現背離，須提防隔日沖獲利了結或單一主力撐盤失敗風險。",
+        "main_cond": "中線趨勢（全體波段分點）與短線動能方向衝突，或當日隔日沖佔比過高（≥ 8%）",
+        "conc_cond": "5 日集中度為正但主力廣度 ≤ 40%（少數大戶硬撐、多數大戶偷跑），或外資與本土對作",
+        "aux_cond": "常見散戶融資過熱、隔日沖拉高灌水，或僅少數分點逆勢攤平接刀",
+        "action": "表面買盤與全體波段分點共識不一致，須提防單一主力撐盤失敗或隔日沖獲利了結。",
     },
     {
         "id": 5,
         "type": "bear",
-        "name": "🟢 5. 全面發散（大戶撤退）",
-        "main_cond": "波段主力明顯轉賣或無 60 日買超主力，投信連賣調節",
-        "conc_cond": "5日集中度轉負（≤ -3% 或 Z ≤ -1.0σ）且主力廣度 ≤ 35%（大戶／外資集體撤退）",
-        "aux_cond": "常見散戶融資過熱、借券空單加壓或集保大戶流出；純籌碼分數 ≤ 35",
-        "action": "籌碼結構明確偏空發散，大資金持續撤離且流向散戶，應避開或待集中度與廣度重新收斂。",
+        "name": "🟢 5. 波段全面發散（大戶撤退）",
+        "main_cond": "全體波段分點 20/60 日合力持續倒貨，累計庫存跌破 20 日庫存均線向下",
+        "conc_cond": "10/20 日與 5 日集中度轉負 ＋ 主力廣度 ≤ 35%（大戶／外資集體撤退）",
+        "aux_cond": "投信連賣、散戶融資過熱或空方加壓（空頭背景借券回補不加分）；純籌碼分數 ≤ 35",
+        "action": "趨勢面與動能面同步偏空發散，大資金持續撤離且流向散戶，應避開做多或偏向空方思維。",
     },
 ]
 
@@ -183,7 +193,7 @@ def profile_brokers(
 ) -> dict:
     """
     對所有追蹤券商分點（不含「投信」）進行行為畫像：
-    - 統計近 1/5/10/60 日與今年累計淨買賣超
+    - 統計近 1/5/10/20/60 日與今年累計淨買賣超
     - 結合靜態名單與「週轉係數＋隔日反手率」自動標記隔日沖分點
     - 以獨立事件 20 日前瞻報酬回測篩選「🏆 高勝率贏家分點」
     """
@@ -222,6 +232,7 @@ def profile_brokers(
         net_1d = int(round(arr[-1])) if n >= 1 else 0
         net_5d = int(round(arr[-5:].sum())) if n >= 1 else 0
         net_10d = int(round(arr[-10:].sum())) if n >= 1 else 0
+        net_20d = int(round(arr[-20:].sum())) if n >= 1 else 0
         net_60d = int(round(arr_lb.sum()))
         net_ytd = int(round(arr.sum()))
 
@@ -265,7 +276,6 @@ def profile_brokers(
                     v_i = arr[i]
                     if v_i < sig_thresh:
                         continue
-                    # 排除極微小雜訊單（至少佔當日量 0.2% 或達 30 張）
                     if vol_arr[i] > 0 and v_i < 30.0 and (v_i / vol_arr[i] * 100.0) < 0.2:
                         continue
                     c_now = close_arr[i]
@@ -298,6 +308,7 @@ def profile_brokers(
             "net_1d": net_1d,
             "net_5d": net_5d,
             "net_10d": net_10d,
+            "net_20d": net_20d,
             "net_60d": net_60d,
             "net_ytd": net_ytd,
             "churn_ratio": churn_ratio,
@@ -342,6 +353,84 @@ def select_wave_main_forces(
     return top_names, filtered_dt
 
 
+def compute_wave_aggregate(
+    df_price_full: pd.DataFrame,
+    df_chips_full: pd.DataFrame,
+    profiles: dict | None = None,
+) -> dict | None:
+    """
+    計算「全體波段分點合力」（排除隔日沖與投信，涵蓋買賣兩端所有追蹤核心分點）：
+    - 解決只抓「近 60 日最大買超前三名」在空頭段只看到接刀手、看不到砸盤黑手的盲區
+    - 產出 5/10/20/60 日淨流向、20/60 日控盤率、20 日控盤 Z-Score 與累計庫存相對 20 日均線位置
+    """
+    if df_price_full is None or df_price_full.empty or df_chips_full is None or df_chips_full.empty:
+        return None
+
+    pure_cols = [c for c in df_chips_full.columns if c not in ("date", "投信")]
+    if not pure_cols:
+        return None
+
+    if profiles:
+        wave_cols = [c for c in pure_cols if not profiles.get(c, {}).get("is_day_trader", c in DAY_TRADE_BROKERS)]
+    else:
+        wave_cols = [c for c in pure_cols if c not in DAY_TRADE_BROKERS]
+    if not wave_cols:
+        wave_cols = pure_cols
+
+    df_p = df_price_full.sort_values("date").reset_index(drop=True)
+    df_m = df_p[["date", "volume"]].merge(
+        df_chips_full[["date"] + wave_cols],
+        on="date",
+        how="left",
+    )
+    df_m[wave_cols] = df_m[wave_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0)
+    vol_s = pd.to_numeric(df_m["volume"], errors="coerce").fillna(0.0)
+
+    agg_daily = df_m[wave_cols].sum(axis=1)
+    cum_s = agg_daily.cumsum()
+    cum_ma20_s = cum_s.rolling(20, min_periods=5).mean()
+
+    net_1d = int(round(float(agg_daily.iloc[-1])))
+    net_5d = int(round(float(agg_daily.tail(5).sum())))
+    net_10d = int(round(float(agg_daily.tail(10).sum())))
+    net_20d = int(round(float(agg_daily.tail(20).sum())))
+    net_60d = int(round(float(agg_daily.tail(60).sum())))
+
+    vol_5d = float(vol_s.tail(5).sum())
+    vol_20d = float(vol_s.tail(20).sum())
+    vol_60d = float(vol_s.tail(60).sum())
+
+    ctrl_5d_pct = round(net_5d / vol_5d * 100.0, 2) if vol_5d > 0 else 0.0
+    ctrl_20d_pct = round(net_20d / vol_20d * 100.0, 2) if vol_20d > 0 else 0.0
+    ctrl_60d_pct = round(net_60d / vol_60d * 100.0, 2) if vol_60d > 0 else 0.0
+
+    roll_20_net = agg_daily.rolling(20, min_periods=10).sum()
+    roll_20_vol = vol_s.rolling(20, min_periods=10).sum().replace(0, np.nan)
+    roll_20_ctrl = (roll_20_net / roll_20_vol) * 100.0
+    ctrl_20d_z = compute_rolling_zscore(roll_20_ctrl, window=STRATEGY_PARAMS["zscore_window"], min_periods=15)
+
+    cum_now = float(cum_s.iloc[-1])
+    cum_ma20 = float(cum_ma20_s.iloc[-1]) if pd.notna(cum_ma20_s.iloc[-1]) else cum_now
+    cum_above_ma20 = bool(cum_now > cum_ma20) if abs(cum_now - cum_ma20) > 1e-6 else None
+
+    return {
+        "wave_broker_names": wave_cols,
+        "broker_count": len(wave_cols),
+        "net_1d": net_1d,
+        "net_5d": net_5d,
+        "net_10d": net_10d,
+        "net_20d": net_20d,
+        "net_60d": net_60d,
+        "ctrl_5d_pct": ctrl_5d_pct,
+        "ctrl_20d_pct": ctrl_20d_pct,
+        "ctrl_60d_pct": ctrl_60d_pct,
+        "ctrl_20d_z": ctrl_20d_z,
+        "cum_now": int(round(cum_now)),
+        "cum_ma20": int(round(cum_ma20)),
+        "cum_above_ma20": cum_above_ma20,
+    }
+
+
 def compute_broker_breadth(
     df_chips_full: pd.DataFrame,
     profiles: dict | None = None,
@@ -351,7 +440,6 @@ def compute_broker_breadth(
     計算「主力分點廣度比（含外資分點共識度）」：
     - 排除「投信」與隔日沖分點，統計追蹤波段分點中「淨買超家數 ÷ (買超家數 + 賣超家數)」
     - 獨立拆出外資分點近 5 日買賣家數與共識比率，快速辨識外資集體買賣或對作
-    - 同步計算整體波段分點廣度連續 ≥ 60%（高共識）或 ≤ 40%（低共識）之天數
     """
     if df_chips_full is None or df_chips_full.empty:
         return None
@@ -401,7 +489,6 @@ def compute_broker_breadth(
         if f_active_5d > 0:
             f_breadth_5d = round(f_buy_5d / f_active_5d * 100.0, 1)
 
-    # 計算逐日廣度連續高檔 (≥ 60%) / 低檔 (≤ 40%) 天數
     high_thresh = STRATEGY_PARAMS["breadth_streak_pct"]
     low_thresh = 100.0 - high_thresh
     high_streak = 0
@@ -451,11 +538,7 @@ def compute_broker_breadth(
 
 
 def evaluate_trust_phase(trust_info: dict) -> dict:
-    """
-    判定投信水位階段與短線動向：
-    - 動向標籤嚴格依買超紅 (bull)、賣超綠 (bear)、觀望灰 (info) 呈現
-    - 持股比率 0.5% ~ 5.0% 且偏買時標記為「初升認養甜蜜期」；>= 10% 標記為高水位警戒
-    """
+    """判定投信水位階段與短線動向"""
     if not isinstance(trust_info, dict):
         return {"tier_label": "", "tier_level": "info", "momentum": "", "momentum_level": "info"}
 
@@ -463,7 +546,6 @@ def evaluate_trust_phase(trust_info: dict) -> dict:
     d5 = int(trust_info.get("d5", 0) or 0)
     hold_pct = trust_info.get("holding_pct")
 
-    # 1. 短線動向標籤
     if streak >= 3 and d5 > 0:
         momentum = f"連買 {streak} 日認養中"
         momentum_level = "bull"
@@ -486,7 +568,6 @@ def evaluate_trust_phase(trust_info: dict) -> dict:
         momentum = "短線觀望"
         momentum_level = "info"
 
-    # 2. 真實持股比率水位標籤
     tier_label = ""
     tier_level = "info"
     if hold_pct is not None:
@@ -525,20 +606,22 @@ def evaluate_divergence_alert(
     trust_info: dict | None = None,
     margin_info: dict | None = None,
     sbl_info: dict | None = None,
+    wave_agg_info: dict | None = None,
 ) -> dict | None:
-    """
-    價量籌碼背離視覺警示條（純視覺參考，不介入純籌碼健康分數計算）：
-    - 股價近 5 日顯著下跌但主力與集中度逆勢強吸 → 底背離提醒
-    - 股價近 5 日顯著上漲但主力與集中度逆勢倒貨 → 頂背離提醒
-    """
+    """價量籌碼背離視覺警示條（純視覺參考，不介入純籌碼健康分數計算）"""
     _ = (latest_close, trust_info, margin_info, sbl_info)
     p = STRATEGY_PARAMS
     amt_ok = (top3_5d_amount_ntd == 0.0) or (abs(top3_5d_amount_ntd) >= p["top3_min_amount_ntd"] * 0.5)
 
-    # 多方底背離：價跌籌碼收
+    # 若有全體波段分點合力，背離判定必須同時確認全體波段合力未反向
+    agg_5d = wave_agg_info.get("net_5d") if isinstance(wave_agg_info, dict) else None
+    agg_bull_ok = True if agg_5d is None else (agg_5d > 0)
+    agg_bear_ok = True if agg_5d is None else (agg_5d < 0)
+
     if (
         price_5d_pct <= -3.0
         and top3_5d > 0
+        and agg_bull_ok
         and amt_ok
         and (top3_5d_ctrl_pct >= p["top3_ctrl_mod_pct"] or (top3_5d_ctrl_z is not None and top3_5d_ctrl_z >= p["z_bull_min"]))
         and (conc_5d is not None and conc_5d >= p["conc_mod_pct"])
@@ -547,26 +630,24 @@ def evaluate_divergence_alert(
             "type": "bull",
             "title": "🧲 價跌籌碼收（多方底背離）",
             "desc": (
-                f"近 5 日股價回檔 {price_5d_pct:+.2f}%，但三大波段主力逆勢買超 {top3_5d:+,} 張"
-                f"（控盤 {top3_5d_ctrl_pct:+.1f}%）且全市場 5 日集中度達 {conc_5d:+.2f}%。"
+                f"近 5 日股價回檔 {price_5d_pct:+.2f}%，但全體波段分點與三大主力同步買超"
+                f"且全市場 5 日集中度達 {conc_5d:+.2f}%。"
                 "<br>代表大資金趁拉回承接籌碼，可留意下方承接力道與止穩訊號。"
             ),
         }
 
-    # 空方頂背離：價漲籌碼散
     if (
         price_5d_pct >= 3.0
-        and top3_5d < 0
-        and amt_ok
-        and (top3_5d_ctrl_pct <= -p["top3_ctrl_mod_pct"] or (top3_5d_ctrl_z is not None and top3_5d_ctrl_z <= p["z_bear_max"]))
+        and (top3_5d < 0 or (agg_5d is not None and agg_5d < 0))
+        and agg_bear_ok
         and (conc_5d is not None and conc_5d <= -p["conc_mod_pct"])
     ):
         return {
             "type": "bear",
             "title": "⚠️ 價漲籌碼散（空方頂背離）",
             "desc": (
-                f"近 5 日股價上漲 {price_5d_pct:+.2f}%，但三大波段主力逢高出貨 {top3_5d:+,} 張"
-                f"（控盤 {top3_5d_ctrl_pct:+.1f}%）且全市場 5 日集中度轉負至 {conc_5d:+.2f}%。"
+                f"近 5 日股價上漲 {price_5d_pct:+.2f}%，但全體波段分點逢高調節"
+                f"且全市場 5 日集中度轉負至 {conc_5d:+.2f}%。"
                 "<br>代表大資金正趁拉抬派發籌碼，追高風險顯著升高。"
             ),
         }
@@ -591,16 +672,20 @@ def evaluate_chip_scenario(
     day_trade_info: dict | None = None,
     vol_5d: float = 0.0,
     domestic_top_buy_5d: int = 0,
+    wave_agg_info: dict | None = None,
 ) -> dict:
     """
-    100% 純籌碼五層健康評分引擎（基準 50 分，總分 0～100，完全排除均線與漲跌）：
-    1. 全市場前 15 大集中度 (±12) ＋ 主力分點廣度比含外資共識 (±6)  → 合計 ±18 分
-    2. 60日三大波段主力 (±8) ＋ 投信真實水位與連買賣 (±6)          → 合計 ±14 分
-    3. 融資四象限 (±5) ＋ 借券賣出 (±5)（皆含相對量能 ≥ 3% 濾網）  → 合計 ±10 分
-    4. TDCC 集保大戶週歸戶驗證                                     → 合計 ±8 分
-    5. 當日隔日沖灌水濾網（偏多時單向扣分）                        → 0 ～ -10 分
+    100% 純籌碼「趨勢 (60%) ＋ 動能 (40%)」雙層健康評分引擎（基準 50 分，總分 0～100）：
+    一、中線趨勢面 (±30 分，佔 60%)：
+        1. 全體波段分點合力趨勢 (±14)：20日控盤率/Z-Score (±8) ＋ 累計庫存相對20日均線與60日斜率 (±6)
+        2. 中線集中度 10/20日 (±8)：20日集中度 (±5) ＋ 10日集中度 (±3)
+        3. 中長線法人與大戶 (±8)：投信 20日動向與持股水位 (±4) ＋ TDCC 集保大戶週變化 (±4)
+    二、短線動能面 (±20 分，佔 40%)：
+        4. 短線集中度與廣度 (±10)：5日集中度 (±4) ＋ 主力分點廣度比含外資共識 (±6)
+        5. 信用交易與情境借券 (±10)：融資四象限 (±5) ＋ 情境修正借券賣出 (±5，空頭背景回補改判 0 分)
+    三、當日隔日沖灌水濾網（偏多時單向扣分 0 ～ -10 分）
     """
-    _ = (latest_close, broker_diff_info, vol_5d)
+    _ = (latest_close, broker_diff_info, vol_5d, top3_5d_amount_ntd, top3_5d_float_pct)
     p = STRATEGY_PARAMS
     badges = []
 
@@ -610,59 +695,250 @@ def evaluate_chip_scenario(
     c20 = (conc or {}).get("d20", {}).get("pct")
 
     # =========================================================
-    # Layer 1A：全市場前 15 大籌碼集中度 (±12 分)
+    # 一、中線趨勢面 (±30 分，佔 60%)
     # =========================================================
-    conc_score = 0
+    # 1A. 全體波段分點合力趨勢 (±14 分)
+    trend_wave_score = 0
+    wave_20d_net = None
+    wave_20d_ctrl = None
+    wave_60d_ctrl = None
+    wave_above_ma20 = None
+
+    if isinstance(wave_agg_info, dict):
+        wave_20d_net = int(wave_agg_info.get("net_20d", 0) or 0)
+        wave_20d_ctrl = float(wave_agg_info.get("ctrl_20d_pct", 0.0) or 0.0)
+        wave_60d_ctrl = float(wave_agg_info.get("ctrl_60d_pct", 0.0) or 0.0)
+        wave_20d_z = wave_agg_info.get("ctrl_20d_z")
+        wave_above_ma20 = wave_agg_info.get("cum_above_ma20")
+        wave_60d_net = int(wave_agg_info.get("net_60d", 0) or 0)
+
+        # 近 20 日全體波段合力控盤力道 (±8 分)
+        if wave_20d_ctrl >= p["wave_agg_20d_strong_pct"] or (
+            wave_20d_ctrl >= p["wave_agg_20d_mod_pct"] and wave_20d_z is not None and wave_20d_z >= p["z_bull_min"]
+        ):
+            trend_wave_score += 8
+        elif wave_20d_ctrl >= p["wave_agg_20d_mod_pct"]:
+            trend_wave_score += 5
+        elif wave_20d_ctrl >= p["wave_agg_20d_mild_pct"]:
+            trend_wave_score += 2
+        elif wave_20d_ctrl <= -p["wave_agg_20d_strong_pct"] or (
+            wave_20d_ctrl <= -p["wave_agg_20d_mod_pct"] and wave_20d_z is not None and wave_20d_z <= p["z_bear_max"]
+        ):
+            trend_wave_score -= 8
+        elif wave_20d_ctrl <= -p["wave_agg_20d_mod_pct"]:
+            trend_wave_score -= 5
+        elif wave_20d_ctrl <= -p["wave_agg_20d_mild_pct"]:
+            trend_wave_score -= 2
+
+        # 累計庫存相對 20 日均線 (±3 分)
+        if wave_above_ma20 is True:
+            trend_wave_score += 3
+        elif wave_above_ma20 is False:
+            trend_wave_score -= 3
+
+        # 60 日大波段庫存斜率 (±3 分)
+        if wave_60d_net > 0 and wave_60d_ctrl >= p["wave_agg_60d_mod_pct"]:
+            trend_wave_score += 3
+        elif wave_60d_net > 0:
+            trend_wave_score += 1
+        elif wave_60d_net < 0 and wave_60d_ctrl <= -p["wave_agg_60d_mod_pct"]:
+            trend_wave_score -= 3
+        elif wave_60d_net < 0:
+            trend_wave_score -= 1
+
+        if trend_wave_score >= 10:
+            badges.append({
+                "label": f"🌊 波段合力強多 (20日 {wave_20d_ctrl:+.1f}%)",
+                "level": "bull",
+                "detail": f"全體波段分點近 20 日合計 {wave_20d_net:+,} 張（控盤 {wave_20d_ctrl:+.1f}%），累計庫存站穩 20 日均線上方。",
+            })
+        elif trend_wave_score <= -10:
+            badges.append({
+                "label": f"🌊 波段合力急撤 (20日 {wave_20d_ctrl:+.1f}%)",
+                "level": "bear",
+                "detail": f"全體波段分點近 20 日合計 {wave_20d_net:+,} 張（控盤 {wave_20d_ctrl:+.1f}%），累計庫存跌破 20 日均線向下。",
+            })
+    else:
+        # 向下相容：舊呼叫端未傳 wave_agg_info 時，以 top3_5d 等比例換算
+        if top3_5d > 0 and top3_5d_ctrl_pct >= p["top3_ctrl_strong_pct"]:
+            trend_wave_score = 10
+        elif top3_5d > 0 and top3_5d_ctrl_pct >= p["top3_ctrl_mod_pct"]:
+            trend_wave_score = 5
+        elif top3_5d < 0 and top3_5d_ctrl_pct <= -p["top3_ctrl_strong_pct"]:
+            trend_wave_score = -10
+        elif top3_5d < 0 and top3_5d_ctrl_pct <= -p["top3_ctrl_mod_pct"]:
+            trend_wave_score = -5
+
+    trend_wave_score = max(-14, min(14, trend_wave_score))
+
+    # 1B. 中線集中度 10日／20日 (±8 分)
+    trend_conc_score = 0
+    if c20 is not None:
+        if c20 >= p["conc_20d_strong_pct"]:
+            trend_conc_score += 5
+        elif c20 >= p["conc_20d_mod_pct"]:
+            trend_conc_score += 3
+        elif c20 > 0:
+            trend_conc_score += 1
+        elif c20 <= -p["conc_20d_strong_pct"]:
+            trend_conc_score -= 5
+        elif c20 <= -p["conc_20d_mod_pct"]:
+            trend_conc_score -= 3
+        elif c20 < 0:
+            trend_conc_score -= 1
+
+    if c10 is not None:
+        if c10 >= p["conc_10d_strong_pct"]:
+            trend_conc_score += 3
+        elif c10 >= p["conc_10d_mod_pct"]:
+            trend_conc_score += 2
+        elif c10 > 0:
+            trend_conc_score += 1
+        elif c10 <= -p["conc_10d_strong_pct"]:
+            trend_conc_score -= 3
+        elif c10 <= -p["conc_10d_mod_pct"]:
+            trend_conc_score -= 2
+        elif c10 < 0:
+            trend_conc_score -= 1
+
+    if c5 is not None and c10 is not None and c20 is not None:
+        if c5 > 0 and c10 > 0 and c20 > 0:
+            badges.append({
+                "label": "🔥 多週期集中共振",
+                "level": "bull",
+                "detail": f"全市場 5/10/20 日集中度同步為正（{c5:+.1f}% / {c10:+.1f}% / {c20:+.1f}%）。",
+            })
+        elif c5 < 0 and c10 < 0 and c20 < 0:
+            badges.append({
+                "label": "📉 多週期連續發散",
+                "level": "bear",
+                "detail": f"全市場 5/10/20 日集中度同步為負（{c5:+.1f}% / {c10:+.1f}% / {c20:+.1f}%）。",
+            })
+
+    trend_conc_score = max(-8, min(8, trend_conc_score))
+
+    # 1C. 中長線法人與大戶：投信 20 日趨勢 (±4) ＋ TDCC 集保大戶 (±4)
+    trust_score = 0
+    if isinstance(trust_info, dict):
+        t_streak = int(trust_info.get("streak", 0) or 0)
+        t_d5 = int(trust_info.get("d5", 0) or 0)
+        t_d20 = int(trust_info.get("d20", t_d5) or 0)
+        t_hold = trust_info.get("holding_pct")
+
+        if t_d20 > 0 and (t_streak >= 3 or t_d5 > 0):
+            trust_score += 3
+            if t_hold is not None and 0.5 <= t_hold <= 5.0:
+                trust_score += 1
+                badges.append({
+                    "label": f"🎯 投信初升認養 (持股{t_hold:.1f}%)",
+                    "level": "bull",
+                    "detail": f"投信近 20 日淨買超 {t_d20:+,} 張且持股比率處於 0.5%～5% 甜蜜認養區間。",
+                })
+            elif t_hold is not None and t_hold >= 10.0:
+                badges.append({
+                    "label": f"⚠️ 投信高水位偏買 (持股{t_hold:.1f}%)",
+                    "level": "warn",
+                    "detail": f"投信持股比率已達 {t_hold:.1f}%，須留意波段結帳風險。",
+                })
+            elif t_streak >= 3:
+                trust_score += 1
+                badges.append({
+                    "label": f"🏦 投信連買 {t_streak} 日",
+                    "level": "bull",
+                    "detail": f"投信近 20 日淨買超 {t_d20:+,} 張（近 5 日 {t_d5:+,} 張）。",
+                })
+        elif t_d20 > 0:
+            trust_score += 2
+        elif t_d20 < 0 and (t_streak <= -3 or t_d5 < 0):
+            trust_score -= 3
+            if t_hold is not None and t_hold >= 10.0:
+                trust_score -= 1
+                badges.append({
+                    "label": f"🏦 投信高檔結帳 (持股{t_hold:.1f}%)",
+                    "level": "bear",
+                    "detail": f"投信持股比率達 {t_hold:.1f}% 且近 20 日賣超 {t_d20:+,} 張，高水位結帳賣壓明顯。",
+                })
+            elif t_streak <= -3:
+                trust_score -= 1
+                badges.append({
+                    "label": f"🏦 投信連賣 {abs(t_streak)} 日",
+                    "level": "bear",
+                    "detail": f"投信近 20 日淨賣超 {t_d20:+,} 張（近 5 日 {t_d5:+,} 張）。",
+                })
+        elif t_d20 < 0:
+            trust_score -= 2
+
+    trust_score = max(-4, min(4, trust_score))
+
+    tdcc_score = 0
+    if isinstance(tdcc_info, dict):
+        w1000_chg = tdcc_info.get("whale_1000_chg_1w")
+        w400_chg = tdcc_info.get("whale_400_chg_1w")
+        h_chg = tdcc_info.get("holders_chg_1w")
+
+        if w1000_chg is not None:
+            if w1000_chg >= 0.5 and (h_chg is None or h_chg < 0):
+                tdcc_score = 4
+                badges.append({
+                    "label": f"🐋 集保大戶強吸 (+{w1000_chg:.2f}%)",
+                    "level": "bull",
+                    "detail": "千張大戶持股比率單週大增且總股東人數減少，歸戶籌碼強烈集中。",
+                })
+            elif w1000_chg >= 0.2 and (h_chg is None or h_chg < 0):
+                tdcc_score = 3
+                badges.append({
+                    "label": f"🐋 集保大戶增持 (+{w1000_chg:.2f}%)",
+                    "level": "bull",
+                    "detail": "千張大戶比率上升且散戶總人數減少，確認籌碼往大戶集中。",
+                })
+            elif w1000_chg >= 0.2 or (w400_chg is not None and w400_chg >= 0.3 and (h_chg is not None and h_chg < 0)):
+                tdcc_score = 1
+            elif w1000_chg <= -0.5 and (h_chg is None or h_chg > 0):
+                tdcc_score = -4
+                badges.append({
+                    "label": f"⚠️ 集保大戶大減 ({w1000_chg:+.2f}%)",
+                    "level": "bear",
+                    "detail": "千張大戶比率單週顯著下滑且股東人數增加，歸戶籌碼明顯發散。",
+                })
+            elif w1000_chg <= -0.2 and (h_chg is None or h_chg > 0):
+                tdcc_score = -3
+                badges.append({
+                    "label": f"⚠️ 集保大戶流出 ({w1000_chg:+.2f}%)",
+                    "level": "bear",
+                    "detail": "千張大戶比率下滑且總股東人數增加。",
+                })
+            elif w1000_chg <= -0.2 or (w400_chg is not None and w400_chg <= -0.3 and (h_chg is not None and h_chg > 0)):
+                tdcc_score = -1
+
+    tdcc_score = max(-4, min(4, tdcc_score))
+    trend_inst_score = max(-8, min(8, trust_score + tdcc_score))
+    trend_score = max(-30, min(30, trend_wave_score + trend_conc_score + trend_inst_score))
+
+    # =========================================================
+    # 二、短線動能面 (±20 分，佔 40%)
+    # =========================================================
+    # 2A. 5 日集中度 (±4 分) ＋ 主力分點廣度比含外資共識 (±6 分)
+    conc5_score = 0
     if c5 is not None:
         is_c5_strong_bull = (c5 >= p["conc_strong_pct"]) or (c5 > 0 and c5_z is not None and c5_z >= p["z_bull_min"])
         is_c5_strong_bear = (c5 <= -p["conc_strong_pct"]) or (c5 < 0 and c5_z is not None and c5_z <= p["z_bear_max"])
-
         if is_c5_strong_bull:
-            conc_score += 8
+            conc5_score = 4
         elif c5 >= p["conc_mod_pct"]:
-            conc_score += 5
+            conc5_score = 2
         elif c5 > 0:
-            conc_score += 2
+            conc5_score = 1
         elif is_c5_strong_bear:
-            conc_score -= 8
+            conc5_score = -4
         elif c5 <= -p["conc_mod_pct"]:
-            conc_score -= 5
+            conc5_score = -2
         elif c5 < 0:
-            conc_score -= 2
+            conc5_score = -1
 
-        # 中期 (10日 / 20日) 同向共振加分
-        if c5 > 0:
-            if c10 is not None and c20 is not None and c10 > 0 and c20 > 0:
-                conc_score += 4
-                badges.append({
-                    "label": "🔥 多週期集中共振",
-                    "level": "bull",
-                    "detail": f"全市場 5/10/20 日集中度同步為正（{c5:+.1f}% / {c10:+.1f}% / {c20:+.1f}%）。",
-                })
-            elif c10 is not None and c10 > 0:
-                conc_score += 2
-        elif c5 < 0:
-            if c10 is not None and c20 is not None and c10 < 0 and c20 < 0:
-                conc_score -= 4
-                badges.append({
-                    "label": "📉 多週期連續發散",
-                    "level": "bear",
-                    "detail": f"全市場 5/10/20 日集中度同步為負（{c5:+.1f}% / {c10:+.1f}% / {c20:+.1f}%）。",
-                })
-            elif c10 is not None and c10 < 0:
-                conc_score -= 2
-
-    conc_score = max(-12, min(12, conc_score))
-
-    # =========================================================
-    # Layer 1B：主力分點廣度比＋外資共識 (±6 分)
-    # =========================================================
     breadth_score = 0
     few_holding_up = False
     breadth_valid = False
     b5_pct = None
-    f5_pct = None
-    f5_active = 0
 
     if isinstance(breadth_info, dict):
         b5_pct = breadth_info.get("breadth_5d")
@@ -728,115 +1004,13 @@ def evaluate_chip_scenario(
             else:
                 if b5_pct >= p["breadth_bull_pct"]:
                     breadth_score += 3
-                    badges.append({
-                        "label": f"🧭 主力偏多共識 ({b5_pct:.0f}%)",
-                        "level": "bull",
-                        "detail": f"近 5 日波段分點 {buy_5d} 買 / {sell_5d} 賣。",
-                    })
                 elif b5_pct <= p["breadth_bear_pct"]:
                     breadth_score -= 3
-                    badges.append({
-                        "label": f"📉 主力偏空撤退 ({b5_pct:.0f}%)",
-                        "level": "bear",
-                        "detail": f"近 5 日波段分點僅 {buy_5d} 買 / {sell_5d} 賣。",
-                    })
 
     breadth_score = max(-6, min(6, breadth_score))
-    conc_breadth_score = max(-18, min(18, conc_score + breadth_score))
+    mom_conc_breadth_score = max(-10, min(10, conc5_score + breadth_score))
 
-    # =========================================================
-    # Layer 2：60日三大波段主力 (±8) ＋ 投信真實水位與動向 (±6)
-    # =========================================================
-    wave_score = 0
-    amt_meaningful = (top3_5d_amount_ntd == 0.0) or (abs(top3_5d_amount_ntd) >= p["top3_min_amount_ntd"])
-    z_bull = top3_5d_ctrl_z is not None and top3_5d_ctrl_z >= p["z_bull_min"]
-    z_bear = top3_5d_ctrl_z is not None and top3_5d_ctrl_z <= p["z_bear_max"]
-
-    if top3_5d > 0:
-        if top3_5d_ctrl_pct >= p["top3_ctrl_strong_pct"] or (z_bull and top3_5d_ctrl_pct >= p["top3_ctrl_mod_pct"]):
-            wave_score = 8 if amt_meaningful else 5
-            badges.append({
-                "label": f"🚀 三大主力強攻 ({top3_5d_ctrl_pct:+.1f}%)",
-                "level": "bull",
-                "detail": f"近 60 日波段三大主力近 5 日淨買超 {top3_5d:+,} 張（控盤率 {top3_5d_ctrl_pct:+.1f}%）。",
-            })
-        elif top3_5d_ctrl_pct >= p["top3_ctrl_mod_pct"] or (top3_5d_float_pct is not None and top3_5d_float_pct >= 0.3):
-            wave_score = 5 if amt_meaningful else 3
-        elif top3_5d_ctrl_pct >= 0.5:
-            wave_score = 2
-    elif top3_5d < 0:
-        if top3_5d_ctrl_pct <= -p["top3_ctrl_strong_pct"] or (z_bear and top3_5d_ctrl_pct <= -p["top3_ctrl_mod_pct"]):
-            wave_score = -8 if amt_meaningful else -5
-            badges.append({
-                "label": f"🔻 三大主力急撤 ({top3_5d_ctrl_pct:+.1f}%)",
-                "level": "bear",
-                "detail": f"近 60 日波段三大主力近 5 日轉賣 {top3_5d:+,} 張（控盤率 {top3_5d_ctrl_pct:+.1f}%）。",
-            })
-        elif top3_5d_ctrl_pct <= -p["top3_ctrl_mod_pct"] or (top3_5d_float_pct is not None and top3_5d_float_pct <= -0.3):
-            wave_score = -5 if amt_meaningful else -3
-        elif top3_5d_ctrl_pct <= -0.5:
-            wave_score = -2
-
-    trust_score = 0
-    trust_bull = False
-    if isinstance(trust_info, dict):
-        t_streak = int(trust_info.get("streak", 0) or 0)
-        t_d5 = int(trust_info.get("d5", 0) or 0)
-        t_hold = trust_info.get("holding_pct")
-
-        if t_streak >= 3 and t_d5 > 0:
-            trust_bull = True
-            trust_score += 4
-            if t_hold is not None and 0.5 <= t_hold <= 5.0:
-                trust_score += 2
-                badges.append({
-                    "label": f"🎯 投信初升認養 (連買{t_streak}日｜持股{t_hold:.1f}%)",
-                    "level": "bull",
-                    "detail": f"投信持股比率處於 0.5%～5% 甜蜜認養區間且連續買超 {t_streak} 日。",
-                })
-            elif t_hold is not None and t_hold >= 10.0:
-                badges.append({
-                    "label": f"⚠️ 投信高水位連買 (持股{t_hold:.1f}%)",
-                    "level": "warn",
-                    "detail": f"投信雖連買 {t_streak} 日，但持股比率已達 {t_hold:.1f}%，須留意結帳風險。",
-                })
-            else:
-                if t_streak >= 5:
-                    trust_score += 2
-                badges.append({
-                    "label": f"🏦 投信連買 {t_streak} 日",
-                    "level": "bull",
-                    "detail": f"投信近 5 日淨買超 {t_d5:+,} 張。",
-                })
-        elif t_d5 > 0 and t_streak >= 1:
-            trust_bull = True
-            trust_score += 2
-        elif t_streak <= -3 and t_d5 < 0:
-            trust_score -= 4
-            if t_hold is not None and t_hold >= 10.0:
-                trust_score -= 2
-                badges.append({
-                    "label": f"🏦 投信高檔結帳 (連賣{abs(t_streak)}日｜持股{t_hold:.1f}%)",
-                    "level": "bear",
-                    "detail": f"投信持股比率達 {t_hold:.1f}% 且連續賣超 {abs(t_streak)} 日，高水位結帳賣壓明顯。",
-                })
-            else:
-                if abs(t_streak) >= 5:
-                    trust_score -= 2
-                badges.append({
-                    "label": f"🏦 投信連賣 {abs(t_streak)} 日",
-                    "level": "bear",
-                    "detail": f"投信近 5 日淨賣超 {t_d5:+,} 張。",
-                })
-        elif t_d5 < 0 and t_streak <= -1:
-            trust_score -= 2
-
-    trust_score = max(-6, min(6, trust_score))
-    wave_trust_score = max(-14, min(14, wave_score + trust_score))
-
-    # =========================================================
-    # Layer 3：融資四象限 (±5) ＋ 借券賣出 (±5)（相對量能 ≥ 3% 濾網）
-    # =========================================================
+    # 2B. 融資四象限 (±5 分) ＋ 情境修正借券賣出 (±5 分)
     margin_score = 0
     margin_quadrant = 0
     is_heavy_dt = bool((day_trade_info or {}).get("is_heavy_day_trade", False))
@@ -897,6 +1071,7 @@ def evaluate_chip_scenario(
             })
 
     sbl_score = 0
+    sbl_mode = "neutral"
     if isinstance(sbl_info, dict):
         sbl_5d = int(sbl_info.get("chg_5d", 0) or 0)
         sbl_pct = float(sbl_info.get("chg_5d_pct", 0.0) or 0.0)
@@ -904,76 +1079,56 @@ def evaluate_chip_scenario(
         sbl_vol_pct = sbl_info.get("chg_5d_vol_pct")
         sbl_vol_ok = True if sbl_vol_pct is None else (sbl_vol_pct >= p["credit_vol_ratio_min"])
 
+        # 情境檢核：空頭大跌段的借券大減常為「空單獲利回補」，不得給予多方加分
+        is_bear_chip_context = (trend_wave_score <= -3) or (
+            c5 is not None and c5 < 0 and (c10 is None or c10 < 0)
+        )
+
         if sbl_vol_ok and sbl_5d < 0 and (sbl_pct <= p["sbl_cover_5d_pct"] or (sbl_z is not None and sbl_z <= p["z_bear_max"])):
-            sbl_score = 5
-            badges.append({
-                "label": f"🚀 借券回補 (5日 {sbl_5d:+,}張/{sbl_pct:+.1f}%)",
-                "level": "bull",
-                "detail": "外資／法人借券賣出餘額顯著下降，空方回補力道提供籌碼支撐。",
-            })
+            if is_bear_chip_context:
+                sbl_score = 0
+                sbl_mode = "profit_cover"
+                badges.append({
+                    "label": f"ℹ️ 借券獲利回補 (5日 {sbl_5d:+,}張)",
+                    "level": "info",
+                    "detail": "借券賣出餘額雖下降，但波段分點與集中度仍偏空，研判為空單順勢獲利回補（不予多方加分）。",
+                })
+            else:
+                sbl_score = 5
+                sbl_mode = "bull_cover"
+                badges.append({
+                    "label": f"🚀 借券回補 (5日 {sbl_5d:+,}張/{sbl_pct:+.1f}%)",
+                    "level": "bull",
+                    "detail": "偏多或止穩籌碼背景下借券餘額顯著減少，空方認輸回補提供籌碼支撐。",
+                })
         elif sbl_vol_ok and sbl_5d > 0 and (sbl_pct >= p["sbl_surge_5d_pct"] or (sbl_z is not None and sbl_z >= p["z_bull_min"])):
-            sbl_score = -5
-            badges.append({
-                "label": f"🐻 借券空單加壓 (5日 {sbl_5d:+,}張/{sbl_pct:+.1f}%)",
-                "level": "bear",
-                "detail": "外資／法人借券賣出餘額顯著增加，空方避險或放空壓力升溫。",
-            })
-
-    credit_sbl_score = max(-10, min(10, margin_score + sbl_score))
-
-    # =========================================================
-    # Layer 4：TDCC 集保大戶週歸戶驗證 (±8 分)
-    # =========================================================
-    tdcc_score = 0
-    if isinstance(tdcc_info, dict):
-        w1000_chg = tdcc_info.get("whale_1000_chg_1w")
-        w400_chg = tdcc_info.get("whale_400_chg_1w")
-        h_chg = tdcc_info.get("holders_chg_1w")
-
-        if w1000_chg is not None:
-            if w1000_chg >= 0.5 and (h_chg is None or h_chg < 0):
-                tdcc_score = 8
+            sbl_mode = "bear_surge"
+            if trend_wave_score >= 6 and c5 is not None and c5 > 0:
+                sbl_score = -2
                 badges.append({
-                    "label": f"🐋 集保大戶強吸 (+{w1000_chg:.2f}%)",
-                    "level": "bull",
-                    "detail": "千張大戶持股比率單週大增且總股東人數減少，歸戶籌碼強烈集中。",
+                    "label": f"⚡ 偏多對作借券增 (5日 {sbl_5d:+,}張)",
+                    "level": "warn",
+                    "detail": "波段籌碼偏多但借券空單增加，屬多空對作或避險鎖單（減輕扣分，留意軋空）。",
                 })
-            elif w1000_chg >= 0.2 and (h_chg is None or h_chg < 0):
-                tdcc_score = 5
+            else:
+                sbl_score = -5
                 badges.append({
-                    "label": f"🐋 集保大戶增持 (+{w1000_chg:.2f}%)",
-                    "level": "bull",
-                    "detail": "千張大戶比率上升且散戶總人數減少，確認籌碼往大戶集中。",
-                })
-            elif w1000_chg >= 0.2 or (w400_chg is not None and w400_chg >= 0.3 and (h_chg is not None and h_chg < 0)):
-                tdcc_score = 3
-            elif w1000_chg <= -0.5 and (h_chg is None or h_chg > 0):
-                tdcc_score = -8
-                badges.append({
-                    "label": f"⚠️ 集保大戶大減 ({w1000_chg:+.2f}%)",
+                    "label": f"🐻 借券空單加壓 (5日 {sbl_5d:+,}張/{sbl_pct:+.1f}%)",
                     "level": "bear",
-                    "detail": "千張大戶比率單週顯著下滑且股東人數增加，歸戶籌碼明顯發散。",
+                    "detail": "外資／法人借券賣出餘額顯著增加，空方放空壓力升溫。",
                 })
-            elif w1000_chg <= -0.2 and (h_chg is None or h_chg > 0):
-                tdcc_score = -5
-                badges.append({
-                    "label": f"⚠️ 集保大戶流出 ({w1000_chg:+.2f}%)",
-                    "level": "bear",
-                    "detail": "千張大戶比率下滑且總股東人數增加。",
-                })
-            elif w1000_chg <= -0.2 or (w400_chg is not None and w400_chg <= -0.3 and (h_chg is not None and h_chg > 0)):
-                tdcc_score = -3
 
-    tdcc_score = max(-8, min(8, tdcc_score))
+    mom_credit_sbl_score = max(-10, min(10, margin_score + sbl_score))
+    momentum_score = max(-20, min(20, mom_conc_breadth_score + mom_credit_sbl_score))
 
     # =========================================================
-    # Layer 5：當日隔日沖灌水濾網（偏多時單向扣分 0 ～ -10 分）
+    # 三、當日隔日沖灌水濾網（偏多時單向扣分 0 ～ -10 分）
     # =========================================================
-    raw_before_dt = 50 + conc_breadth_score + wave_trust_score + credit_sbl_score + tdcc_score
+    raw_before_dt = 50 + trend_score + momentum_score
     dt_score = 0
     dt_vol_pct = float((day_trade_info or {}).get("dt_vol_pct", 0.0) or 0.0)
     dt_buyers = (day_trade_info or {}).get("dt_buyers") or []
-    is_bull_biased = (raw_before_dt > 50) or (c5 is not None and c5 > 0) or (top3_5d > 0)
+    is_bull_biased = (raw_before_dt > 50) or (c5 is not None and c5 > 0) or (trend_wave_score > 0)
 
     if is_bull_biased and dt_vol_pct >= p["dt_today_vol_warn_pct"]:
         if dt_vol_pct >= p["dt_today_vol_high_pct"]:
@@ -994,64 +1149,61 @@ def evaluate_chip_scenario(
     # =========================================================
     # 判定 5 大純籌碼結構狀態
     # =========================================================
-    point_surface_conflict = (
-        (c5 is not None and c5 <= -p["conc_mod_pct"] and top3_5d > 0 and top3_5d_ctrl_pct >= p["top3_ctrl_mod_pct"])
-        or (c5 is not None and c5 >= p["conc_mod_pct"] and top3_5d < 0 and top3_5d_ctrl_pct <= -p["top3_ctrl_mod_pct"])
+    trend_mom_conflict = (
+        (trend_score >= 8 and momentum_score <= -8)
+        or (trend_score <= -8 and momentum_score >= 8)
     )
     heavy_dt_distortion = dt_score <= -6
 
     c5_txt = f"{c5:+.1f}%" if c5 is not None else "N/A"
-    c5_z_txt = f"（Z:{c5_z:+.1f}σ）" if c5_z is not None else ""
     c10_txt = f"{c10:+.1f}%" if c10 is not None else "N/A"
     c20_txt = f"{c20:+.1f}%" if c20 is not None else "N/A"
     b5_txt = f"主力廣度 {b5_pct:.0f}%" if breadth_valid and b5_pct is not None else "主力廣度累積中"
-    z_top3_txt = f"／Z:{top3_5d_ctrl_z:+.1f}σ" if top3_5d_ctrl_z is not None else ""
+    if wave_20d_net is not None and wave_20d_ctrl is not None:
+        ma_txt = "站上20日均線" if wave_above_ma20 is True else ("跌破20日均線" if wave_above_ma20 is False else "貼近均線")
+        wave_txt = f"全體波段分點 20 日合計 {wave_20d_net:+,} 張（控盤 {wave_20d_ctrl:+.1f}%／庫存{ma_txt}）"
+    else:
+        wave_txt = f"三大波段主力近 5 日淨額 {top3_5d:+,} 張（控盤 {top3_5d_ctrl_pct:+.1f}%）"
 
     summary_prefix = (
-        f"全市場 5 日集中度 {c5_txt}{c5_z_txt}（10日 {c10_txt} ／ 20日 {c20_txt}），"
-        f"{b5_txt}，近 60 日三大波段主力近 5 日淨額 {top3_5d:+,} 張（控盤率 {top3_5d_ctrl_pct:+.1f}%{z_top3_txt}）"
+        f"{wave_txt}；全市場集中度 5/10/20 日分別為 {c5_txt} / {c10_txt} / {c20_txt}，{b5_txt}"
     )
 
-    if conviction_score >= 70 and (c5 is None or c5 > 0) and (not few_holding_up):
+    if conviction_score >= 70 and trend_score > 0 and (not few_holding_up):
         sc_id = 1
         sc_type = "bull"
-        sub_type = "全面共振吸籌"
-        title = "🔥 純籌碼狀態：1. 全面共振吸籌（點面齊強）"
-        desc = f"{summary_prefix}，大資金與多數追蹤波段分點高度同向偏多。"
-        action = "籌碼集中度、主力廣度與輔助籌碼形成正向共振，屬結構最紮實的鎖碼或建倉格局。"
-    elif conviction_score <= 35 or (
-        c5 is not None
-        and c5 <= -p["conc_mod_pct"]
-        and conviction_score < 50
-        and (top3_5d < 0 or (breadth_valid and b5_pct <= p["breadth_bear_pct"]))
-    ):
+        sub_type = "波段強多共振"
+        title = "🔥 純籌碼狀態：1. 波段趨勢強多共振（趨勢＋動能齊強）"
+        desc = f"{summary_prefix}，中線波段趨勢（{trend_score:+d}）與短線動能（{momentum_score:+d}）同步偏多。"
+        action = "趨勢與動能高度共振，屬籌碼最紮實的主升鎖碼或波段建倉格局。"
+    elif conviction_score <= 35 or (trend_score <= -12 and conviction_score < 45):
         sc_id = 5
         sc_type = "bear"
-        sub_type = "全面發散"
-        title = "🟢 純籌碼狀態：5. 全面發散（大戶撤退）"
-        desc = f"{summary_prefix}，籌碼明顯從大資金流向散戶或呈現主力集體撤退。"
-        action = "籌碼結構偏空發散，下方缺乏大資金共識承接，應避開或等待集中度與廣度重新收斂。"
-    elif few_holding_up or point_surface_conflict or heavy_dt_distortion:
+        sub_type = "波段全面發散"
+        title = "🟢 純籌碼狀態：5. 波段全面發散（大戶集體撤退）"
+        desc = f"{summary_prefix}，中線趨勢（{trend_score:+d}）與短線動能（{momentum_score:+d}）明顯偏空發散。"
+        action = "波段主力持續撤離且籌碼流向散戶，應避開做多或改採偏空思維觀察。"
+    elif few_holding_up or trend_mom_conflict or heavy_dt_distortion:
         sc_id = 4
         sc_type = "neutral"
         sub_type = "籌碼分歧"
-        title = "⚡ 純籌碼狀態：4. 籌碼分歧（少數硬撐／短沖干擾）"
-        desc = f"{summary_prefix}，但內部主力廣度、三大主力方向或隔日沖佔比出現明顯矛盾。"
-        action = "表面集中度與內部大戶共識不一致，須提防少數主力硬撐失敗或隔日沖短線獲利了結。"
+        title = "⚡ 純籌碼狀態：4. 籌碼分歧（趨勢動能衝突／少數硬撐）"
+        desc = f"{summary_prefix}，但中線趨勢（{trend_score:+d}）與短線動能（{momentum_score:+d}）或隔日沖存在明顯矛盾。"
+        action = "表面集中度與全體波段共識不一致，須提防少數主力硬撐失敗或隔日沖短線獲利了結。"
     elif conviction_score >= 55:
         sc_id = 2
         sc_type = "bull"
-        sub_type = "隱性吸籌"
-        title = "📈 純籌碼狀態：2. 隱性吸籌／洗盤沉澱"
-        desc = f"{summary_prefix}，籌碼已逐步向大戶端沉澱，整體偏向多方優勢。"
-        action = "籌碼開始收斂但尚未達全面共振強度，可持續追蹤集中度與外資／波段廣度是否進一步放大。"
+        sub_type = "溫和吸籌"
+        title = "📈 純籌碼狀態：2. 波段溫和吸籌／沉澱"
+        desc = f"{summary_prefix}，整體籌碼偏向大戶端沉澱（趨勢 {trend_score:+d} ／ 動能 {momentum_score:+d}）。"
+        action = "波段結構逐步轉佳但尚未達全面共振強度，可追蹤集中度與外資廣度是否續強。"
     else:
         sc_id = 3
         sc_type = "neutral"
         sub_type = "籌碼中性"
         title = "⚪ 純籌碼狀態：3. 籌碼中性／換手觀望"
-        desc = f"{summary_prefix}，多空籌碼力道大致平衡。"
-        action = "大資金尚未展現壓倒性單邊傾向，宜持續觀察主力廣度與集中度突破方向。"
+        desc = f"{summary_prefix}，多空力道大致平衡（趨勢 {trend_score:+d} ／ 動能 {momentum_score:+d}）。"
+        action = "大資金尚未展現單邊波段傾向，宜等待全體波段分點庫存方向表態。"
 
     return {
         "id": sc_id,
@@ -1064,15 +1216,110 @@ def evaluate_chip_scenario(
         "conviction_score": conviction_score,
         "score_breakdown": {
             "base": 50,
-            "conc_breadth": conc_breadth_score,
-            "conc_diff": conc_breadth_score,  # 向下相容舊版鍵名
-            "wave_trust": wave_trust_score,
-            "credit_sbl": credit_sbl_score,
-            "tdcc": tdcc_score,
+            "trend_total": trend_score,
+            "trend_wave": trend_wave_score,
+            "trend_conc": trend_conc_score,
+            "trend_inst": trend_inst_score,
+            "momentum_total": momentum_score,
+            "mom_conc_breadth": mom_conc_breadth_score,
+            "mom_credit_sbl": mom_credit_sbl_score,
             "day_trade": dt_score,
+            # 向下相容舊版鍵名
+            "conc_breadth": mom_conc_breadth_score,
+            "conc_diff": mom_conc_breadth_score,
+            "wave_trust": trend_wave_score + trust_score,
+            "credit_sbl": mom_credit_sbl_score,
+            "tdcc": tdcc_score,
         },
         "margin_quadrant": margin_quadrant,
+        "sbl_mode": sbl_mode,
         "few_holding_up": few_holding_up,
+    }
+
+
+def compute_score_backtest(
+    df_price_full: pd.DataFrame,
+    df_health: pd.DataFrame,
+    horizons: tuple[int, ...] = (5, 10, 20),
+) -> dict:
+    """
+    計算今年度「純籌碼健康分數區間」對應未來 5 / 10 / 20 個交易日的勝率與平均報酬回測表：
+    - 客觀驗證該檔個股在 ≥70、55~69、36~54、≤35 分各區間的多空期望值
+    """
+    empty_res = {"rows": [], "total_scored_days": 0, "verdict": ""}
+    if df_price_full is None or df_price_full.empty or df_health is None or df_health.empty:
+        return empty_res
+
+    df = (
+        df_price_full[["date", "close"]]
+        .sort_values("date")
+        .merge(df_health[["date", "health_score"]], on="date", how="left")
+        .reset_index(drop=True)
+    )
+    df["close"] = pd.to_numeric(df["close"], errors="coerce")
+    df["health_score"] = pd.to_numeric(df["health_score"], errors="coerce")
+
+    for h in horizons:
+        df[f"fwd_{h}d"] = (df["close"].shift(-h) / df["close"] - 1.0) * 100.0
+
+    scored = df.dropna(subset=["health_score"]).copy()
+    if scored.empty:
+        return empty_res
+
+    buckets = [
+        ("≥ 70 分（強力偏多）", "bull", lambda s: s >= 70),
+        ("55 ～ 69 分（溫和偏多）", "warn", lambda s: (s >= 55) & (s < 70)),
+        ("36 ～ 54 分（中性分歧）", "info", lambda s: (s > 35) & (s < 55)),
+        ("≤ 35 分（明顯偏空）", "bear", lambda s: s <= 35),
+    ]
+
+    rows = []
+    for label, level, cond_fn in buckets:
+        sub = scored[cond_fn(scored["health_score"])]
+        row_item = {
+            "label": label,
+            "level": level,
+            "days": int(len(sub)),
+            "stats": {},
+        }
+        for h in horizons:
+            rets = sub[f"fwd_{h}d"].dropna()
+            cnt = int(len(rets))
+            if cnt > 0:
+                long_wr = round(float((rets > 0).mean()) * 100.0, 1)
+                short_wr = round(float((rets < 0).mean()) * 100.0, 1)
+                avg_ret = round(float(rets.mean()), 2)
+            else:
+                long_wr = short_wr = avg_ret = None
+            row_item["stats"][h] = {
+                "count": cnt,
+                "long_wr": long_wr,
+                "short_wr": short_wr,
+                "avg_ret": avg_ret,
+            }
+        rows.append(row_item)
+
+    # 產生客觀摘要結論（以 20 日為主、樣本不足退回 10 日）
+    verdict_parts = []
+    bull_row = rows[0]
+    bear_row = rows[3]
+    ref_h = 20 if (bull_row["stats"][20]["count"] >= 3 or bear_row["stats"][20]["count"] >= 3) else 10
+
+    b_st = bull_row["stats"][ref_h]
+    if b_st["count"] >= 3 and b_st["avg_ret"] is not None:
+        verdict_parts.append(
+            f"≥70 分進場 {ref_h} 日上漲勝率 {b_st['long_wr']:.1f}%（均報 {b_st['avg_ret']:+.2f}%，{b_st['count']}筆）"
+        )
+    s_st = bear_row["stats"][ref_h]
+    if s_st["count"] >= 3 and s_st["avg_ret"] is not None:
+        verdict_parts.append(
+            f"≤35 分放空 {ref_h} 日勝率 {s_st['short_wr']:.1f}%（做多均報 {s_st['avg_ret']:+.2f}%，{s_st['count']}筆）"
+        )
+
+    return {
+        "rows": rows,
+        "total_scored_days": int(len(scored)),
+        "verdict": " ｜ ".join(verdict_parts),
     }
 
 
