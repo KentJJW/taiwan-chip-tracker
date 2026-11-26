@@ -49,10 +49,12 @@ FOREIGN_BROKER_KEYWORDS = (
 
 # 100% 純籌碼策略參數集中管理（趨勢 60% ＋ 動能 40%）
 STRATEGY_PARAMS = {
-    # 多空分數門檻（做多門檻下修至 55 分，空方門檻 35 分）
+    # 多空分數門檻（做多門檻 55 分，空方門檻 35 分）
     "bull_score_min": 55,
     "strong_bull_score_min": 70,
     "bear_score_max": 35,
+    "long_exit_score": 40,
+    "short_exit_score": 50,
 
     # 滾動視窗與 Z-Score 門檻
     "wave_lookback_days": 60,
@@ -1241,14 +1243,7 @@ def compute_score_backtest(
     df_health: pd.DataFrame,
     horizons: tuple[int, ...] = (5, 10, 20),
 ) -> dict:
-    """
-    計算今年度「純籌碼健康分數區間」與「進場濾網實戰對照」回測統計（5 / 10 / 20 個交易日）：
-    1. 分數區間表：≥70、55~69、36~54、≤35 分
-    2. 進場濾網對照表（做多門檻 55 分、放空門檻 35 分）：
-       - 基準做多 (≥55) vs. 趨勢濾網做多 (≥55 且收盤 > 20MA)
-       - 甜蜜區濾網做多 (55~69 且收盤 > 20MA) vs. 啟動突破做多 (<55 首破 ≥55，5日冷卻)
-       - 基準放空 (≤35) vs. 趨勢濾網放空 (≤35 且收盤 < 20MA)
-    """
+    """保留向下相容之固定天期分數區間回測函式"""
     empty_res = {"rows": [], "filter_rows": [], "total_scored_days": 0, "verdict": ""}
     if df_price_full is None or df_price_full.empty or df_health is None or df_health.empty:
         return empty_res
@@ -1265,158 +1260,343 @@ def compute_score_backtest(
     )
     df["close"] = pd.to_numeric(df["close"], errors="coerce")
     df["health_score"] = pd.to_numeric(df["health_score"], errors="coerce")
-    df["ma20"] = df["close"].rolling(20).mean()
-    df["prev_score"] = df["health_score"].shift(1)
-
     for h in horizons:
         df[f"fwd_{h}d"] = (df["close"].shift(-h) / df["close"] - 1.0) * 100.0
-
-    # 計算「由 <55 首次突破 ≥55」啟動點（5 個交易日冷卻避免重複計數）
-    breakout_mask = np.zeros(len(df), dtype=bool)
-    last_bo_idx = -999
-    for idx in range(len(df)):
-        sc_now = df.loc[idx, "health_score"]
-        sc_prev = df.loc[idx, "prev_score"]
-        if pd.notna(sc_now) and pd.notna(sc_prev) and sc_now >= bull_min and sc_prev < bull_min:
-            if idx - last_bo_idx >= 5:
-                breakout_mask[idx] = True
-                last_bo_idx = idx
-    df["is_bull_breakout"] = breakout_mask
 
     scored = df.dropna(subset=["health_score"]).copy()
     if scored.empty:
         return empty_res
 
-    # --- 1. 分數區間表 ---
     buckets = [
         (f"≥ {strong_bull_min} 分（強力共振）", "bull", lambda d: d["health_score"] >= strong_bull_min),
         (f"{bull_min} ～ {strong_bull_min - 1} 分（偏多甜蜜區）", "warn", lambda d: (d["health_score"] >= bull_min) & (d["health_score"] < strong_bull_min)),
         (f"{bear_max + 1} ～ {bull_min - 1} 分（中性分歧）", "info", lambda d: (d["health_score"] > bear_max) & (d["health_score"] < bull_min)),
         (f"≤ {bear_max} 分（明顯偏空）", "bear", lambda d: d["health_score"] <= bear_max),
     ]
-
     rows = []
     for label, level, cond_fn in buckets:
         sub = scored[cond_fn(scored)]
-        row_item = {
-            "label": label,
-            "level": level,
-            "days": int(len(sub)),
-            "stats": {},
-        }
+        row_item = {"label": label, "level": level, "days": int(len(sub)), "stats": {}}
         for h in horizons:
             rets = sub[f"fwd_{h}d"].dropna()
             cnt = int(len(rets))
-            if cnt > 0:
-                long_wr = round(float((rets > 0).mean()) * 100.0, 1)
-                short_wr = round(float((rets < 0).mean()) * 100.0, 1)
-                avg_ret = round(float(rets.mean()), 2)
-            else:
-                long_wr = short_wr = avg_ret = None
             row_item["stats"][h] = {
                 "count": cnt,
-                "long_wr": long_wr,
-                "short_wr": short_wr,
-                "avg_ret": avg_ret,
+                "long_wr": round(float((rets > 0).mean()) * 100.0, 1) if cnt > 0 else None,
+                "short_wr": round(float((rets < 0).mean()) * 100.0, 1) if cnt > 0 else None,
+                "avg_ret": round(float(rets.mean()), 2) if cnt > 0 else None,
             }
         rows.append(row_item)
 
-    # --- 2. 進場濾網實戰對照表 ---
-    filter_specs = [
-        (
-            f"基準做多：分數 ≥ {bull_min}（無濾網）",
-            "long",
-            "bull",
-            lambda d: d["health_score"] >= bull_min,
-        ),
-        (
-            f"趨勢濾網做多：分數 ≥ {bull_min} ＋ 收盤 > 20MA",
-            "long",
-            "bull",
-            lambda d: (d["health_score"] >= bull_min) & d["ma20"].notna() & (d["close"] > d["ma20"]),
-        ),
-        (
-            f"甜蜜區做多：分數 {bull_min}～{strong_bull_min - 1} ＋ 收盤 > 20MA",
-            "long",
-            "warn",
-            lambda d: (d["health_score"] >= bull_min) & (d["health_score"] < strong_bull_min) & d["ma20"].notna() & (d["close"] > d["ma20"]),
-        ),
-        (
-            f"啟動突破做多：由 <{bull_min} 首次站上 ≥ {bull_min}（5日冷卻）",
-            "long",
-            "warn",
-            lambda d: d["is_bull_breakout"],
-        ),
-        (
-            f"基準放空：分數 ≤ {bear_max}（無濾網）",
-            "short",
-            "bear",
-            lambda d: d["health_score"] <= bear_max,
-        ),
-        (
-            f"趨勢濾網放空：分數 ≤ {bear_max} ＋ 收盤 < 20MA",
-            "short",
-            "bear",
-            lambda d: (d["health_score"] <= bear_max) & d["ma20"].notna() & (d["close"] < d["ma20"]),
-        ),
+    return {"rows": rows, "filter_rows": [], "total_scored_days": int(len(scored)), "verdict": ""}
+
+
+def simulate_swing_backtest(
+    df_price_full: pd.DataFrame,
+    df_health: pd.DataFrame,
+    long_entry: int = 55,
+    long_exit: int = 40,
+    short_entry: int = 35,
+    short_exit: int = 50,
+    round_trip_cost_pct: float = 0.5,
+) -> dict:
+    """
+    波段進出模擬回測引擎（取代固定抱 20 天）：
+    - 嚴格採用「當日盤後判定訊號 → 次日開盤價執行進出場」，完全杜絕未來函數
+    - 預設扣除來回交易摩擦成本（手續費＋證交稅，預設 0.50%）
+    - 同步比較 4 組波段策略（純多+20MA、純空+20MA、多空雙向+20MA、無20MA純籌碼對照）與同期 Buy & Hold 基準
+    - 產出逐日淨值曲線 (Base=100)、最大回撤 (MDD)、勝率、賺賠比、平均持有天數與逐筆進出明細
+    """
+    empty_res = {
+        "valid": False,
+        "dates": [],
+        "start_date": "",
+        "end_date": "",
+        "total_days": 0,
+        "cost_pct": round_trip_cost_pct,
+        "bh": {"total_ret_pct": 0.0, "mdd_pct": 0.0, "equity_curve": []},
+        "strategies": {},
+        "strategy_order": [],
+        "summary_text": "",
+    }
+    if df_price_full is None or df_price_full.empty or df_health is None or df_health.empty:
+        return empty_res
+
+    price_cols = ["date", "close"] + (["open"] if "open" in df_price_full.columns else [])
+    df = (
+        df_price_full[price_cols]
+        .sort_values("date")
+        .merge(df_health[["date", "health_score"]], on="date", how="left")
+        .reset_index(drop=True)
+    )
+    df["close"] = pd.to_numeric(df["close"], errors="coerce")
+    df["open"] = pd.to_numeric(df["open"], errors="coerce") if "open" in df.columns else df["close"]
+    df["open"] = df["open"].where(df["open"] > 0, df["close"])
+    df["health_score"] = pd.to_numeric(df["health_score"], errors="coerce")
+    df["ma20"] = df["close"].rolling(20).mean()
+
+    valid_idx = df.index[df["health_score"].notna() & df["close"].notna()].tolist()
+    if len(valid_idx) < 5:
+        return empty_res
+
+    start_i = int(valid_idx[0])
+    sub = df.iloc[start_i:].reset_index(drop=True)
+    n = len(sub)
+
+    dates = sub["date"].astype(str).tolist()
+    open_arr = sub["open"].to_numpy(dtype=float)
+    close_arr = sub["close"].to_numpy(dtype=float)
+    score_arr = sub["health_score"].to_numpy(dtype=float)
+    ma20_arr = sub["ma20"].to_numpy(dtype=float)
+
+    # 同期買進持有基準 (Base = 100)
+    bh_curve = (100.0 * (close_arr / close_arr[0])).tolist()
+    bh_np = np.array(bh_curve, dtype=float)
+    bh_peak = np.maximum.accumulate(bh_np)
+    bh_mdd = round(float(((bh_np - bh_peak) / bh_peak * 100.0).min()), 2)
+    bh_total_ret = round(float(bh_np[-1] - 100.0), 2)
+
+    cost_dec = max(0.0, float(round_trip_cost_pct)) / 100.0
+    half_cost = cost_dec / 2.0
+
+    def _run_sim(key: str, label: str, mode: str, use_ma20: bool) -> dict:
+        pos = 0  # 0=空手, 1=持多單, -1=持空單
+        entry_idx = -1
+        entry_px = 0.0
+        entry_date = ""
+        entry_score = 0.0
+        entry_reason = ""
+        realized_eq = 100.0
+        pending_action = None  # tuple: (action_type, reason, signal_score)
+        trades = []
+        eq_curve = []
+
+        for i in range(n):
+            exec_px = float(open_arr[i]) if (pd.notna(open_arr[i]) and open_arr[i] > 0) else float(close_arr[i])
+
+            # 1. 開盤執行前一日盤後觸發的進出訊號
+            if pending_action is not None:
+                act_type, act_reason, sig_sc = pending_action
+
+                # 先處理平倉／反手平倉
+                if act_type in ("exit", "rev_to_short", "rev_to_long") and pos != 0:
+                    raw_ret = ((exec_px - entry_px) / entry_px) if pos == 1 else ((entry_px - exec_px) / entry_px)
+                    net_ret = raw_ret - cost_dec
+                    realized_eq = max(0.0, realized_eq * (1.0 + net_ret))
+                    trades.append({
+                        "no": len(trades) + 1,
+                        "direction": "做多" if pos == 1 else "放空",
+                        "entry_date": entry_date,
+                        "entry_price": round(entry_px, 2),
+                        "entry_score": int(round(entry_score)),
+                        "exit_date": dates[i],
+                        "exit_price": round(exec_px, 2),
+                        "hold_days": int(i - entry_idx),
+                        "net_ret_pct": round(net_ret * 100.0, 2),
+                        "exit_reason": act_reason,
+                        "is_open": False,
+                    })
+                    pos = 0
+
+                # 再處理新開倉／反手開倉
+                if act_type in ("enter_long", "rev_to_long"):
+                    pos = 1
+                    entry_idx = i
+                    entry_px = exec_px
+                    entry_date = dates[i]
+                    entry_score = sig_sc
+                    entry_reason = act_reason
+                elif act_type in ("enter_short", "rev_to_short"):
+                    pos = -1
+                    entry_idx = i
+                    entry_px = exec_px
+                    entry_date = dates[i]
+                    entry_score = sig_sc
+                    entry_reason = act_reason
+
+                pending_action = None
+
+            # 2. 收盤按市價結算當日權益淨值
+            cl_i = float(close_arr[i])
+            if pos == 0:
+                eq_curve.append(round(realized_eq, 2))
+            elif pos == 1:
+                unr = (cl_i - entry_px) / entry_px - half_cost
+                eq_curve.append(round(max(0.0, realized_eq * (1.0 + unr)), 2))
+            else:
+                unr = (entry_px - cl_i) / entry_px - half_cost
+                eq_curve.append(round(max(0.0, realized_eq * (1.0 + unr)), 2))
+
+            # 3. 盤後檢核當日籌碼分數與 20MA，決定次日開盤動作
+            sc_i = score_arr[i]
+            m20_i = ma20_arr[i]
+            if pd.isna(sc_i) or (use_ma20 and pd.isna(m20_i)):
+                continue
+
+            can_long = (mode in ("long_only", "both")) and (sc_i >= long_entry) and ((not use_ma20) or (cl_i > m20_i))
+            can_short = (mode in ("short_only", "both")) and (sc_i <= short_entry) and ((not use_ma20) or (cl_i < m20_i))
+
+            if pos == 1:
+                ma_break = use_ma20 and (cl_i < m20_i)
+                sc_weak = (sc_i < long_exit)
+                if ma_break or sc_weak:
+                    if ma_break and sc_weak:
+                        ex_r = f"跌破20MA＋分數<{long_exit}"
+                    elif ma_break:
+                        ex_r = "跌破 20MA"
+                    else:
+                        ex_r = f"分數轉弱 (<{long_exit})"
+                    if can_short:
+                        pending_action = ("rev_to_short", ex_r, sc_i)
+                    else:
+                        pending_action = ("exit", ex_r, sc_i)
+            elif pos == -1:
+                ma_break = use_ma20 and (cl_i > m20_i)
+                sc_strong = (sc_i > short_exit)
+                if ma_break or sc_strong:
+                    if ma_break and sc_strong:
+                        ex_r = f"站上20MA＋分數>{short_exit}"
+                    elif ma_break:
+                        ex_r = "站上 20MA"
+                    else:
+                        ex_r = f"分數轉強 (>{short_exit})"
+                    if can_long:
+                        pending_action = ("rev_to_long", ex_r, sc_i)
+                    else:
+                        pending_action = ("exit", ex_r, sc_i)
+            else:
+                if can_long:
+                    pending_action = ("enter_long", f"≥{long_entry}分" + ("＋>20MA" if use_ma20 else ""), sc_i)
+                elif can_short:
+                    pending_action = ("enter_short", f"≤{short_entry}分" + ("＋<20MA" if use_ma20 else ""), sc_i)
+
+        # 若最新交易日仍持有倉位，以最新收盤價計入未實現明細（標註持倉中）
+        has_open = False
+        open_dir_txt = "空手觀望"
+        if pos != 0:
+            has_open = True
+            last_cl = float(close_arr[-1])
+            raw_unr = ((last_cl - entry_px) / entry_px) if pos == 1 else ((entry_px - last_cl) / entry_px)
+            net_unr = raw_unr - half_cost
+            dir_str = "做多" if pos == 1 else "放空"
+            open_dir_txt = f"持有{dir_str}中（{entry_date[5:]}進場｜未實現 {net_unr * 100.0:+.1f}%）"
+            trades.append({
+                "no": len(trades) + 1,
+                "direction": dir_str,
+                "entry_date": entry_date,
+                "entry_price": round(entry_px, 2),
+                "entry_score": int(round(entry_score)),
+                "exit_date": dates[-1],
+                "exit_price": round(last_cl, 2),
+                "hold_days": int((n - 1) - entry_idx),
+                "net_ret_pct": round(net_unr * 100.0, 2),
+                "exit_reason": "持倉中 (未實現)",
+                "is_open": True,
+            })
+
+        # 最新一日盤後觸發的明日開盤預告
+        next_signal_txt = open_dir_txt
+        if pending_action is not None:
+            pa_type, pa_reason, _ = pending_action
+            if pa_type == "enter_long":
+                next_signal_txt = f"🔴 盤後觸發做多（次日開盤進場）"
+            elif pa_type == "enter_short":
+                next_signal_txt = f"🟢 盤後觸發放空（次日開盤放空）"
+            elif pa_type == "exit":
+                next_signal_txt = f"🟡 盤後觸發平倉（{pa_reason}｜次日開盤出場）"
+            elif pa_type == "rev_to_short":
+                next_signal_txt = f"🟢 盤後多翻空（{pa_reason}｜次日開盤反手）"
+            elif pa_type == "rev_to_long":
+                next_signal_txt = f"🔴 盤後空翻多（{pa_reason}｜次日開盤反手）"
+
+        # 計算績效統計
+        eq_np = np.array(eq_curve, dtype=float)
+        peak_np = np.maximum.accumulate(eq_np)
+        mdd_pct = round(float(((eq_np - peak_np) / np.where(peak_np > 0, peak_np, 1.0) * 100.0).min()), 2)
+        total_ret_pct = round(float(eq_np[-1] - 100.0), 2)
+
+        n_trades = len(trades)
+        if n_trades > 0:
+            rets_list = [t["net_ret_pct"] for t in trades]
+            wins = [r for r in rets_list if r > 0]
+            losses = [r for r in rets_list if r <= 0]
+            win_rate = round(len(wins) / n_trades * 100.0, 1)
+            avg_ret = round(float(np.mean(rets_list)), 2)
+            avg_win = round(float(np.mean(wins)), 2) if wins else 0.0
+            avg_loss = round(abs(float(np.mean(losses))), 2) if losses else 0.0
+            avg_hold = round(float(np.mean([t["hold_days"] for t in trades])), 1)
+            if wins and losses and avg_loss > 1e-9:
+                payoff_ratio = round(avg_win / avg_loss, 2)
+                profit_factor = round(sum(wins) / abs(sum(losses)), 2)
+            elif wins and not losses:
+                payoff_ratio = None  # 全勝
+                profit_factor = None
+            else:
+                payoff_ratio = 0.0
+                profit_factor = 0.0
+        else:
+            win_rate = avg_ret = avg_win = avg_loss = avg_hold = None
+            payoff_ratio = profit_factor = None
+
+        return {
+            "key": key,
+            "label": label,
+            "mode": mode,
+            "use_ma20": use_ma20,
+            "trade_count": n_trades,
+            "has_open": has_open,
+            "win_rate": win_rate,
+            "avg_ret_pct": avg_ret,
+            "avg_win_pct": avg_win,
+            "avg_loss_pct": avg_loss,
+            "payoff_ratio": payoff_ratio,
+            "profit_factor": profit_factor,
+            "total_ret_pct": total_ret_pct,
+            "mdd_pct": mdd_pct,
+            "avg_hold_days": avg_hold,
+            "next_signal": next_signal_txt,
+            "equity_curve": eq_curve,
+            "trades": trades,
+        }
+
+    strat_defs = [
+        ("both_ma20", "⚡ 多空雙向（籌碼＋20MA）", "both", True),
+        ("long_ma20", "🔴 純做多（籌碼＋20MA）", "long_only", True),
+        ("short_ma20", "🟢 純放空（籌碼＋20MA）", "short_only", True),
+        ("both_raw", "⚪ 多空雙向（純籌碼無20MA對照）", "both", False),
     ]
 
-    filter_rows = []
-    for label, direction, level, cond_fn in filter_specs:
-        sub = scored[cond_fn(scored)]
-        f_item = {
-            "label": label,
-            "direction": direction,
-            "level": level,
-            "days": int(len(sub)),
-            "stats": {},
-        }
-        for h in horizons:
-            rets = sub[f"fwd_{h}d"].dropna()
-            cnt = int(len(rets))
-            if cnt > 0:
-                if direction == "long":
-                    win_rate = round(float((rets > 0).mean()) * 100.0, 1)
-                    strat_ret = round(float(rets.mean()), 2)
-                else:
-                    win_rate = round(float((rets < 0).mean()) * 100.0, 1)
-                    strat_ret = round(float((-rets).mean()), 2)
-                raw_ret = round(float(rets.mean()), 2)
-            else:
-                win_rate = strat_ret = raw_ret = None
-            f_item["stats"][h] = {
-                "count": cnt,
-                "win_rate": win_rate,
-                "strat_ret": strat_ret,
-                "raw_ret": raw_ret,
-            }
-        filter_rows.append(f_item)
+    strategies = {}
+    order = []
+    for s_key, s_lbl, s_mode, s_ma20 in strat_defs:
+        strategies[s_key] = _run_sim(s_key, s_lbl, s_mode, s_ma20)
+        order.append(s_key)
 
-    # --- 3. 產生客觀實證摘要（對照無濾網 vs 20MA 趨勢濾網） ---
-    verdict_parts = []
-    ref_h = 20 if (filter_rows[0]["stats"][20]["count"] >= 3 or filter_rows[4]["stats"][20]["count"] >= 3) else 10
-
-    long_base = filter_rows[0]["stats"][ref_h]
-    long_ma = filter_rows[1]["stats"][ref_h]
-    if long_base["count"] >= 3 and long_base["strat_ret"] is not None:
-        base_txt = f"≥{bull_min}分做多 {ref_h}日勝率 {long_base['win_rate']:.1f}%（均報 {long_base['strat_ret']:+.2f}%）"
-        if long_ma["count"] >= 3 and long_ma["strat_ret"] is not None:
-            base_txt += f" → 加20MA濾網 {long_ma['win_rate']:.1f}%（{long_ma['strat_ret']:+.2f}%）"
-        verdict_parts.append(base_txt)
-
-    short_base = filter_rows[4]["stats"][ref_h]
-    short_ma = filter_rows[5]["stats"][ref_h]
-    if short_base["count"] >= 3 and short_base["strat_ret"] is not None:
-        s_txt = f"≤{bear_max}分放空 {ref_h}日勝率 {short_base['win_rate']:.1f}%（空單均報 {short_base['strat_ret']:+.2f}%）"
-        if short_ma["count"] >= 3 and short_ma["strat_ret"] is not None:
-            s_txt += f" → 加20MA濾網 {short_ma['win_rate']:.1f}%（{short_ma['strat_ret']:+.2f}%）"
-        verdict_parts.append(s_txt)
+    main_s = strategies["both_ma20"]
+    raw_s = strategies["both_raw"]
+    pr_txt = "全勝" if (main_s["payoff_ratio"] is None and main_s["trade_count"] > 0) else (
+        f"{main_s['payoff_ratio']:.2f}" if main_s["payoff_ratio"] is not None else "—"
+    )
+    summary_text = (
+        f"多空雙向＋20MA 累積淨報酬 <b>{main_s['total_ret_pct']:+.1f}%</b>（最大回撤 <b>{main_s['mdd_pct']:.1f}%</b>｜賺賠比 <b>{pr_txt}</b>），"
+        f"對比無 20MA 對照組 <b>{raw_s['total_ret_pct']:+.1f}%</b>（MDD {raw_s['mdd_pct']:.1f}%）與同期買進持有 <b>{bh_total_ret:+.1f}%</b>（MDD {bh_mdd:.1f}%）。"
+    )
 
     return {
-        "rows": rows,
-        "filter_rows": filter_rows,
-        "total_scored_days": int(len(scored)),
-        "verdict": " ｜ ".join(verdict_parts),
+        "valid": True,
+        "dates": dates,
+        "start_date": dates[0],
+        "end_date": dates[-1],
+        "total_days": n,
+        "cost_pct": round_trip_cost_pct,
+        "bh": {
+            "total_ret_pct": bh_total_ret,
+            "mdd_pct": bh_mdd,
+            "equity_curve": bh_curve,
+        },
+        "strategies": strategies,
+        "strategy_order": order,
+        "summary_text": summary_text,
     }
 
 
