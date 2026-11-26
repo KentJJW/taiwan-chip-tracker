@@ -1805,7 +1805,7 @@ def compute_daily_health_scores(
 ) -> pd.DataFrame:
     """
     向量化回算今年每一個交易日的「純籌碼健康分數 (0~100)」與對應狀態：
-    - 100% 撇除均線與漲跌，與即時看板套用同一套「趨勢 60% ＋ 動能 40%」純籌碼評分規則（方案 A）
+    - 100% 對齊看板 analyze_main_force() 口徑（動態隔日沖過濾、Z-Score dropna/min_periods=10、融資/借券 dropna 5日變動）
     - 若當日分點明細或近 3 日融資／借券尚未齊全，該日不計分 (NaN)，確保圖表與回測不誤觸
     """
     if df_price_full is None or df_price_full.empty or df_chips_full is None or df_chips_full.empty:
@@ -1827,40 +1827,25 @@ def compute_daily_health_scores(
     if not pure_cols:
         return pd.DataFrame(columns=["date", "health_score", "scenario_id", "sub_type"])
 
-    wave_cols = [c for c in pure_cols if c not in DAY_TRADE_BROKERS] or pure_cols
-    dt_cols = [c for c in pure_cols if c in DAY_TRADE_BROKERS]
-    dom_wave_cols = [c for c in wave_cols if not is_foreign_broker(c)]
-    foreign_wave_idx = [idx for idx, c in enumerate(wave_cols) if is_foreign_broker(c)]
+    n_brokers = len(pure_cols)
+    pure_mat = df_c[pure_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0).to_numpy(dtype=float)
+    pure_5d_mat = pd.DataFrame(pure_mat).rolling(5, min_periods=1).sum().to_numpy(dtype=float)
+    pure_row_abs_sum = np.abs(pure_mat).sum(axis=1)
 
-    chips_mat = df_c[wave_cols].to_numpy(dtype=float)
-    chips_5d_mat = pd.DataFrame(chips_mat).rolling(5, min_periods=1).sum().to_numpy(dtype=float)
-    dt_mat = df_c[dt_cols].to_numpy(dtype=float) if dt_cols else np.zeros((n, 0), dtype=float)
-    dom_5d_mat = (
-        pd.DataFrame(df_c[dom_wave_cols].to_numpy(dtype=float)).rolling(5, min_periods=1).sum().to_numpy(dtype=float)
-        if dom_wave_cols
-        else np.zeros((n, 0), dtype=float)
-    )
+    is_static_dt_arr = np.array([c in DAY_TRADE_BROKERS for c in pure_cols], dtype=bool)
+    is_foreign_arr = np.array([is_foreign_broker(c) for c in pure_cols], dtype=bool)
 
     close_arr = pd.to_numeric(df_p["close"], errors="coerce").to_numpy(dtype=float)
     vol_arr = pd.to_numeric(df_p["volume"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
     vol5_sum_arr = pd.Series(vol_arr).rolling(5, min_periods=1).sum().to_numpy(dtype=float)
-    vol20_sum_arr = pd.Series(vol_arr).rolling(20, min_periods=1).sum().to_numpy(dtype=float)
-    vol60_sum_arr = pd.Series(vol_arr).rolling(60, min_periods=1).sum().to_numpy(dtype=float)
+    vol20_s = pd.Series(vol_arr).rolling(20, min_periods=10).sum().replace(0, np.nan)
+    vol20_arr_full = pd.Series(vol_arr).rolling(20, min_periods=1).sum().to_numpy(dtype=float)
+    vol60_arr_full = pd.Series(vol_arr).rolling(60, min_periods=1).sum().to_numpy(dtype=float)
     vwap_arr = (
         pd.to_numeric(df_p["vwap"], errors="coerce").fillna(df_p["close"]).to_numpy(dtype=float)
         if "vwap" in df_p.columns
         else close_arr
     )
-
-    # 全體波段分點合力每日趨勢序列（向量化預計算）
-    agg_daily_arr = chips_mat.sum(axis=1)
-    agg_cum_arr = np.cumsum(agg_daily_arr)
-    agg_cum_ma20_arr = pd.Series(agg_cum_arr).rolling(20, min_periods=5).mean().to_numpy(dtype=float)
-    agg_5d_arr = pd.Series(agg_daily_arr).rolling(5, min_periods=1).sum().to_numpy(dtype=float)
-    agg_20d_arr = pd.Series(agg_daily_arr).rolling(20, min_periods=1).sum().to_numpy(dtype=float)
-    agg_60d_arr = pd.Series(agg_daily_arr).rolling(60, min_periods=1).sum().to_numpy(dtype=float)
-    agg_ctrl_20d_arr = np.where(vol20_sum_arr > 0, (agg_20d_arr / vol20_sum_arr) * 100.0, np.nan)
-    agg_ctrl_60d_arr = np.where(vol60_sum_arr > 0, (agg_60d_arr / vol60_sum_arr) * 100.0, 0.0)
 
     trust_arr = pd.to_numeric(df_c["投信"], errors="coerce").fillna(0.0).to_numpy(dtype=float) if "投信" in df_c.columns else np.zeros(n)
     trust_5d_arr = pd.Series(trust_arr).rolling(5, min_periods=1).sum().to_numpy(dtype=float)
@@ -1883,18 +1868,15 @@ def compute_daily_health_scores(
     s_arr = pd.to_numeric(df_a["short_bal"], errors="coerce").to_numpy(dtype=float) if "short_bal" in df_a.columns else np.full(n, np.nan)
     sbl_arr = pd.to_numeric(df_a["sbl_bal"], errors="coerce").to_numpy(dtype=float) if "sbl_bal" in df_a.columns else np.full(n, np.nan)
 
-    m_diff5_arr = pd.Series(m_arr).diff(5).to_numpy(dtype=float)
-    sbl_diff5_arr = pd.Series(sbl_arr).diff(5).to_numpy(dtype=float)
-
     lb = STRATEGY_PARAMS["wave_lookback_days"]
     z_win = STRATEGY_PARAMS["zscore_window"]
     high_thresh = STRATEGY_PARAMS["breadth_streak_pct"]
+    dt_churn_min = STRATEGY_PARAMS["dt_churn_ratio"]
+    dt_flip_min = STRATEGY_PARAMS["dt_flip_rate"]
     tdcc_list = sorted(tdcc_history, key=lambda x: x.get("date", "")) if isinstance(tdcc_history, list) else []
 
     trust_streak_arr = np.zeros(n, dtype=int)
-    breadth_high_streak_arr = np.zeros(n, dtype=int)
     cur_ts = 0
-    cur_hs = 0
     for i in range(n):
         v = trust_arr[i]
         if v > 0:
@@ -1905,25 +1887,16 @@ def compute_daily_health_scores(
             cur_ts = 0
         trust_streak_arr[i] = cur_ts
 
-        row_d = chips_mat[i]
-        bd = int((row_d > 0).sum())
-        sd = int((row_d < 0).sum())
-        ad = bd + sd
-        if ad >= 4 and (bd / ad * 100.0) >= high_thresh:
-            cur_hs += 1
-        else:
-            cur_hs = 0
-        breadth_high_streak_arr[i] = cur_hs
-
-    def _slice_zscore(arr: np.ndarray, idx: int) -> float | None:
-        sl = arr[max(0, idx - z_win + 1) : idx + 1]
+    def _tail_zscore_dropna(arr: np.ndarray, idx: int) -> float | None:
+        """對齊 compute_rolling_zscore：先 dropna 再取最後 z_win 筆有效值"""
+        sl = arr[: idx + 1]
         sl = sl[~np.isnan(sl)]
         if len(sl) < 15:
             return None
-        std_v = float(np.std(sl))
-        return round((float(sl[-1]) - float(np.mean(sl))) / std_v, 2) if std_v > 1e-9 else 0.0
+        sub = sl[-z_win:]
+        std_v = float(np.std(sub))
+        return round((float(sub[-1]) - float(np.mean(sub))) / std_v, 2) if std_v > 1e-9 else 0.0
 
-    pure_row_abs_sum = np.abs(df_c[pure_cols].to_numpy(dtype=float)).sum(axis=1)
     has_hist_margin = bool(np.any(~np.isnan(m_arr)))
     has_hist_sbl = bool(np.any(~np.isnan(sbl_arr)))
 
@@ -1943,31 +1916,73 @@ def compute_daily_health_scores(
             records.append({"date": dt_str, "health_score": np.nan, "scenario_id": 0, "sub_type": "結算中"})
             continue
 
-        # 1. 全體波段分點合力當日狀態
-        cum_i = float(agg_cum_arr[i])
-        ma20_i = float(agg_cum_ma20_arr[i]) if not np.isnan(agg_cum_ma20_arr[i]) else cum_i
+        # --- 1. 動態隔日沖偵測（100% 對齊 profile_brokers，僅用 <= i 之近 60 日資料） ---
+        w_start = max(0, i - lb + 1)
+        win_mat = pure_mat[w_start : i + 1]  # shape: (W, n_brokers)
+        net_60_vec = np.rint(win_mat.sum(axis=0))
+        gross_60_vec = np.abs(win_mat).sum(axis=0)
+        churn_vec = np.where(
+            gross_60_vec > 0,
+            np.round(gross_60_vec / np.maximum(np.abs(net_60_vec), 1.0), 2),
+            0.0,
+        )
+        active_days_vec = (win_mat != 0).sum(axis=0)
+
+        if win_mat.shape[0] >= 2:
+            buy_mask = win_mat[:-1] > 0
+            buy_cnt_vec = buy_mask.sum(axis=0)
+            flip_cnt_vec = (buy_mask & (win_mat[1:] < 0)).sum(axis=0)
+            flip_rate_vec = np.where(buy_cnt_vec >= 5, flip_cnt_vec / np.maximum(buy_cnt_vec, 1), 0.0)
+        else:
+            flip_rate_vec = np.zeros(n_brokers, dtype=float)
+
+        is_dyn_dt = (~is_foreign_arr) & (active_days_vec >= 10) & (churn_vec >= dt_churn_min) & (flip_rate_vec >= dt_flip_min)
+        dt_mask = is_static_dt_arr | is_dyn_dt
+        wave_mask = ~dt_mask
+        if not np.any(wave_mask):
+            wave_mask = np.ones(n_brokers, dtype=bool)
+
+        # --- 2. 全體波段分點合力當日狀態（對齊 compute_wave_aggregate） ---
+        agg_daily_sub = pure_mat[: i + 1, wave_mask].sum(axis=1)
+        agg_cum_sub = np.cumsum(agg_daily_sub)
+        cum_i = float(agg_cum_sub[-1])
+        ma20_win = agg_cum_sub[max(0, i - 19) : i + 1]
+        ma20_i = float(np.mean(ma20_win)) if len(ma20_win) >= 5 else cum_i
         above_ma20_i = bool(cum_i > ma20_i) if abs(cum_i - ma20_i) > 1e-6 else None
+
+        agg_5d_i = float(agg_daily_sub[max(0, i - 4) : i + 1].sum())
+        agg_20d_i = float(agg_daily_sub[max(0, i - 19) : i + 1].sum())
+        agg_60d_i = float(agg_daily_sub[w_start : i + 1].sum())
+        v20_i = float(vol20_arr_full[i])
+        v60_i = float(vol60_arr_full[i])
+        ctrl_20d_i = round((agg_20d_i / v20_i * 100.0), 2) if v20_i > 0 else 0.0
+        ctrl_60d_i = round((agg_60d_i / v60_i * 100.0), 2) if v60_i > 0 else 0.0
+
+        roll_20_net_s = pd.Series(agg_daily_sub).rolling(20, min_periods=10).sum()
+        roll_20_ctrl_arr = ((roll_20_net_s / vol20_s.iloc[: i + 1].reset_index(drop=True)) * 100.0).to_numpy(dtype=float)
+        ctrl_20d_z_i = _tail_zscore_dropna(roll_20_ctrl_arr, i)
+
         wave_agg_i = {
-            "net_5d": int(round(agg_5d_arr[i])),
-            "net_20d": int(round(agg_20d_arr[i])),
-            "net_60d": int(round(agg_60d_arr[i])),
-            "ctrl_20d_pct": round(float(agg_ctrl_20d_arr[i]), 2) if not np.isnan(agg_ctrl_20d_arr[i]) else 0.0,
-            "ctrl_60d_pct": round(float(agg_ctrl_60d_arr[i]), 2),
-            "ctrl_20d_z": _slice_zscore(agg_ctrl_20d_arr, i),
+            "net_5d": int(round(agg_5d_i)),
+            "net_20d": int(round(agg_20d_i)),
+            "net_60d": int(round(agg_60d_i)),
+            "ctrl_20d_pct": ctrl_20d_i,
+            "ctrl_60d_pct": ctrl_60d_i,
+            "ctrl_20d_z": ctrl_20d_z_i,
             "cum_above_ma20": above_ma20_i,
         }
 
-        # 2. 當日滾動 60 日三大波段主力（供診斷與輔助相容欄位）
-        w_start = max(0, i - lb + 1)
-        sum_60 = chips_mat[w_start : i + 1].sum(axis=0)
-        pos_idx = np.where(sum_60 > 0)[0]
-        if len(pos_idx) > 0:
-            top3_idx = pos_idx[np.argsort(sum_60[pos_idx])[::-1][:3]]
-            top3_daily = chips_mat[:, top3_idx].sum(axis=1)
-            top3_5d_series = chips_5d_mat[:, top3_idx].sum(axis=1)
+        # --- 3. 當日滾動 60 日三大波段主力 ---
+        wave_indices = np.where(wave_mask)[0]
+        sum_60_wave = net_60_vec[wave_indices]
+        pos_rel = np.where(sum_60_wave > 0)[0]
+        if len(pos_rel) > 0:
+            top3_idx = wave_indices[pos_rel[np.argsort(sum_60_wave[pos_rel])[::-1][:3]]]
+            top3_daily = pure_mat[: i + 1, top3_idx].sum(axis=1)
+            top3_5d_series = pure_5d_mat[: i + 1, top3_idx].sum(axis=1)
         else:
-            top3_daily = np.zeros(n)
-            top3_5d_series = np.zeros(n)
+            top3_daily = np.zeros(i + 1)
+            top3_5d_series = np.zeros(i + 1)
 
         s5_start = max(0, i - 4)
         top3_5d = int(round(top3_5d_series[i]))
@@ -1978,32 +1993,40 @@ def compute_daily_health_scores(
 
         top3_5d_z = None
         if i >= 14:
-            z_s = max(4, i - z_win + 1)
-            v5_slice = vol5_sum_arr[z_s : i + 1]
-            valid_v = v5_slice > 0
-            if int(valid_v.sum()) >= 15:
-                ctrl_hist = (top3_5d_series[z_s : i + 1][valid_v] / v5_slice[valid_v]) * 100.0
-                std_c = float(np.std(ctrl_hist))
-                top3_5d_z = round((float(ctrl_hist[-1]) - float(np.mean(ctrl_hist))) / std_c, 2) if std_c > 1e-9 else 0.0
+            v5_sub = vol5_sum_arr[: i + 1]
+            ctrl_5d_arr = np.where(v5_sub > 0, (top3_5d_series / np.where(v5_sub > 0, v5_sub, 1.0)) * 100.0, np.nan)
+            ctrl_5d_arr[:4] = np.nan
+            top3_5d_z = _tail_zscore_dropna(ctrl_5d_arr, i)
 
-        c5_z = _slice_zscore(c5_arr, i)
+        c5_z = _tail_zscore_dropna(c5_arr, i)
 
-        # 3. 主力分點廣度比（含外資共識）
-        row5 = chips_5d_mat[i]
-        b5_i = int((row5 > 0).sum())
-        s5_i = int((row5 < 0).sum())
+        # --- 4. 主力分點廣度比（含外資共識與高廣度連日天數） ---
+        row5_wave = pure_5d_mat[i, wave_mask]
+        b5_i = int((row5_wave > 0).sum())
+        s5_i = int((row5_wave < 0).sum())
         a5_i = b5_i + s5_i
         b5_pct_i = round(b5_i / a5_i * 100.0, 1) if a5_i > 0 else None
 
+        f_wave_mask = wave_mask & is_foreign_arr
         fb5_i = fs5_i = fa5_i = 0
         fb5_pct_i = None
-        if foreign_wave_idx:
-            f_row5 = row5[foreign_wave_idx]
+        if np.any(f_wave_mask):
+            f_row5 = pure_5d_mat[i, f_wave_mask]
             fb5_i = int((f_row5 > 0).sum())
             fs5_i = int((f_row5 < 0).sum())
             fa5_i = fb5_i + fs5_i
             if fa5_i > 0:
                 fb5_pct_i = round(fb5_i / fa5_i * 100.0, 1)
+
+        high_streak_i = 0
+        for back_idx in range(i, max(-1, i - 15), -1):
+            r_d = pure_mat[back_idx, wave_mask]
+            bd = int((r_d > 0).sum())
+            sd = int((r_d < 0).sum())
+            ad = bd + sd
+            if ad < 4 or (bd / ad * 100.0) < high_thresh:
+                break
+            high_streak_i += 1
 
         breadth_i = {
             "breadth_5d": b5_pct_i,
@@ -2014,30 +2037,33 @@ def compute_daily_health_scores(
             "foreign_buy_5d": fb5_i,
             "foreign_sell_5d": fs5_i,
             "foreign_active_5d": fa5_i,
-            "high_streak": int(breadth_high_streak_arr[i]),
+            "high_streak": high_streak_i,
         }
 
-        # 4. 當日隔日沖與本土波段買盤
+        # --- 5. 當日隔日沖與本土波段買盤 ---
         dt_info_i = None
-        if dt_mat.shape[1] > 0 and vol_arr[i] > 0:
-            row_dt = dt_mat[i]
-            dt_pos = row_dt[row_dt > 0]
-            dt_pct_i = round(float(dt_pos.sum()) / float(vol_arr[i]) * 100.0, 1) if len(dt_pos) > 0 else 0.0
+        if np.any(dt_mask) and vol_arr[i] > 0:
+            dt_indices = np.where(dt_mask)[0]
+            row_dt = pure_mat[i, dt_indices]
+            dt_pos_rel = np.where(row_dt > 0)[0]
+            dt_pct_i = round(float(row_dt[dt_pos_rel].sum()) / float(vol_arr[i]) * 100.0, 1) if len(dt_pos_rel) > 0 else 0.0
             if dt_pct_i > 0:
-                dt_names_i = [dt_cols[k] for k in np.where(row_dt > 0)[0][:3]]
+                dt_names_i = [pure_cols[dt_indices[k]] for k in dt_pos_rel[:3]]
                 dt_info_i = {
                     "is_heavy_day_trade": dt_pct_i >= STRATEGY_PARAMS["dt_today_vol_warn_pct"],
                     "dt_vol_pct": dt_pct_i,
                     "dt_buyers": dt_names_i,
                 }
 
+        dom_wave_mask = wave_mask & (~is_foreign_arr)
         dom_buy_5d = 0
-        if dom_5d_mat.shape[1] > 0:
-            pos_dom = dom_5d_mat[i][dom_5d_mat[i] > 0]
+        if np.any(dom_wave_mask):
+            row5_dom = pure_5d_mat[i, dom_wave_mask]
+            pos_dom = row5_dom[row5_dom > 0]
             if len(pos_dom) > 0:
                 dom_buy_5d = int(round(np.sort(pos_dom)[::-1][:3].sum()))
 
-        # 5. 投信當日狀態（保留相容欄位，方案 A 不計入總分）
+        # --- 6. 投信當日狀態（保留相容欄位，方案 A 不計入總分） ---
         t_hold_i = None
         if not np.isnan(trust_pct_arr[i]):
             t_hold_i = round(float(trust_pct_arr[i]), 2)
@@ -2052,29 +2078,42 @@ def compute_daily_health_scores(
             "holding_pct": t_hold_i,
         }
 
-        # 6. 融資、借券與集保大戶
+        # --- 7. 融資、借券（對齊看板：dropna 後取前 5 筆）與集保大戶 ---
         mg_i = None
-        if not np.isnan(m_arr[i]) and i >= 5 and not np.isnan(m_arr[i - 5]) and m_arr[i - 5] > 0:
-            chg_m = int(round(m_arr[i] - m_arr[i - 5]))
-            chg_m_pct = round(chg_m / m_arr[i - 5] * 100.0, 2)
-            sm_r = round(s_arr[i] / m_arr[i] * 100.0, 2) if (not np.isnan(s_arr[i]) and m_arr[i] > 0) else 0.0
+        if not np.isnan(m_arr[i]):
+            m_valid = m_arr[: i + 1]
+            m_valid = m_valid[~np.isnan(m_valid)]
+            latest_m = int(round(float(m_valid[-1])))
+            base_m = float(m_valid[-6]) if len(m_valid) >= 6 else float(m_valid[0])
+            chg_m = int(round(latest_m - base_m))
+            chg_m_pct = round(chg_m / base_m * 100.0, 2) if base_m > 0 else 0.0
+            m_diff5 = pd.Series(m_valid).diff(5).to_numpy(dtype=float)
+            m_z_i = _tail_zscore_dropna(m_diff5, len(m_diff5) - 1)
+            latest_s = int(round(float(s_arr[i]))) if not np.isnan(s_arr[i]) else 0
+            sm_r = round(latest_s / latest_m * 100.0, 2) if latest_m > 0 else 0.0
             mg_i = {
                 "chg_5d": chg_m,
                 "chg_5d_pct": chg_m_pct,
-                "chg_5d_z": _slice_zscore(m_diff5_arr, i),
+                "chg_5d_z": m_z_i,
                 "chg_5d_vol_pct": round(abs(chg_m) / vol_5d * 100.0, 2) if vol_5d > 0 else None,
                 "short_margin_ratio": sm_r,
                 "domestic_top_buy_5d": dom_buy_5d,
             }
 
         sbl_i = None
-        if not np.isnan(sbl_arr[i]) and i >= 5 and not np.isnan(sbl_arr[i - 5]) and sbl_arr[i - 5] > 0:
-            chg_sbl = int(round(sbl_arr[i] - sbl_arr[i - 5]))
-            chg_sbl_pct = round(chg_sbl / sbl_arr[i - 5] * 100.0, 2)
+        if not np.isnan(sbl_arr[i]):
+            sbl_valid = sbl_arr[: i + 1]
+            sbl_valid = sbl_valid[~np.isnan(sbl_valid)]
+            latest_sbl = int(round(float(sbl_valid[-1])))
+            base_sbl = float(sbl_valid[-6]) if len(sbl_valid) >= 6 else float(sbl_valid[0])
+            chg_sbl = int(round(latest_sbl - base_sbl))
+            chg_sbl_pct = round(chg_sbl / base_sbl * 100.0, 2) if base_sbl > 0 else 0.0
+            sbl_diff5 = pd.Series(sbl_valid).diff(5).to_numpy(dtype=float)
+            sbl_z_i = _tail_zscore_dropna(sbl_diff5, len(sbl_diff5) - 1)
             sbl_i = {
                 "chg_5d": chg_sbl,
                 "chg_5d_pct": chg_sbl_pct,
-                "chg_5d_z": _slice_zscore(sbl_diff5_arr, i),
+                "chg_5d_z": sbl_z_i,
                 "chg_5d_vol_pct": round(abs(chg_sbl) / vol_5d * 100.0, 2) if vol_5d > 0 else None,
             }
 
