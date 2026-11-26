@@ -49,7 +49,7 @@ FOREIGN_BROKER_KEYWORDS = (
 
 # 100% 純籌碼策略參數集中管理（趨勢 60% ＋ 動能 40%）
 STRATEGY_PARAMS = {
-    # 多空分數門檻（做多門檻 55 分，空方門檻 35 分）
+    # 多空分數預設門檻（後續可依純籌碼回測數據調整）
     "bull_score_min": 55,
     "strong_bull_score_min": 70,
     "bear_score_max": 35,
@@ -117,7 +117,7 @@ STRATEGY_PARAMS = {
     "winner_min_avg_ret": 3.0,
 }
 
-# 純籌碼結構 5 大狀態判讀矩陣（趨勢 60% ＋ 動能 40%，做多門檻 ≥ 55 分）
+# 純籌碼結構 5 大狀態判讀矩陣（100% 撇除技術面均線與漲跌）
 SCENARIO_MATRIX = [
     {
         "id": 1,
@@ -126,16 +126,16 @@ SCENARIO_MATRIX = [
         "main_cond": "全體波段分點 20/60 日合力明確偏多，累計庫存站上 20 日庫存均線",
         "conc_cond": "10/20 日中線集中度與 5 日集中度同向偏多 ＋ 主力廣度 ≥ 65%（大戶／外資齊心）",
         "aux_cond": "投信 20 日偏多、融資清洗或點火、多頭借券回補或集保大戶增持；純籌碼分數 ≥ 70",
-        "action": "趨勢面與動能面高度共振，屬主升鎖碼格局；短線乖離偏大時宜等拉回或分批操作。",
+        "action": "趨勢面與動能面高度共振，屬籌碼最紮實的主升鎖碼格局。",
     },
     {
         "id": 2,
         "type": "bull",
-        "name": "📈 2. 偏多吸籌／進場甜蜜區",
+        "name": "📈 2. 偏多吸籌／沉澱區",
         "main_cond": "全體波段分點合力轉正或庫存穩步墊高，大戶籌碼逐步由空翻多",
         "conc_cond": "中線集中度溫和偏正或止跌收斂，主力廣度未跌破 40%（無少數硬撐跡象）",
-        "aux_cond": "常見融資清洗或投信／大戶緩步承接；純籌碼分數 55 ～ 69（達做多門檻）",
-        "action": "已進入偏多做多區且尚未過熱，若股價站穩 20MA 往往為風險報酬比最佳的切入位置。",
+        "aux_cond": "常見融資清洗或投信／大戶緩步承接；純籌碼分數 55 ～ 69",
+        "action": "大資金已開始偏向集中且尚未過熱，持續追蹤集中度與外資廣度是否擴大。",
     },
     {
         "id": 3,
@@ -144,7 +144,7 @@ SCENARIO_MATRIX = [
         "main_cond": "全體波段分點 20 日淨進出幅度不大，累計庫存貼近 20 日均線橫向整理",
         "conc_cond": "10/20 日集中度介於 -2% ～ +2%，主力廣度落於 40% ～ 65% 中性區間",
         "aux_cond": "趨勢面與動能面互相抵銷，大資金未展現壓倒性方向；純籌碼分數 36 ～ 54",
-        "action": "籌碼處於正常換手與平衡期，缺乏明確波段方向，宜等待突破 55 分或跌破 35 分表態。",
+        "action": "籌碼處於正常換手與平衡期，缺乏明確波段方向，宜等待主力庫存方向表態。",
     },
     {
         "id": 4,
@@ -152,7 +152,7 @@ SCENARIO_MATRIX = [
         "name": "⚡ 4. 籌碼分歧／少數硬撐",
         "main_cond": "中線趨勢（全體波段分點）與短線動能方向衝突，或當日隔日沖佔比過高（≥ 8%）",
         "conc_cond": "5 日集中度為正但主力廣度 ≤ 40%（少數大戶硬撐、多數大戶偷跑），或外資與本土對作",
-        "aux_cond": "常見散戶融資過熱、隔日沖拉高灌水，或僅少數分點逆勢攤平接刀",
+        "aux_cond": "常見散戶融資過熱、隔日沖拉高灌水，或僅少數分點逆勢承接",
         "action": "表面買盤與全體波段分點共識不一致，須提防單一主力撐盤失敗或隔日沖獲利了結。",
     },
     {
@@ -162,7 +162,7 @@ SCENARIO_MATRIX = [
         "main_cond": "全體波段分點 20/60 日合力持續倒貨，累計庫存跌破 20 日庫存均線向下",
         "conc_cond": "10/20 日與 5 日集中度轉負 ＋ 主力廣度 ≤ 35%（大戶／外資集體撤退）",
         "aux_cond": "投信連賣、散戶融資過熱或空方加壓（空頭背景借券回補不加分）；純籌碼分數 ≤ 35",
-        "action": "趨勢與動能同步偏空發散，應避開做多；若股價同步跌破 20MA 則符合偏空操作條件。",
+        "action": "趨勢與動能同步偏空發散，大資金持續撤離且流向散戶，籌碼結構明顯不利多方。",
     },
 ]
 
@@ -1145,7 +1145,7 @@ def evaluate_chip_scenario(
     conviction_score = int(max(0, min(100, raw_before_dt + dt_score)))
 
     # =========================================================
-    # 判定 5 大純籌碼結構狀態（做多門檻 ≥ 55 分，空方門檻 ≤ 35 分）
+    # 判定 5 大純籌碼結構狀態（100% 純籌碼，不含任何均線）
     # =========================================================
     bull_min = p["bull_score_min"]
     strong_bull_min = p["strong_bull_score_min"]
@@ -1175,16 +1175,16 @@ def evaluate_chip_scenario(
         sc_id = 1
         sc_type = "bull"
         sub_type = "波段強多共振"
-        title = "🔥 純籌碼狀態：1. 波段趨勢強多共振（≥70 分）"
+        title = f"🔥 純籌碼狀態：1. 波段趨勢強多共振（≥{strong_bull_min} 分）"
         desc = f"{summary_prefix}，中線波段趨勢（{trend_score:+d}）與短線動能（{momentum_score:+d}）同步偏多。"
-        action = "趨勢與動能高度共振，屬主升鎖碼格局；短線乖離偏大時宜等拉回或分批操作。"
+        action = "趨勢與動能高度共振，屬籌碼最紮實的主升鎖碼格局。"
     elif conviction_score <= bear_max or (trend_score <= -12 and conviction_score < 45):
         sc_id = 5
         sc_type = "bear"
         sub_type = "波段全面發散"
-        title = "🟢 純籌碼狀態：5. 波段全面發散（≤35 分｜大戶撤退）"
+        title = f"🟢 純籌碼狀態：5. 波段全面發散（≤{bear_max} 分｜大戶撤退）"
         desc = f"{summary_prefix}，中線趨勢（{trend_score:+d}）與短線動能（{momentum_score:+d}）明顯偏空發散。"
-        action = "波段主力持續撤離且籌碼流向散戶，應避開做多；若股價跌破 20MA 則符合偏空條件。"
+        action = "波段主力持續撤離且籌碼流向散戶，整體籌碼結構偏空。"
     elif few_holding_up or trend_mom_conflict or heavy_dt_distortion:
         sc_id = 4
         sc_type = "neutral"
@@ -1195,17 +1195,17 @@ def evaluate_chip_scenario(
     elif conviction_score >= bull_min:
         sc_id = 2
         sc_type = "bull"
-        sub_type = "偏多甜蜜區"
-        title = "📈 純籌碼狀態：2. 偏多吸籌／進場甜蜜區（55～69 分）"
-        desc = f"{summary_prefix}，已站上 55 分做多門檻（趨勢 {trend_score:+d} ／ 動能 {momentum_score:+d}）。"
-        action = "籌碼已轉向大戶集中且尚未短線過熱，搭配股價站穩 20MA 時為高勝率切入區間。"
+        sub_type = "偏多吸籌"
+        title = f"📈 純籌碼狀態：2. 偏多吸籌／沉澱區（{bull_min}～{strong_bull_min - 1} 分）"
+        desc = f"{summary_prefix}，整體籌碼偏向大戶端集中（趨勢 {trend_score:+d} ／ 動能 {momentum_score:+d}）。"
+        action = "波段籌碼結構偏多且尚未過熱，可持續觀察集中度與外資廣度是否續強。"
     else:
         sc_id = 3
         sc_type = "neutral"
         sub_type = "籌碼中性"
-        title = "⚪ 純籌碼狀態：3. 籌碼中性／換手觀望（36～54 分）"
+        title = f"⚪ 純籌碼狀態：3. 籌碼中性／換手觀望（{bear_max + 1}～{bull_min - 1} 分）"
         desc = f"{summary_prefix}，多空力道大致平衡（趨勢 {trend_score:+d} ／ 動能 {momentum_score:+d}）。"
-        action = "大資金尚未展現單邊波段傾向，宜等待突破 55 分偏多或跌破 35 分偏空表態。"
+        action = "大資金尚未展現單邊波段傾向，宜等待全體波段分點庫存方向表態。"
 
     return {
         "id": sc_id,
@@ -1243,7 +1243,7 @@ def compute_score_backtest(
     df_health: pd.DataFrame,
     horizons: tuple[int, ...] = (5, 10, 20),
 ) -> dict:
-    """保留向下相容之固定天期分數區間回測函式"""
+    """保留向下相容之純籌碼分數區間固定天期回測函式"""
     empty_res = {"rows": [], "filter_rows": [], "total_scored_days": 0, "verdict": ""}
     if df_price_full is None or df_price_full.empty or df_health is None or df_health.empty:
         return empty_res
@@ -1269,7 +1269,7 @@ def compute_score_backtest(
 
     buckets = [
         (f"≥ {strong_bull_min} 分（強力共振）", "bull", lambda d: d["health_score"] >= strong_bull_min),
-        (f"{bull_min} ～ {strong_bull_min - 1} 分（偏多甜蜜區）", "warn", lambda d: (d["health_score"] >= bull_min) & (d["health_score"] < strong_bull_min)),
+        (f"{bull_min} ～ {strong_bull_min - 1} 分（偏多吸籌）", "warn", lambda d: (d["health_score"] >= bull_min) & (d["health_score"] < strong_bull_min)),
         (f"{bear_max + 1} ～ {bull_min - 1} 分（中性分歧）", "info", lambda d: (d["health_score"] > bear_max) & (d["health_score"] < bull_min)),
         (f"≤ {bear_max} 分（明顯偏空）", "bear", lambda d: d["health_score"] <= bear_max),
     ]
@@ -1301,11 +1301,12 @@ def simulate_swing_backtest(
     round_trip_cost_pct: float = 0.5,
 ) -> dict:
     """
-    波段進出模擬回測引擎（取代固定抱 20 天）：
-    - 嚴格採用「當日盤後判定訊號 → 次日開盤價執行進出場」，完全杜絕未來函數
+    100% 純籌碼波段進出模擬回測引擎（完全不含技術面均線與停損濾網）：
+    - 嚴格採用「當日盤後純籌碼分數判定 → 次日開盤價執行進出場」，杜絕未來函數
     - 預設扣除來回交易摩擦成本（手續費＋證交稅，預設 0.50%）
-    - 同步比較 4 組波段策略（純多+20MA、純空+20MA、多空雙向+20MA、無20MA純籌碼對照）與同期 Buy & Hold 基準
-    - 產出逐日淨值曲線 (Base=100)、最大回撤 (MDD)、勝率、賺賠比、平均持有天數與逐筆進出明細
+    - 產出：
+        1. 使用者選定門檻之「純籌碼多空雙向」、「純做多」、「純放空」與同期 Buy & Hold 基準
+        2. 5 組常用純籌碼門檻敏感度對照表（55/35、60/35、65/35、70/30、60/40），方便實證討論最佳分數門檻
     """
     empty_res = {
         "valid": False,
@@ -1314,9 +1315,16 @@ def simulate_swing_backtest(
         "end_date": "",
         "total_days": 0,
         "cost_pct": round_trip_cost_pct,
+        "params": {
+            "long_entry": long_entry,
+            "long_exit": long_exit,
+            "short_entry": short_entry,
+            "short_exit": short_exit,
+        },
         "bh": {"total_ret_pct": 0.0, "mdd_pct": 0.0, "equity_curve": []},
         "strategies": {},
         "strategy_order": [],
+        "threshold_compare": [],
         "summary_text": "",
     }
     if df_price_full is None or df_price_full.empty or df_health is None or df_health.empty:
@@ -1333,7 +1341,6 @@ def simulate_swing_backtest(
     df["open"] = pd.to_numeric(df["open"], errors="coerce") if "open" in df.columns else df["close"]
     df["open"] = df["open"].where(df["open"] > 0, df["close"])
     df["health_score"] = pd.to_numeric(df["health_score"], errors="coerce")
-    df["ma20"] = df["close"].rolling(20).mean()
 
     valid_idx = df.index[df["health_score"].notna() & df["close"].notna()].tolist()
     if len(valid_idx) < 5:
@@ -1347,7 +1354,6 @@ def simulate_swing_backtest(
     open_arr = sub["open"].to_numpy(dtype=float)
     close_arr = sub["close"].to_numpy(dtype=float)
     score_arr = sub["health_score"].to_numpy(dtype=float)
-    ma20_arr = sub["ma20"].to_numpy(dtype=float)
 
     # 同期買進持有基準 (Base = 100)
     bh_curve = (100.0 * (close_arr / close_arr[0])).tolist()
@@ -1359,13 +1365,20 @@ def simulate_swing_backtest(
     cost_dec = max(0.0, float(round_trip_cost_pct)) / 100.0
     half_cost = cost_dec / 2.0
 
-    def _run_sim(key: str, label: str, mode: str, use_ma20: bool) -> dict:
+    def _run_pure_sim(
+        key: str,
+        label: str,
+        mode: str,
+        l_in: int,
+        l_out: int,
+        s_in: int,
+        s_out: int,
+    ) -> dict:
         pos = 0  # 0=空手, 1=持多單, -1=持空單
         entry_idx = -1
         entry_px = 0.0
         entry_date = ""
         entry_score = 0.0
-        entry_reason = ""
         realized_eq = 100.0
         pending_action = None  # tuple: (action_type, reason, signal_score)
         trades = []
@@ -1374,11 +1387,10 @@ def simulate_swing_backtest(
         for i in range(n):
             exec_px = float(open_arr[i]) if (pd.notna(open_arr[i]) and open_arr[i] > 0) else float(close_arr[i])
 
-            # 1. 開盤執行前一日盤後觸發的進出訊號
+            # 1. 次日開盤執行前一日盤後純籌碼訊號
             if pending_action is not None:
                 act_type, act_reason, sig_sc = pending_action
 
-                # 先處理平倉／反手平倉
                 if act_type in ("exit", "rev_to_short", "rev_to_long") and pos != 0:
                     raw_ret = ((exec_px - entry_px) / entry_px) if pos == 1 else ((entry_px - exec_px) / entry_px)
                     net_ret = raw_ret - cost_dec
@@ -1398,21 +1410,18 @@ def simulate_swing_backtest(
                     })
                     pos = 0
 
-                # 再處理新開倉／反手開倉
                 if act_type in ("enter_long", "rev_to_long"):
                     pos = 1
                     entry_idx = i
                     entry_px = exec_px
                     entry_date = dates[i]
                     entry_score = sig_sc
-                    entry_reason = act_reason
                 elif act_type in ("enter_short", "rev_to_short"):
                     pos = -1
                     entry_idx = i
                     entry_px = exec_px
                     entry_date = dates[i]
                     entry_score = sig_sc
-                    entry_reason = act_reason
 
                 pending_action = None
 
@@ -1427,50 +1436,33 @@ def simulate_swing_backtest(
                 unr = (entry_px - cl_i) / entry_px - half_cost
                 eq_curve.append(round(max(0.0, realized_eq * (1.0 + unr)), 2))
 
-            # 3. 盤後檢核當日籌碼分數與 20MA，決定次日開盤動作
+            # 3. 盤後純籌碼分數判定次日開盤動作
             sc_i = score_arr[i]
-            m20_i = ma20_arr[i]
-            if pd.isna(sc_i) or (use_ma20 and pd.isna(m20_i)):
+            if pd.isna(sc_i):
                 continue
 
-            can_long = (mode in ("long_only", "both")) and (sc_i >= long_entry) and ((not use_ma20) or (cl_i > m20_i))
-            can_short = (mode in ("short_only", "both")) and (sc_i <= short_entry) and ((not use_ma20) or (cl_i < m20_i))
+            can_long = (mode in ("long_only", "both")) and (sc_i >= l_in) and (l_in > s_in or mode == "long_only")
+            can_short = (mode in ("short_only", "both")) and (sc_i <= s_in) and (l_in > s_in or mode == "short_only")
 
             if pos == 1:
-                ma_break = use_ma20 and (cl_i < m20_i)
-                sc_weak = (sc_i < long_exit)
-                if ma_break or sc_weak:
-                    if ma_break and sc_weak:
-                        ex_r = f"跌破20MA＋分數<{long_exit}"
-                    elif ma_break:
-                        ex_r = "跌破 20MA"
-                    else:
-                        ex_r = f"分數轉弱 (<{long_exit})"
+                if sc_i < l_out or can_short:
                     if can_short:
-                        pending_action = ("rev_to_short", ex_r, sc_i)
+                        pending_action = ("rev_to_short", f"分數翻空 (≤{s_in})", sc_i)
                     else:
-                        pending_action = ("exit", ex_r, sc_i)
+                        pending_action = ("exit", f"籌碼轉弱 (<{l_out})", sc_i)
             elif pos == -1:
-                ma_break = use_ma20 and (cl_i > m20_i)
-                sc_strong = (sc_i > short_exit)
-                if ma_break or sc_strong:
-                    if ma_break and sc_strong:
-                        ex_r = f"站上20MA＋分數>{short_exit}"
-                    elif ma_break:
-                        ex_r = "站上 20MA"
-                    else:
-                        ex_r = f"分數轉強 (>{short_exit})"
+                if sc_i > s_out or can_long:
                     if can_long:
-                        pending_action = ("rev_to_long", ex_r, sc_i)
+                        pending_action = ("rev_to_long", f"分數翻多 (≥{l_in})", sc_i)
                     else:
-                        pending_action = ("exit", ex_r, sc_i)
+                        pending_action = ("exit", f"籌碼轉強 (>{s_out})", sc_i)
             else:
                 if can_long:
-                    pending_action = ("enter_long", f"≥{long_entry}分" + ("＋>20MA" if use_ma20 else ""), sc_i)
+                    pending_action = ("enter_long", f"純籌碼 ≥{l_in} 分", sc_i)
                 elif can_short:
-                    pending_action = ("enter_short", f"≤{short_entry}分" + ("＋<20MA" if use_ma20 else ""), sc_i)
+                    pending_action = ("enter_short", f"純籌碼 ≤{s_in} 分", sc_i)
 
-        # 若最新交易日仍持有倉位，以最新收盤價計入未實現明細（標註持倉中）
+        # 若最新交易日仍在持倉，按最新收盤價計入未實現損益
         has_open = False
         open_dir_txt = "空手觀望"
         if pos != 0:
@@ -1494,14 +1486,13 @@ def simulate_swing_backtest(
                 "is_open": True,
             })
 
-        # 最新一日盤後觸發的明日開盤預告
         next_signal_txt = open_dir_txt
         if pending_action is not None:
             pa_type, pa_reason, _ = pending_action
             if pa_type == "enter_long":
-                next_signal_txt = f"🔴 盤後觸發做多（次日開盤進場）"
+                next_signal_txt = f"🔴 盤後觸發做多（{pa_reason}｜次日開盤進場）"
             elif pa_type == "enter_short":
-                next_signal_txt = f"🟢 盤後觸發放空（次日開盤放空）"
+                next_signal_txt = f"🟢 盤後觸發放空（{pa_reason}｜次日開盤放空）"
             elif pa_type == "exit":
                 next_signal_txt = f"🟡 盤後觸發平倉（{pa_reason}｜次日開盤出場）"
             elif pa_type == "rev_to_short":
@@ -1509,7 +1500,6 @@ def simulate_swing_backtest(
             elif pa_type == "rev_to_long":
                 next_signal_txt = f"🔴 盤後空翻多（{pa_reason}｜次日開盤反手）"
 
-        # 計算績效統計
         eq_np = np.array(eq_curve, dtype=float)
         peak_np = np.maximum.accumulate(eq_np)
         mdd_pct = round(float(((eq_np - peak_np) / np.where(peak_np > 0, peak_np, 1.0) * 100.0).min()), 2)
@@ -1529,7 +1519,7 @@ def simulate_swing_backtest(
                 payoff_ratio = round(avg_win / avg_loss, 2)
                 profit_factor = round(sum(wins) / abs(sum(losses)), 2)
             elif wins and not losses:
-                payoff_ratio = None  # 全勝
+                payoff_ratio = None
                 profit_factor = None
             else:
                 payoff_ratio = 0.0
@@ -1542,7 +1532,6 @@ def simulate_swing_backtest(
             "key": key,
             "label": label,
             "mode": mode,
-            "use_ma20": use_ma20,
             "trade_count": n_trades,
             "has_open": has_open,
             "win_rate": win_rate,
@@ -1559,27 +1548,62 @@ def simulate_swing_backtest(
             "trades": trades,
         }
 
+    # --- 1. 主回測（依目前設定門檻，純籌碼多空／純多／純空） ---
     strat_defs = [
-        ("both_ma20", "⚡ 多空雙向（籌碼＋20MA）", "both", True),
-        ("long_ma20", "🔴 純做多（籌碼＋20MA）", "long_only", True),
-        ("short_ma20", "🟢 純放空（籌碼＋20MA）", "short_only", True),
-        ("both_raw", "⚪ 多空雙向（純籌碼無20MA對照）", "both", False),
+        ("both_pure", f"⚡ 純籌碼多空雙向（多≥{long_entry} / 空≤{short_entry}）", "both"),
+        ("long_pure", f"🔴 純籌碼純做多（≥{long_entry} 進 / <{long_exit} 出）", "long_only"),
+        ("short_pure", f"🟢 純籌碼純放空（≤{short_entry} 進 / >{short_exit} 出）", "short_only"),
     ]
 
     strategies = {}
     order = []
-    for s_key, s_lbl, s_mode, s_ma20 in strat_defs:
-        strategies[s_key] = _run_sim(s_key, s_lbl, s_mode, s_ma20)
+    for s_key, s_lbl, s_mode in strat_defs:
+        strategies[s_key] = _run_pure_sim(
+            s_key, s_lbl, s_mode, long_entry, long_exit, short_entry, short_exit
+        )
         order.append(s_key)
 
-    main_s = strategies["both_ma20"]
-    raw_s = strategies["both_raw"]
+    # --- 2. 5 組純籌碼門檻敏感度對照（皆採多空雙向純籌碼） ---
+    presets = [
+        ("寬鬆標準（多≥55/<40 ｜ 空≤35/>50）", 55, 40, 35, 50),
+        ("中庸偏多（多≥60/<45 ｜ 空≤35/>50）", 60, 45, 35, 50),
+        ("嚴格做多（多≥65/<45 ｜ 空≤35/>50）", 65, 45, 35, 50),
+        ("極端共振（多≥70/<45 ｜ 空≤30/>50）", 70, 45, 30, 50),
+        ("對稱門檻（多≥60/<40 ｜ 空≤40/>55）", 60, 40, 40, 55),
+    ]
+    threshold_compare = []
+    for idx_p, (p_lbl, p_li, p_lo, p_si, p_so) in enumerate(presets):
+        res_p = _run_pure_sim(f"preset_{idx_p}", p_lbl, "both", p_li, p_lo, p_si, p_so)
+        threshold_compare.append({
+            "label": p_lbl,
+            "long_entry": p_li,
+            "long_exit": p_lo,
+            "short_entry": p_si,
+            "short_exit": p_so,
+            "is_current": (
+                p_li == long_entry and p_lo == long_exit and p_si == short_entry and p_so == short_exit
+            ),
+            "trade_count": res_p["trade_count"],
+            "has_open": res_p["has_open"],
+            "win_rate": res_p["win_rate"],
+            "payoff_ratio": res_p["payoff_ratio"],
+            "avg_ret_pct": res_p["avg_ret_pct"],
+            "avg_hold_days": res_p["avg_hold_days"],
+            "total_ret_pct": res_p["total_ret_pct"],
+            "mdd_pct": res_p["mdd_pct"],
+        })
+
+    main_s = strategies["both_pure"]
+    long_s = strategies["long_pure"]
+    short_s = strategies["short_pure"]
     pr_txt = "全勝" if (main_s["payoff_ratio"] is None and main_s["trade_count"] > 0) else (
         f"{main_s['payoff_ratio']:.2f}" if main_s["payoff_ratio"] is not None else "—"
     )
     summary_text = (
-        f"多空雙向＋20MA 累積淨報酬 <b>{main_s['total_ret_pct']:+.1f}%</b>（最大回撤 <b>{main_s['mdd_pct']:.1f}%</b>｜賺賠比 <b>{pr_txt}</b>），"
-        f"對比無 20MA 對照組 <b>{raw_s['total_ret_pct']:+.1f}%</b>（MDD {raw_s['mdd_pct']:.1f}%）與同期買進持有 <b>{bh_total_ret:+.1f}%</b>（MDD {bh_mdd:.1f}%）。"
+        f"純籌碼多空雙向（多≥{long_entry} / 空≤{short_entry}）累積淨報酬 <b>{main_s['total_ret_pct']:+.1f}%</b>"
+        f"（交易 {main_s['trade_count']} 筆｜賺賠比 <b>{pr_txt}</b>｜MDD <b>{main_s['mdd_pct']:.1f}%</b>），"
+        f"其中純做多 <b>{long_s['total_ret_pct']:+.1f}%</b>、純放空 <b>{short_s['total_ret_pct']:+.1f}%</b>，"
+        f"對比同期買進持有 <b>{bh_total_ret:+.1f}%</b>（MDD {bh_mdd:.1f}%）。"
     )
 
     return {
@@ -1589,6 +1613,12 @@ def simulate_swing_backtest(
         "end_date": dates[-1],
         "total_days": n,
         "cost_pct": round_trip_cost_pct,
+        "params": {
+            "long_entry": long_entry,
+            "long_exit": long_exit,
+            "short_entry": short_entry,
+            "short_exit": short_exit,
+        },
         "bh": {
             "total_ret_pct": bh_total_ret,
             "mdd_pct": bh_mdd,
@@ -1596,6 +1626,7 @@ def simulate_swing_backtest(
         },
         "strategies": strategies,
         "strategy_order": order,
+        "threshold_compare": threshold_compare,
         "summary_text": summary_text,
     }
 
