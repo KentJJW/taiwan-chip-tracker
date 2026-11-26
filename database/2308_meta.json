@@ -1,45 +1,50 @@
 {
-  "main_force_html": "臺銀（近60日 <span style=\"color:#ef5350; font-weight:700;\">+6,385 張</span>）",
+  "main_force_html": "臺銀（近60日 <span style=\"color:#ef5350; font-weight:700;\">+6,457 張</span>）",
   "main_force_sub_lines": [
     "今年累計 <span style=\"color:#ef5350; font-weight:700;\">+5,087 張</span> ｜ 單一均價 <b style='color:#e2e8f0;'>1,079.21 元</b>",
-    "三大主力合計成本：<b style='color:#ffb74d;'>1,340.04 元</b>（帳面 <span style=\"color:#26a69a; font-weight:700;\">-21.27%</span>）"
+    "三大主力合計成本：<b style='color:#ffb74d;'>1,322.45 元</b>（帳面 <span style=\"color:#26a69a; font-weight:700;\">-15.31%</span>）"
   ],
-  "status_html": "🔴 區間內三大波段主力吃貨中（<span style=\"color:#ef5350; font-weight:700;\">+16,677 張</span>）",
-  "status_sub": "近 60 日波段三大主力：臺銀, 凱基, 國泰證券",
+  "status_html": "🔴 區間內三大波段主力吃貨中（<span style=\"color:#ef5350; font-weight:700;\">+21,357 張</span>）",
+  "status_sub": "近 60 日波段三大主力：臺銀, 凱基, 永豐金證券",
   "divergence_alert": null,
   "scenario": {
     "id": 5,
     "type": "bear",
     "sub_type": "波段全面發散",
     "title": "🟢 純籌碼狀態：5. 波段全面發散（≤35 分｜大戶撤退）",
-    "desc": "全體波段分點 20 日合計 -30,401 張（控盤 -7.0%／庫存跌破20日均線）；全市場集中度 5/10/20 日分別為 -1.8% / -4.0% / -7.5%，主力廣度 48%，中線趨勢（-21）與短線動能（-1）明顯偏空發散。",
+    "desc": "全體波段分點 20 日合計 -28,561 張（控盤 -6.6%／庫存跌破20日均線）；全市場集中度 5/10/20 日分別為 -0.9% / -3.6% / -6.5%，主力廣度 42%，中線趨勢（-15）與短線動能（-1）明顯偏空發散。",
     "action": "波段主力持續撤離且籌碼流向散戶，整體籌碼結構偏空。",
     "badges": [
       {
-        "label": "🌊 波段合力急撤 (20日 -7.0%)",
+        "label": "🌊 波段合力急撤 (20日 -6.6%)",
         "level": "bear",
-        "detail": "全體波段分點近 20 日合計 -30,401 張（控盤 -7.0%），累計庫存跌破 20 日均線向下。"
+        "detail": "全體波段分點近 20 日合計 -28,561 張（控盤 -6.6%），累計庫存跌破 20 日均線向下。"
       },
       {
         "label": "📉 多週期連續發散",
         "level": "bear",
-        "detail": "全市場 5/10/20 日集中度同步為負（-1.8% / -4.0% / -7.5%）。"
+        "detail": "全市場 5/10/20 日集中度同步為負（-0.9% / -3.6% / -6.5%）。"
+      },
+      {
+        "label": "🎯 投信初升認養 (持股4.6%)",
+        "level": "bull",
+        "detail": "投信近 20 日淨買超 +2,686 張且持股比率處於 0.5%～5% 甜蜜認養區間。"
       }
     ],
-    "conviction_score": 28,
+    "conviction_score": 34,
     "score_breakdown": {
       "base": 50,
-      "trend_total": -21,
+      "trend_total": -15,
       "trend_wave": -14,
       "trend_conc": -5,
-      "trend_inst": -2,
+      "trend_inst": 4,
       "momentum_total": -1,
       "mom_conc_breadth": -1,
       "mom_credit_sbl": 0,
       "day_trade": 0,
       "conc_breadth": -1,
       "conc_diff": -1,
-      "wave_trust": -16,
+      "wave_trust": -10,
       "credit_sbl": 0,
       "tdcc": 0
     },
@@ -49,28 +54,28 @@
   },
   "concentrations": {
     "d5": {
-      "pct": -1.79,
-      "net": -2182,
-      "buy15": 11543,
-      "sell15": 13725,
-      "z_score": 0.44,
-      "z_samples": 212
+      "pct": -0.92,
+      "net": -1048,
+      "buy15": 10133,
+      "sell15": 11181,
+      "z_score": 0.5,
+      "z_samples": 213
     },
     "d10": {
-      "pct": -3.98,
-      "net": -8717,
-      "buy15": 16906,
-      "sell15": 25623,
-      "z_score": 0.36,
-      "z_samples": 207
+      "pct": -3.58,
+      "net": -8048,
+      "buy15": 17252,
+      "sell15": 25300,
+      "z_score": 0.4,
+      "z_samples": 208
     },
     "d20": {
-      "pct": -7.52,
-      "net": -32460,
-      "buy15": 25653,
-      "sell15": 58113,
-      "z_score": -0.11,
-      "z_samples": 197
+      "pct": -6.55,
+      "net": -28537,
+      "buy15": 26943,
+      "sell15": 55480,
+      "z_score": 0.06,
+      "z_samples": 198
     }
   },
   "broker_tags": {
@@ -195,20 +200,27 @@
       "花旗環球",
       "國泰-台中",
       "華南永昌",
-      "統一"
+      "統一",
+      "富邦-新店",
+      "凱基-城中",
+      "宏遠-民生",
+      "(牛牛牛)亞證券",
+      "元大-豐原站前",
+      "富邦-南員林",
+      "新光-新竹"
     ],
-    "broker_count": 29,
-    "net_1d": 778,
-    "net_5d": -2952,
-    "net_10d": -9413,
-    "net_20d": -30401,
-    "net_60d": -69260,
-    "ctrl_5d_pct": -2.42,
-    "ctrl_20d_pct": -7.04,
-    "ctrl_60d_pct": -7.67,
-    "ctrl_20d_z": 0.09,
-    "cum_now": -94402,
-    "cum_ma20": -85833,
+    "broker_count": 36,
+    "net_1d": 0,
+    "net_5d": -4043,
+    "net_10d": -9660,
+    "net_20d": -28561,
+    "net_60d": -70461,
+    "ctrl_5d_pct": -3.53,
+    "ctrl_20d_pct": -6.56,
+    "ctrl_60d_pct": -7.7,
+    "ctrl_20d_z": 0.18,
+    "cum_now": -95741,
+    "cum_ma20": -87327,
     "cum_above_ma20": false
   },
   "wave_broker_names": [
@@ -240,147 +252,130 @@
     "花旗環球",
     "國泰-台中",
     "華南永昌",
-    "統一"
+    "統一",
+    "富邦-新店",
+    "凱基-城中",
+    "宏遠-民生",
+    "(牛牛牛)亞證券",
+    "元大-豐原站前",
+    "富邦-南員林",
+    "新光-新竹"
   ],
   "top3_names": [
     "臺銀",
     "凱基",
-    "國泰證券"
+    "永豐金證券"
   ],
-  "top3_period_net": 16677,
-  "top3_period_ctrl_pct": 0.6,
-  "top3_5d_ctrl_pct": 4.0,
-  "top3_5d_ctrl_z": 1.94,
-  "top3_5d_float_pct": 0.19,
-  "top3_cost": 1340.04,
+  "top3_period_net": 21357,
+  "top3_period_ctrl_pct": 0.7,
+  "top3_5d_ctrl_pct": 3.0,
+  "top3_5d_ctrl_z": 1.08,
+  "top3_5d_float_pct": 0.13,
+  "top3_cost": 1322.45,
   "top3_rows": [
     {
       "name": "臺銀",
-      "net_60d": 6385,
+      "net_60d": 6457,
       "ytd": 5087,
       "period": 5087,
-      "d1": 2233,
-      "d10": 5830,
-      "d20": 6130,
-      "streak": 11,
+      "d1": 0,
+      "d10": 5724,
+      "d20": 6084,
+      "streak": 0,
       "ctrl_pct": 0.2,
       "tags": [],
       "win_rate": 50.0,
       "avg_fwd_ret": -7.13,
-      "churn_ratio": 1.11
+      "churn_ratio": 1.08
     },
     {
       "name": "凱基",
-      "net_60d": 3353,
+      "net_60d": 3483,
       "ytd": 9363,
       "period": 9363,
-      "d1": 373,
-      "d10": 492,
-      "d20": 1111,
-      "streak": 1,
+      "d1": 0,
+      "d10": 461,
+      "d20": 1098,
+      "streak": 0,
       "ctrl_pct": 0.3,
       "tags": [
         "🏆 贏家"
       ],
       "win_rate": 69.2,
       "avg_fwd_ret": 7.03,
-      "churn_ratio": 1.98
+      "churn_ratio": 1.87
     },
     {
-      "name": "國泰證券",
-      "net_60d": 3031,
-      "ytd": 2227,
-      "period": 2227,
-      "d1": -182,
-      "d10": 307,
-      "d20": 1093,
-      "streak": -1,
-      "ctrl_pct": 0.1,
+      "name": "永豐金證券",
+      "net_60d": 3232,
+      "ytd": 6907,
+      "period": 6907,
+      "d1": 0,
+      "d10": 1219,
+      "d20": 1382,
+      "streak": 0,
+      "ctrl_pct": 0.2,
       "tags": [
         "🏆 贏家"
       ],
-      "win_rate": 66.7,
-      "avg_fwd_ret": 8.94,
-      "churn_ratio": 2.47
+      "win_rate": 61.5,
+      "avg_fwd_ret": 8.5,
+      "churn_ratio": 3.28
     }
   ],
   "remark_md": "- 💡 備註：本檢視區間分點買超第一名為 **凱基**（:red[**+9,363 張**]） ｜ 分點賣超第一名為 **台灣摩根士丹利**（:green[**-28,553 張**]）",
   "trust_info": {
-    "ytd": 3779,
-    "period": 3779,
-    "d1": 1804,
-    "d5": 2344,
-    "d10": -72,
-    "d20": -40,
-    "streak": 1,
-    "ctrl_pct": 0.1,
-    "cost": 1420.03,
-    "inv": 7869,
-    "pnl_pct": -25.71,
-    "holding_pct": 4.57,
+    "ytd": 4972,
+    "period": 4972,
+    "d1": 1193,
+    "d5": 3432,
+    "d10": 1021,
+    "d20": 2686,
+    "streak": 2,
+    "ctrl_pct": 0.2,
+    "cost": 1379.18,
+    "inv": 9062,
+    "pnl_pct": -18.79,
+    "holding_pct": 4.61,
     "phase": {
-      "tier_label": "🎯 初升認養甜蜜期 (4.57%)",
+      "tier_label": "🎯 初升認養甜蜜期 (4.61%)",
       "tier_level": "bull",
-      "momentum": "偏買（連買 1 日）",
+      "momentum": "偏買（連買 2 日）",
       "momentum_level": "bull"
     }
   },
   "breadth_info": {
-    "breadth_5d": 48.3,
-    "buy_5d": 14,
-    "sell_5d": 15,
-    "active_5d": 29,
-    "breadth_1d": 55.6,
-    "buy_1d": 15,
-    "sell_1d": 12,
-    "active_1d": 27,
-    "foreign_breadth_5d": 27.3,
-    "foreign_buy_5d": 3,
-    "foreign_sell_5d": 8,
+    "breadth_5d": 41.7,
+    "buy_5d": 15,
+    "sell_5d": 21,
+    "active_5d": 36,
+    "breadth_1d": null,
+    "buy_1d": 0,
+    "sell_1d": 0,
+    "active_1d": 0,
+    "foreign_breadth_5d": 18.2,
+    "foreign_buy_5d": 2,
+    "foreign_sell_5d": 9,
     "foreign_active_5d": 11,
     "high_streak": 0,
     "low_streak": 0,
-    "total_wave_brokers": 29,
+    "total_wave_brokers": 36,
     "few_holding_up": false
   },
   "broker_diff_info": null,
-  "margin_info": {
-    "date": "2026-11-25",
-    "lag_days": 0,
-    "is_latest": true,
-    "latest_bal": 9200,
-    "chg_5d": -557,
-    "chg_5d_pct": -5.71,
-    "chg_5d_z": -1.03,
-    "chg_5d_vol_pct": 0.46,
-    "short_bal": 66,
-    "short_margin_ratio": 0.72,
-    "quadrant": 0,
-    "domestic_top_buy_5d": 5463
-  },
-  "sbl_info": {
-    "date": "2026-11-25",
-    "lag_days": 0,
-    "is_latest": true,
-    "latest_bal": 11485,
-    "chg_5d": -1460,
-    "chg_5d_pct": -11.28,
-    "chg_5d_z": -1.05,
-    "chg_5d_vol_pct": 1.2,
-    "chg_1d": -516,
-    "sbl_mode": "neutral"
-  },
+  "margin_info": null,
+  "sbl_info": null,
   "tdcc_info": null,
   "winner_brokers": [
     {
       "name": "摩根大通",
-      "net_1d": 519,
-      "net_5d": -3193,
-      "net_10d": -3196,
-      "net_20d": -9133,
-      "net_60d": -13592,
+      "net_1d": 0,
+      "net_5d": -1563,
+      "net_10d": -4190,
+      "net_20d": -8114,
+      "net_60d": -14677,
       "net_ytd": -22603,
-      "churn_ratio": 3.35,
+      "churn_ratio": 3.03,
       "flip_rate": 0.48,
       "is_foreign": true,
       "is_day_trader": false,
@@ -395,14 +390,14 @@
     },
     {
       "name": "港商野村",
-      "net_1d": -651,
-      "net_5d": -1261,
-      "net_10d": -3096,
-      "net_20d": -3870,
-      "net_60d": -5666,
+      "net_1d": 0,
+      "net_5d": -757,
+      "net_10d": -2461,
+      "net_20d": -3790,
+      "net_60d": -5755,
       "net_ytd": -6483,
-      "churn_ratio": 2.74,
-      "flip_rate": 0.48,
+      "churn_ratio": 2.68,
+      "flip_rate": 0.5,
       "is_foreign": true,
       "is_day_trader": false,
       "is_winner": true,
@@ -416,14 +411,14 @@
     },
     {
       "name": "美林",
-      "net_1d": 1315,
-      "net_5d": 1190,
-      "net_10d": 1106,
-      "net_20d": -3395,
-      "net_60d": -7708,
+      "net_1d": 0,
+      "net_5d": 1212,
+      "net_10d": 178,
+      "net_20d": -3101,
+      "net_60d": -7441,
       "net_ytd": -16049,
-      "churn_ratio": 2.95,
-      "flip_rate": 0.7,
+      "churn_ratio": 3.02,
+      "flip_rate": 0.67,
       "is_foreign": true,
       "is_day_trader": false,
       "is_winner": true,
@@ -438,13 +433,13 @@
     {
       "name": "土銀",
       "net_1d": 0,
-      "net_5d": -120,
+      "net_5d": -122,
       "net_10d": -112,
-      "net_20d": 140,
-      "net_60d": 674,
+      "net_20d": 133,
+      "net_60d": 673,
       "net_ytd": 1568,
       "churn_ratio": 1.66,
-      "flip_rate": 0.25,
+      "flip_rate": 0.23,
       "is_foreign": false,
       "is_day_trader": false,
       "is_winner": true,
@@ -458,12 +453,12 @@
     {
       "name": "永豐金-豐原",
       "net_1d": 0,
-      "net_5d": -847,
+      "net_5d": -452,
       "net_10d": -842,
-      "net_20d": 484,
-      "net_60d": -26,
+      "net_20d": 479,
+      "net_60d": -22,
       "net_ytd": 1744,
-      "churn_ratio": 109.69,
+      "churn_ratio": 129.45,
       "flip_rate": 0.33,
       "is_foreign": false,
       "is_day_trader": false,
@@ -477,25 +472,25 @@
     }
   ],
   "recent_10d_rising": {
-    "臺銀": 5830,
-    "美商高盛": 2353,
-    "美林": 1106,
-    "法銀巴黎": 910,
-    "永豐金證券": 908
+    "臺銀": 5724,
+    "美商高盛": 2985,
+    "永豐金證券": 1219,
+    "法銀巴黎": 1062,
+    "元大證券": 715
   },
   "top_buyers": {
-    "臺銀": 6385,
-    "凱基": 3353,
-    "國泰證券": 3031,
-    "國泰-敦南": 2784,
-    "台新": 2369
+    "臺銀": 6457,
+    "凱基": 3483,
+    "永豐金證券": 3232,
+    "國泰證券": 3028,
+    "國泰-敦南": 2785
   },
   "top_sellers": {
-    "台灣摩根士丹利": -17956,
-    "港商麥格理": -13968,
-    "摩根大通": -13592,
-    "花旗環球": -11755,
-    "美林": -7708
+    "台灣摩根士丹利": -17953,
+    "摩根大通": -14677,
+    "港商麥格理": -14246,
+    "花旗環球": -11800,
+    "美林": -7441
   },
   "ytd_top_buyers": {
     "凱基": 9363,
@@ -511,25 +506,13 @@
     "美商高盛": -11786,
     "永豐金-匯立": -9933
   },
-  "today_buyers": {
-    "臺銀": 2233,
-    "法銀巴黎": 1585,
-    "永豐金-匯立": 1372,
-    "美林": 1315,
-    "港商麥格理": 862
-  },
-  "today_sellers": {
-    "美商高盛": -2132,
-    "元大證券": -1920,
-    "台灣摩根士丹利": -1720,
-    "台新-台北": -1007,
-    "港商野村": -651
-  },
+  "today_buyers": {},
+  "today_sellers": {},
   "stock_id": "2308",
   "stock_name": "台達電",
   "ticker_suffix": ".TW",
   "issued_lots": 2597543.3,
-  "broker_count": 36,
+  "broker_count": 43,
   "tracked_brokers": {
     "凱基": {
       "bhid": "9200",
@@ -674,10 +657,38 @@
     "華南永昌": {
       "bhid": "9300",
       "b": "9300"
+    },
+    "富邦-新店": {
+      "bhid": "9600",
+      "b": "9661"
+    },
+    "凱基-城中": {
+      "bhid": "9200",
+      "b": "9227"
+    },
+    "宏遠-民生": {
+      "bhid": "1260",
+      "b": "1261"
+    },
+    "(牛牛牛)亞證券": {
+      "bhid": "6010",
+      "b": "6010"
+    },
+    "元大-豐原站前": {
+      "bhid": "9800",
+      "b": "0039003800390057"
+    },
+    "富邦-南員林": {
+      "bhid": "9600",
+      "b": "0039003600310052"
+    },
+    "新光-新竹": {
+      "bhid": "8560",
+      "b": "8563"
     }
   },
   "tdcc_history": [],
-  "last_updated": "2026-11-26 09:22",
+  "last_updated": "2026-11-26 16:41",
   "debug_notes": [],
-  "github_sync": "✅ 已單次打包同步 4 個檔案至 GitHub database/"
+  "github_sync": "✅ 已單次打包同步（全部更新 4 檔）"
 }

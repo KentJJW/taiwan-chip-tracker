@@ -2,7 +2,7 @@
   "main_force_html": "新加坡商瑞銀（近60日 <span style=\"color:#ef5350; font-weight:700;\">+305 張</span>）",
   "main_force_sub_lines": [
     "今年累計 <span style=\"color:#ef5350; font-weight:700;\">+420 張</span> ｜ 單一均價 <b style='color:#e2e8f0;'>9,578.38 元</b>",
-    "三大主力合計成本：<b style='color:#ffb74d;'>10,909.66 元</b>（帳面 <span style=\"color:#26a69a; font-weight:700;\">-15.81%</span>）",
+    "三大主力合計成本：<b style='color:#ffb74d;'>10,909.66 元</b>（帳面 <span style=\"color:#26a69a; font-weight:700;\">-14.02%</span>）",
     "⚡ 已自動過濾短沖：凱基-台北"
   ],
   "status_html": "🔴 區間內三大波段主力吃貨中（<span style=\"color:#ef5350; font-weight:700;\">+507 張</span>）",
@@ -13,13 +13,13 @@
     "type": "bear",
     "sub_type": "波段全面發散",
     "title": "🟢 純籌碼狀態：5. 波段全面發散（≤35 分｜大戶撤退）",
-    "desc": "全體波段分點 20 日合計 -559 張（控盤 -5.9%／庫存跌破20日均線）；全市場集中度 5/10/20 日分別為 +1.4% / -3.5% / -5.0%，主力廣度 61%，中線趨勢（-22）與短線動能（+1）明顯偏空發散。",
+    "desc": "全體波段分點 20 日合計 -559 張（控盤 -5.6%／庫存跌破20日均線）；全市場集中度 5/10/20 日分別為 +1.1% / -3.1% / -4.8%，主力廣度 60%，中線趨勢（-22）與短線動能（+1）明顯偏空發散。",
     "action": "波段主力持續撤離且籌碼流向散戶，整體籌碼結構偏空。",
     "badges": [
       {
-        "label": "🌊 波段合力急撤 (20日 -5.9%)",
+        "label": "🌊 波段合力急撤 (20日 -5.6%)",
         "level": "bear",
-        "detail": "全體波段分點近 20 日合計 -559 張（控盤 -5.9%），累計庫存跌破 20 日均線向下。"
+        "detail": "全體波段分點近 20 日合計 -559 張（控盤 -5.6%），累計庫存跌破 20 日均線向下。"
       }
     ],
     "conviction_score": 29,
@@ -45,27 +45,27 @@
   },
   "concentrations": {
     "d5": {
-      "pct": 1.4,
+      "pct": 1.1,
       "net": 25,
       "buy15": 609,
       "sell15": 584,
-      "z_score": 0.53,
+      "z_score": 0.49,
       "z_samples": 214
     },
     "d10": {
-      "pct": -3.45,
+      "pct": -3.08,
       "net": -141,
       "buy15": 717,
       "sell15": 858,
-      "z_score": -0.17,
+      "z_score": -0.11,
       "z_samples": 209
     },
     "d20": {
-      "pct": -5.04,
+      "pct": -4.79,
       "net": -475,
       "buy15": 953,
       "sell15": 1428,
-      "z_score": -0.58,
+      "z_score": -0.54,
       "z_samples": 199
     }
   },
@@ -171,18 +171,25 @@
       "元大-汐止",
       "花旗環球",
       "永豐金證券",
-      "新光-新竹"
+      "新光-新竹",
+      "兆豐證券",
+      "國票-台南",
+      "統一-士林",
+      "永豐金-台中",
+      "元大-長庚",
+      "群益金鼎-嘉義",
+      "大昌-新店"
     ],
-    "broker_count": 29,
+    "broker_count": 36,
     "net_1d": 0,
     "net_5d": 215,
     "net_10d": -5,
     "net_20d": -559,
     "net_60d": -712,
-    "ctrl_5d_pct": 12.07,
-    "ctrl_20d_pct": -5.93,
-    "ctrl_60d_pct": -3.38,
-    "ctrl_20d_z": -0.42,
+    "ctrl_5d_pct": 9.46,
+    "ctrl_20d_pct": -5.64,
+    "ctrl_60d_pct": -3.3,
+    "ctrl_20d_z": -0.37,
     "cum_now": -1242,
     "cum_ma20": -1177,
     "cum_above_ma20": false
@@ -216,7 +223,14 @@
     "元大-汐止",
     "花旗環球",
     "永豐金證券",
-    "新光-新竹"
+    "新光-新竹",
+    "兆豐證券",
+    "國票-台南",
+    "統一-士林",
+    "永豐金-台中",
+    "元大-長庚",
+    "群益金鼎-嘉義",
+    "大昌-新店"
   ],
   "top3_names": [
     "新加坡商瑞銀",
@@ -225,8 +239,8 @@
   ],
   "top3_period_net": 507,
   "top3_period_ctrl_pct": 0.7,
-  "top3_5d_ctrl_pct": 9.8,
-  "top3_5d_ctrl_z": 1.21,
+  "top3_5d_ctrl_pct": 7.7,
+  "top3_5d_ctrl_z": 0.87,
   "top3_5d_float_pct": 0.42,
   "top3_cost": 10909.66,
   "top3_rows": [
@@ -282,30 +296,30 @@
   ],
   "remark_md": "- 💡 備註：本檢視區間分點買超第一名為 **台灣摩根士丹利**（:red[**+517 張**]） ｜ 分點賣超第一名為 **港商麥格理**（:green[**-602 張**]）",
   "trust_info": {
-    "ytd": 1023,
-    "period": 1023,
-    "d1": 0,
-    "d5": -130,
-    "d10": -403,
-    "d20": -374,
-    "streak": 0,
+    "ytd": 1048,
+    "period": 1048,
+    "d1": 25,
+    "d5": -105,
+    "d10": -378,
+    "d20": -349,
+    "streak": 2,
     "ctrl_pct": 1.5,
-    "cost": 13691.0,
-    "inv": 257,
-    "pnl_pct": -32.91,
-    "holding_pct": 9.7,
+    "cost": 13301.06,
+    "inv": 282,
+    "pnl_pct": -29.48,
+    "holding_pct": 9.76,
     "phase": {
-      "tier_label": "中高度持股 (9.70%)",
+      "tier_label": "中高度持股 (9.76%)",
       "tier_level": "info",
       "momentum": "近 5 日偏空小賣",
       "momentum_level": "bear"
     }
   },
   "breadth_info": {
-    "breadth_5d": 60.9,
-    "buy_5d": 14,
-    "sell_5d": 9,
-    "active_5d": 23,
+    "breadth_5d": 60.0,
+    "buy_5d": 18,
+    "sell_5d": 12,
+    "active_5d": 30,
     "breadth_1d": null,
     "buy_1d": 0,
     "sell_1d": 0,
@@ -316,7 +330,7 @@
     "foreign_active_5d": 11,
     "high_streak": 0,
     "low_streak": 0,
-    "total_wave_brokers": 29,
+    "total_wave_brokers": 36,
     "few_holding_up": false
   },
   "broker_diff_info": null,
@@ -467,7 +481,7 @@
   "stock_name": "信驊",
   "ticker_suffix": ".TWO",
   "issued_lots": 41583.0,
-  "broker_count": 34,
+  "broker_count": 41,
   "tracked_brokers": {
     "台灣摩根士丹利": {
       "bhid": "1470",
@@ -604,10 +618,38 @@
     "新光-新竹": {
       "bhid": "8560",
       "b": "8563"
+    },
+    "兆豐證券": {
+      "bhid": "7000",
+      "b": "7000"
+    },
+    "國票-台南": {
+      "bhid": "7790",
+      "b": "0037003700390044"
+    },
+    "統一-士林": {
+      "bhid": "5850",
+      "b": "003500380035004d"
+    },
+    "永豐金-台中": {
+      "bhid": "9A00",
+      "b": "003900410039004c"
+    },
+    "元大-長庚": {
+      "bhid": "9800",
+      "b": "0039003800380056"
+    },
+    "群益金鼎-嘉義": {
+      "bhid": "9100",
+      "b": "003900310038004d"
+    },
+    "大昌-新店": {
+      "bhid": "6460",
+      "b": "6464"
     }
   },
   "tdcc_history": [],
-  "last_updated": "2026-11-26 09:20",
+  "last_updated": "2026-11-26 16:41",
   "debug_notes": [],
-  "github_sync": "✅ 已單次打包同步 4 個檔案至 GitHub database/"
+  "github_sync": "✅ 已單次打包同步（全部更新 4 檔）"
 }
