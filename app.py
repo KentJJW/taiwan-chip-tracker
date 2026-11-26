@@ -1739,7 +1739,7 @@ if target_stock:
             fig.add_trace(go.Scatter(x=df_plot["date"], y=cost_series, name=f"{target_label} 成本線", legend="legend", line=dict(color="#FF9100", width=2.2, dash="dash"), connectgaps=False, hovertemplate="%{y:,.2f} 元<extra>主力成本均價</extra>"), row=1, col=1, secondary_y=False)
 
         if show_health_regime and has_health_series:
-            y_bull, y_neutral, y_bear, regime_bands, regime_list = _split_price_by_health(
+            _, _, _, regime_bands, regime_list = _split_price_by_health(
                 df_plot["close"],
                 df_plot["health_score"],
                 long_entry=active_bull_in,
@@ -1754,10 +1754,45 @@ if target_stock:
                 else (f"{cl_v:,.2f} 元 ｜ ⏳ 籌碼結算中" if st_v == "結算中" else f"{cl_v:,.2f} 元")
                 for cl_v, sc_v, reg_v, st_v in zip(df_plot["close"], df_plot["health_score"], regime_list, df_plot["sub_type"].fillna(""))
             ]
-            fig.add_trace(go.Scatter(x=df_plot["date"], y=df_plot["close"], name="收盤價懸浮", legend="legend", line=dict(color="#FFD700", width=2.4), opacity=0.0, showlegend=False, text=price_hover_texts, hovertemplate="%{text}<extra>收盤／籌碼</extra>"), row=1, col=1, secondary_y=False)
-            fig.add_trace(go.Scatter(x=df_plot["date"], y=y_neutral, name="收盤價 (空手/中性)", legend="legend", line=dict(color="#FFD700", width=2.5), connectgaps=False, showlegend=True, hoverinfo="skip"), row=1, col=1, secondary_y=False)
-            fig.add_trace(go.Scatter(x=df_plot["date"], y=y_bull, name=f"波段偏多 (≥{active_bull_in}/<{active_bull_out})", legend="legend", line=dict(color="#ef5350", width=3.1), connectgaps=False, hoverinfo="skip"), row=1, col=1, secondary_y=False)
-            fig.add_trace(go.Scatter(x=df_plot["date"], y=y_bear, name=f"波段偏空 (≤{active_bear_in}/>{active_bear_out})", legend="legend", line=dict(color="#26a69a", width=3.1), connectgaps=False, hoverinfo="skip"), row=1, col=1, secondary_y=False)
+            # 固定單一顏色收盤價折線（不隨區塊變色）
+            fig.add_trace(
+                go.Scatter(
+                    x=df_plot["date"],
+                    y=df_plot["close"],
+                    name="收盤價 (元)",
+                    legend="legend",
+                    line=dict(color="#FFD700", width=2.6),
+                    text=price_hover_texts,
+                    hovertemplate="%{text}<extra>收盤／籌碼</extra>",
+                ),
+                row=1, col=1, secondary_y=False,
+            )
+            # 僅於下方圖例標示紅／綠背景區塊含義（不在圖面畫線）
+            first_dt = df_plot["date"].iloc[0]
+            fig.add_trace(
+                go.Scatter(
+                    x=[first_dt],
+                    y=[None],
+                    mode="markers",
+                    marker=dict(symbol="square", size=10, color="rgba(239, 83, 80, 0.55)"),
+                    name=f"波段偏多區 (≥{active_bull_in}/<{active_bull_out})",
+                    legend="legend",
+                    hoverinfo="skip",
+                ),
+                row=1, col=1, secondary_y=False,
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=[first_dt],
+                    y=[None],
+                    mode="markers",
+                    marker=dict(symbol="square", size=10, color="rgba(38, 166, 154, 0.55)"),
+                    name=f"波段偏空區 (≤{active_bear_in}/>{active_bear_out})",
+                    legend="legend",
+                    hoverinfo="skip",
+                ),
+                row=1, col=1, secondary_y=False,
+            )
             for b_start, b_end, b_reg in regime_bands:
                 band_color = "rgba(239, 83, 80, 0.13)" if b_reg == "bull" else "rgba(38, 166, 154, 0.13)"
                 fig.add_vrect(x0=b_start - 0.5, x1=b_end + 0.5, fillcolor=band_color, line_width=0, layer="below", row=1, col=1)
