@@ -1631,28 +1631,12 @@ if target_stock:
     with c_opt3:
         cost_basis = st.radio("成本線計算基準", options=["近 60 日波段成本", "今年累計成本"], index=0, horizontal=True, label_visibility="collapsed")
 
-    # 下方副圖三合一快速切換按鈕列
+    # 確認目前有效之副圖模式（按鈕列渲染在下方副圖正下方）
     if st.session_state["subchart_mode"] == "score" and not has_health_series:
         st.session_state["subchart_mode"] = "flow"
     elif st.session_state["subchart_mode"] == "credit" and not has_aux_series:
         st.session_state["subchart_mode"] = "flow"
     active_sub = st.session_state["subchart_mode"]
-
-    sub_lbl_col, sub_b1, sub_b2, sub_b3, _ = st.columns([1.0, 1.3, 1.2, 1.35, 1.5])
-    with sub_lbl_col:
-        st.markdown('<div class="snap-bar-label">🔀 副圖切換：</div>', unsafe_allow_html=True)
-    with sub_b1:
-        if st.button("📈 籌碼分數走勢", key="btn_sub_score", type="primary" if active_sub == "score" else "secondary", disabled=not bool(has_health_series), width="stretch"):
-            st.session_state["subchart_mode"] = "score"
-            st.rerun()
-    with sub_b2:
-        if st.button("📊 主力買賣超", key="btn_sub_flow", type="primary" if active_sub == "flow" else "secondary", width="stretch"):
-            st.session_state["subchart_mode"] = "flow"
-            st.rerun()
-    with sub_b3:
-        if st.button("💳 融資／借券餘額", key="btn_sub_credit", type="primary" if active_sub == "credit" else "secondary", disabled=not bool(has_aux_series), width="stretch"):
-            st.session_state["subchart_mode"] = "credit"
-            st.rerun()
 
     if not selected_brokers:
         st.warning("請至少選擇一個券商分點或「投信」來繪製圖表。")
@@ -1804,12 +1788,15 @@ if target_stock:
         if active_offset != 0 and anchor_date in date_list:
             fig.add_vline(x=date_list.index(anchor_date), line_width=1.4, line_dash="dash", line_color="rgba(251, 191, 36, 0.75)")
 
-        # --- X 軸純交易日設定 ---
+        # --- X 軸純交易日設定（避免最後兩個日期刻度過近重疊） ---
         n_pts = len(df_plot)
         tick_step = max(1, n_pts // 10)
         tick_indices = list(range(0, n_pts, tick_step))
         if (n_pts - 1) not in tick_indices:
-            tick_indices.append(n_pts - 1)
+            if tick_indices and ((n_pts - 1) - tick_indices[-1]) < max(3, tick_step * 0.5):
+                tick_indices[-1] = n_pts - 1
+            else:
+                tick_indices.append(n_pts - 1)
         tick_vals = [df_plot["date"].iloc[i] for i in tick_indices]
         tick_texts = [d[5:].replace("-", "/") for d in tick_vals]
         fig.update_xaxes(type="category", tickmode="array", tickvals=tick_vals, ticktext=tick_texts, showgrid=False)
@@ -1822,12 +1809,29 @@ if target_stock:
             height=720,
             template="plotly_dark",
             hovermode="x unified",
-            margin=dict(l=20, r=20, t=28, b=95),
+            margin=dict(l=20, r=20, t=28, b=90),
             legend=dict(orientation="h", yanchor="top", y=d1_low - 0.015, xanchor="left", x=0, bgcolor="rgba(0,0,0,0)"),
             legend2=dict(orientation="h", yanchor="top", y=d2_low - 0.075, xanchor="left", x=0, bgcolor="rgba(0,0,0,0)"),
         )
 
         st.plotly_chart(fig, width="stretch")
+
+        # --- 下方副圖三合一快速切換按鈕列（置於副圖正下方） ---
+        sub_lbl_col, sub_b1, sub_b2, sub_b3, _ = st.columns([1.0, 1.3, 1.2, 1.35, 1.5])
+        with sub_lbl_col:
+            st.markdown('<div class="snap-bar-label">🔀 副圖切換：</div>', unsafe_allow_html=True)
+        with sub_b1:
+            if st.button("📈 籌碼分數走勢", key="btn_sub_score", type="primary" if active_sub == "score" else "secondary", disabled=not bool(has_health_series), width="stretch"):
+                st.session_state["subchart_mode"] = "score"
+                st.rerun()
+        with sub_b2:
+            if st.button("📊 主力買賣超", key="btn_sub_flow", type="primary" if active_sub == "flow" else "secondary", width="stretch"):
+                st.session_state["subchart_mode"] = "flow"
+                st.rerun()
+        with sub_b3:
+            if st.button("💳 融資／借券餘額", key="btn_sub_credit", type="primary" if active_sub == "credit" else "secondary", disabled=not bool(has_aux_series), width="stretch"):
+                st.session_state["subchart_mode"] = "credit"
+                st.rerun()
 
     # =====================================================================
     # 區塊三：100% 純籌碼波段進出模擬回測與門檻敏感度對照
