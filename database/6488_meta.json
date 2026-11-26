@@ -1,13 +1,10 @@
 {
   "completeness": {
-    "is_complete": false,
-    "missing_items": [
-      "融資融券",
-      "借券賣出"
-    ],
+    "is_complete": true,
+    "missing_items": [],
     "has_broker": true,
-    "has_margin": false,
-    "has_sbl": false,
+    "has_margin": true,
+    "has_sbl": true,
     "anchor_date": "2026-11-26"
   },
   "main_force_html": "美商高盛（近60日 <span style=\"color:#ef5350; font-weight:700;\">+4,717 張</span>）",
@@ -24,13 +21,13 @@
     "type": "bear",
     "sub_type": "波段全面發散",
     "title": "🟢 純籌碼狀態：5. 波段全面發散（≤35 分｜大戶撤退）",
-    "desc": "全體波段分點 20 日合計 -9,417 張（控盤 -4.3%／庫存跌破20日均線）；全市場集中度 5/10/20 日分別為 -0.0% / -2.9% / -4.7%，主力廣度 66%，中線趨勢（-22）與短線動能（-1）明顯偏空發散。",
+    "desc": "全體波段分點 20 日合計 -9,469 張（控盤 -4.3%／庫存跌破20日均線）；全市場集中度 5/10/20 日分別為 -0.0% / -2.9% / -4.7%，主力廣度 62%，中線趨勢（-22）與短線動能（-1）明顯偏空發散。",
     "action": "波段主力持續撤離且籌碼流向散戶，整體籌碼結構偏空。",
     "badges": [
       {
         "label": "🌊 波段合力急撤 (20日 -4.3%)",
         "level": "bear",
-        "detail": "全體波段分點近 20 日合計 -9,417 張（控盤 -4.3%），累計庫存跌破 20 日均線向下。"
+        "detail": "全體波段分點近 20 日合計 -9,469 張（控盤 -4.3%），累計庫存跌破 20 日均線向下。"
       },
       {
         "label": "📉 多週期連續發散",
@@ -38,7 +35,7 @@
         "detail": "全市場 5/10/20 日集中度同步為負（-0.0% / -2.9% / -4.7%）。"
       }
     ],
-    "conviction_score": null,
+    "conviction_score": 27,
     "score_breakdown": {
       "base": 50,
       "trend_total": -22,
@@ -59,11 +56,8 @@
     "margin_quadrant": 0,
     "sbl_mode": "neutral",
     "few_holding_up": false,
-    "is_incomplete": true,
-    "missing_items": [
-      "融資融券",
-      "借券賣出"
-    ]
+    "is_incomplete": false,
+    "missing_items": []
   },
   "concentrations": {
     "d5": {
@@ -200,20 +194,28 @@
       "港商野村",
       "富邦證券",
       "合庫-西台中",
-      "永全-南崁"
+      "永全-南崁",
+      "台新-城中",
+      "第一金-自由",
+      "台新-高雄",
+      "永豐金-台南",
+      "富邦-永和",
+      "宏遠-高雄",
+      "華南永昌-基隆",
+      "兆豐-竹北"
     ],
-    "broker_count": 32,
-    "net_1d": 394,
-    "net_5d": 1165,
-    "net_10d": -358,
-    "net_20d": -9417,
-    "net_60d": -36421,
-    "ctrl_5d_pct": 3.22,
-    "ctrl_20d_pct": -4.26,
-    "ctrl_60d_pct": -5.46,
-    "ctrl_20d_z": 0.42,
-    "cum_now": -17315,
-    "cum_ma20": -16616,
+    "broker_count": 40,
+    "net_1d": 332,
+    "net_5d": 1113,
+    "net_10d": -410,
+    "net_20d": -9469,
+    "net_60d": -36473,
+    "ctrl_5d_pct": 3.07,
+    "ctrl_20d_pct": -4.28,
+    "ctrl_60d_pct": -5.47,
+    "ctrl_20d_z": 0.41,
+    "cum_now": -17367,
+    "cum_ma20": -16618,
     "cum_above_ma20": false
   },
   "wave_broker_names": [
@@ -248,7 +250,15 @@
     "港商野村",
     "富邦證券",
     "合庫-西台中",
-    "永全-南崁"
+    "永全-南崁",
+    "台新-城中",
+    "第一金-自由",
+    "台新-高雄",
+    "永豐金-台南",
+    "富邦-永和",
+    "宏遠-高雄",
+    "華南永昌-基隆",
+    "兆豐-竹北"
   ],
   "top3_names": [
     "美商高盛",
@@ -334,26 +344,50 @@
     }
   },
   "breadth_info": {
-    "breadth_5d": 65.6,
-    "buy_5d": 21,
-    "sell_5d": 11,
-    "active_5d": 32,
+    "breadth_5d": 62.5,
+    "buy_5d": 25,
+    "sell_5d": 15,
+    "active_5d": 40,
     "breadth_1d": 50.0,
-    "buy_1d": 14,
-    "sell_1d": 14,
-    "active_1d": 28,
+    "buy_1d": 18,
+    "sell_1d": 18,
+    "active_1d": 36,
     "foreign_breadth_5d": 80.0,
     "foreign_buy_5d": 8,
     "foreign_sell_5d": 2,
     "foreign_active_5d": 10,
     "high_streak": 0,
     "low_streak": 0,
-    "total_wave_brokers": 32,
+    "total_wave_brokers": 40,
     "few_holding_up": false
   },
   "broker_diff_info": null,
-  "margin_info": null,
-  "sbl_info": null,
+  "margin_info": {
+    "date": "2026-11-26",
+    "lag_days": 0,
+    "is_latest": true,
+    "latest_bal": 8272,
+    "chg_5d": -560,
+    "chg_5d_pct": -6.34,
+    "chg_5d_z": -0.17,
+    "chg_5d_vol_pct": 1.55,
+    "short_bal": 108,
+    "short_margin_ratio": 1.31,
+    "quadrant": 0,
+    "domestic_top_buy_5d": 512
+  },
+  "sbl_info": {
+    "date": "2026-11-26",
+    "lag_days": 0,
+    "is_latest": true,
+    "latest_bal": 9816,
+    "chg_5d": -930,
+    "chg_5d_pct": -8.65,
+    "chg_5d_z": -0.07,
+    "chg_5d_vol_pct": 2.57,
+    "chg_1d": 12,
+    "sbl_mode": "neutral"
+  },
   "tdcc_info": {
     "date": "2026-11-20",
     "whale_1000_pct": 65.59,
@@ -514,13 +548,13 @@
     "摩根大通": -216,
     "台灣摩根士丹利": -128,
     "永全-南崁": -45,
-    "國泰-敦南": -37
+    "華南永昌-基隆": -43
   },
   "stock_id": "6488",
   "stock_name": "環球晶",
   "ticker_suffix": ".TWO",
   "issued_lots": 528113.72,
-  "broker_count": 39,
+  "broker_count": 47,
   "tracked_brokers": {
     "美商高盛": {
       "bhid": "1480",
@@ -677,6 +711,38 @@
     "永全-南崁": {
       "bhid": "6450",
       "b": "6451"
+    },
+    "台新-城中": {
+      "bhid": "9B00",
+      "b": "0039004200320045"
+    },
+    "第一金-自由": {
+      "bhid": "5380",
+      "b": "0035003300380045"
+    },
+    "台新-高雄": {
+      "bhid": "9B00",
+      "b": "0039004200310067"
+    },
+    "永豐金-台南": {
+      "bhid": "9A00",
+      "b": "0039004100390068"
+    },
+    "富邦-永和": {
+      "bhid": "9600",
+      "b": "9654"
+    },
+    "宏遠-高雄": {
+      "bhid": "1260",
+      "b": "0031003200360051"
+    },
+    "兆豐-竹北": {
+      "bhid": "7000",
+      "b": "7007"
+    },
+    "華南永昌-基隆": {
+      "bhid": "9300",
+      "b": "9322"
     }
   },
   "tdcc_history": [
@@ -687,7 +753,7 @@
       "total_holders": 179231
     }
   ],
-  "last_updated": "2026-11-26 20:00",
+  "last_updated": "2026-11-26 21:23",
   "debug_notes": [],
-  "github_sync": "✅ 已單次打包同步 4 個檔案至 GitHub database/"
+  "github_sync": "✅ 已單次打包同步（全部更新 4 檔）"
 }

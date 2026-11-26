@@ -1,13 +1,10 @@
 {
   "completeness": {
-    "is_complete": false,
-    "missing_items": [
-      "融資融券",
-      "借券賣出"
-    ],
+    "is_complete": true,
+    "missing_items": [],
     "has_broker": true,
-    "has_margin": false,
-    "has_sbl": false,
+    "has_margin": true,
+    "has_sbl": true,
     "anchor_date": "2026-11-26"
   },
   "main_force_html": "新加坡商瑞銀（近60日 <span style=\"color:#ef5350; font-weight:700;\">+277 張</span>）",
@@ -38,7 +35,7 @@
         "detail": "當日隔日沖熱點（國泰-敦南、凱基-站前、元大證券）買超佔成交量 7.3%，提防隔日開高倒貨賣壓。"
       }
     ],
-    "conviction_score": null,
+    "conviction_score": 26,
     "score_breakdown": {
       "base": 50,
       "trend_total": -22,
@@ -59,11 +56,8 @@
     "margin_quadrant": 0,
     "sbl_mode": "neutral",
     "few_holding_up": false,
-    "is_incomplete": true,
-    "missing_items": [
-      "融資融券",
-      "借券賣出"
-    ]
+    "is_incomplete": false,
+    "missing_items": []
   },
   "concentrations": {
     "d5": {
@@ -327,22 +321,22 @@
   ],
   "remark_md": "- 💡 備註：本檢視區間分點買超第一名為 **台灣摩根士丹利**（:red[**+451 張**]） ｜ 分點賣超第一名為 **港商麥格理**（:green[**-611 張**]）",
   "trust_info": {
-    "ytd": 1048,
-    "period": 1048,
-    "d1": 25,
-    "d5": -105,
-    "d10": -378,
-    "d20": -349,
+    "ytd": 1036,
+    "period": 1036,
+    "d1": 13,
+    "d5": -117,
+    "d10": -390,
+    "d20": -361,
     "streak": 2,
     "ctrl_pct": 1.5,
-    "cost": 13301.06,
-    "inv": 282,
-    "pnl_pct": -29.48,
-    "holding_pct": 9.76,
+    "cost": 13479.22,
+    "inv": 270,
+    "pnl_pct": -30.41,
+    "holding_pct": 9.73,
     "phase": {
-      "tier_label": "中高度持股 (9.76%)",
+      "tier_label": "中高水位 (9.73%)",
       "tier_level": "info",
-      "momentum": "近 5 日偏空小賣",
+      "momentum": "波段調節中（今日小幅回補）",
       "momentum_level": "bear"
     }
   },
@@ -365,8 +359,32 @@
     "few_holding_up": false
   },
   "broker_diff_info": null,
-  "margin_info": null,
-  "sbl_info": null,
+  "margin_info": {
+    "date": "2026-11-26",
+    "lag_days": 0,
+    "is_latest": true,
+    "latest_bal": 167,
+    "chg_5d": -25,
+    "chg_5d_pct": -13.02,
+    "chg_5d_z": -0.68,
+    "chg_5d_vol_pct": 1.1,
+    "short_bal": 2,
+    "short_margin_ratio": 1.2,
+    "quadrant": 0,
+    "domestic_top_buy_5d": 123
+  },
+  "sbl_info": {
+    "date": "2026-11-26",
+    "lag_days": 0,
+    "is_latest": true,
+    "latest_bal": 210,
+    "chg_5d": -2,
+    "chg_5d_pct": -0.94,
+    "chg_5d_z": -0.24,
+    "chg_5d_vol_pct": 0.09,
+    "chg_1d": -3,
+    "sbl_mode": "neutral"
+  },
   "tdcc_info": null,
   "winner_brokers": [
     {
@@ -708,7 +726,7 @@
     }
   },
   "tdcc_history": [],
-  "last_updated": "2026-11-26 17:51",
+  "last_updated": "2026-11-26 21:24",
   "debug_notes": [],
   "github_sync": "✅ 已單次打包同步（全部更新 4 檔）"
 }

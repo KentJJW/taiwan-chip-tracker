@@ -1,13 +1,10 @@
 {
   "completeness": {
-    "is_complete": false,
-    "missing_items": [
-      "融資融券",
-      "借券賣出"
-    ],
+    "is_complete": true,
+    "missing_items": [],
     "has_broker": true,
-    "has_margin": false,
-    "has_sbl": false,
+    "has_margin": true,
+    "has_sbl": true,
     "anchor_date": "2026-11-26"
   },
   "main_force_html": "元大證券（近60日 <span style=\"color:#ef5350; font-weight:700;\">+4,783 張</span>）",
@@ -37,7 +34,7 @@
         "detail": "全市場 5/10/20 日集中度同步為負（-4.2% / -1.8% / -5.7%）。"
       }
     ],
-    "conviction_score": null,
+    "conviction_score": 26,
     "score_breakdown": {
       "base": 50,
       "trend_total": -22,
@@ -58,11 +55,8 @@
     "margin_quadrant": 0,
     "sbl_mode": "neutral",
     "few_holding_up": false,
-    "is_incomplete": true,
-    "missing_items": [
-      "融資融券",
-      "借券賣出"
-    ]
+    "is_incomplete": false,
+    "missing_items": []
   },
   "concentrations": {
     "d5": {
@@ -342,9 +336,9 @@
     "pnl_pct": -7.0,
     "holding_pct": 7.13,
     "phase": {
-      "tier_label": "中高度持股 (7.13%)",
+      "tier_label": "中高水位 (7.13%)",
       "tier_level": "info",
-      "momentum": "偏買（連買 2 日）",
+      "momentum": "波段偏多加碼",
       "momentum_level": "bull"
     }
   },
@@ -367,8 +361,32 @@
     "few_holding_up": false
   },
   "broker_diff_info": null,
-  "margin_info": null,
-  "sbl_info": null,
+  "margin_info": {
+    "date": "2026-11-26",
+    "lag_days": 0,
+    "is_latest": true,
+    "latest_bal": 11560,
+    "chg_5d": 370,
+    "chg_5d_pct": 3.31,
+    "chg_5d_z": 0.44,
+    "chg_5d_vol_pct": 0.47,
+    "short_bal": 32,
+    "short_margin_ratio": 0.28,
+    "quadrant": 0,
+    "domestic_top_buy_5d": 1785
+  },
+  "sbl_info": {
+    "date": "2026-11-26",
+    "lag_days": 0,
+    "is_latest": true,
+    "latest_bal": 7960,
+    "chg_5d": -41,
+    "chg_5d_pct": -0.51,
+    "chg_5d_z": -0.38,
+    "chg_5d_vol_pct": 0.05,
+    "chg_1d": 120,
+    "sbl_mode": "neutral"
+  },
   "tdcc_info": null,
   "winner_brokers": [
     {
@@ -708,7 +726,7 @@
     }
   },
   "tdcc_history": [],
-  "last_updated": "2026-11-26 17:51",
+  "last_updated": "2026-11-26 21:24",
   "debug_notes": [],
   "github_sync": "✅ 已單次打包同步（全部更新 4 檔）"
 }
