@@ -11,6 +11,7 @@ from data_engine import (
     DB_DIR,
     SCENARIO_MATRIX,
     STRATEGY_PARAMS,
+    check_chip_completeness,
     update_stock_database,
     analyze_main_force,
     compute_daily_health_scores,
@@ -1045,42 +1046,25 @@ if target_stock:
 
     stock_title = get_stock_display_label(target_stock)
 
-    # --- 盤中／盤後籌碼未公布防呆：若最新交易日籌碼全為 0，分離為待公布日並保留有效籌碼序列 ---
-    realtime_price_row = None
+    # --- 基準日回放選項（方式 A：保留今日於基準列，逐日檢核分點／融資／借券是否齊全） ---
     pending_chip_date = None
-    chip_cols_all = [c for c in df_chips_full.columns if c != "date"]
-    if len(df_price_full) >= 2 and not df_chips_full.empty and chip_cols_all:
-        latest_p_date = str(df_price_full["date"].max())
-        last_chip_rows = df_chips_full[df_chips_full["date"] == latest_p_date]
-        has_valid_chips = (not last_chip_rows.empty) and (float(last_chip_rows[chip_cols_all].fillna(0.0).abs().sum().sum()) > 0)
-        if not has_valid_chips:
-            pending_chip_date = latest_p_date
-            realtime_price_row = df_price_full[df_price_full["date"] == latest_p_date].iloc[-1].to_dict()
-            df_price_full = df_price_full[df_price_full["date"] < latest_p_date].reset_index(drop=True)
-            df_chips_full = df_chips_full[df_chips_full["date"] < latest_p_date].reset_index(drop=True)
-            if df_aux_full is not None and not df_aux_full.empty:
-                df_aux_full = df_aux_full[df_aux_full["date"] < latest_p_date].reset_index(drop=True)
-
-    # --- 基準日回放選項（做法 1：核對台灣實際日期，籌碼未公布時顯示「今天 (mm/dd 待公布)」） ---
+    is_pending_view = False
     valid_dates = df_price_full["date"].astype(str).tolist()
     n_valid = len(valid_dates)
-    snap_options = []  # tuple: (offset, rel_lbl, date_str, is_pending)
+    snap_options = []  # tuple: (offset, rel_lbl, date_str, is_incomplete)
 
-    if pending_chip_date is not None:
-        is_pending_today = (pending_chip_date == tw_today)
-        if n_valid >= 2:
-            snap_options.append((-2, "前天" if is_pending_today else "前2日", valid_dates[-2], False))
-        if n_valid >= 1:
-            snap_options.append((-1, "昨天" if is_pending_today else "前1日", valid_dates[-1], False))
-        snap_options.append((0, "今天" if is_pending_today else "最新", pending_chip_date, True))
-    else:
-        is_latest_today = (n_valid > 0 and valid_dates[-1] == tw_today)
-        if n_valid >= 3:
-            snap_options.append((-2, "前天" if is_latest_today else "前2日", valid_dates[-3], False))
-        if n_valid >= 2:
-            snap_options.append((-1, "昨天" if is_latest_today else "前1日", valid_dates[-2], False))
-        if n_valid >= 1:
-            snap_options.append((0, "今天" if is_latest_today else "最新", valid_dates[-1], False))
+    is_latest_today = (n_valid > 0 and valid_dates[-1] == tw_today)
+    cand_defs = []
+    if n_valid >= 3:
+        cand_defs.append((-2, "前天" if is_latest_today else "前2日", valid_dates[-3]))
+    if n_valid >= 2:
+        cand_defs.append((-1, "昨天" if is_latest_today else "前1日", valid_dates[-2]))
+    if n_valid >= 1:
+        cand_defs.append((0, "今天" if is_latest_today else "最新", valid_dates[-1]))
+
+    for off_v, rel_l, dt_v in cand_defs:
+        comp_opt = check_chip_completeness(df_price_full, df_chips_full, df_aux_full, anchor_date=dt_v)
+        snap_options.append((off_v, rel_l, dt_v, not comp_opt["is_complete"]))
 
     snap_key = f"snap_offset_{target_stock}"
     valid_offsets = [opt[0] for opt in snap_options]
@@ -1090,12 +1074,9 @@ if target_stock:
     active_offset = int(st.session_state[snap_key])
     active_snap_item = next(opt for opt in snap_options if opt[0] == active_offset)
     snap_rel_name = active_snap_item[1]
-    anchor_date = active_snap_item[2]
-    is_pending_view = bool(active_snap_item[3])
-
+    valid_anchor_date = active_snap_item[2]
     latest_trade_date = str(df_price_full["date"].max())
-    valid_anchor_date = latest_trade_date if is_pending_view else anchor_date
-    day_word = "今日" if ((not is_pending_view) and (valid_anchor_date == tw_today)) else "當日"
+    day_word = "今日" if (valid_anchor_date == tw_today) else "當日"
 
     df_price_snap = df_price_full[df_price_full["date"] <= valid_anchor_date].reset_index(drop=True)
     df_chips_snap = df_chips_full[df_chips_full["date"] <= valid_anchor_date].reset_index(drop=True)
@@ -1116,12 +1097,7 @@ if target_stock:
         end_filter = df_price["date"].max()
         df_chips = df_chips_snap[(df_chips_snap["date"] >= start_filter) & (df_chips_snap["date"] <= end_filter)].copy()
         if n_days == 1:
-            if is_pending_view:
-                period_label = f"{pending_chip_date} 盤後待公布"
-            elif valid_anchor_date == tw_today:
-                period_label = f"今日（{end_filter}）"
-            else:
-                period_label = f"{snap_rel_name}（{end_filter}）"
+            period_label = f"今日（{end_filter}）" if valid_anchor_date == tw_today else f"{snap_rel_name}（{end_filter}）"
         else:
             period_label = f"近 {n_days} 日（{start_filter} ~ {end_filter}）"
     elif range_type == "指定日期":
@@ -1143,19 +1119,12 @@ if target_stock:
         st.warning(f"在指定區間 `{start_filter} ~ {end_filter}` 內查無交易資料，請確認輸入的日期。")
         st.stop()
 
-    chip_close = float(df_price.iloc[-1]["close"])
-    if is_pending_view and realtime_price_row is not None:
-        display_close = float(realtime_price_row["close"])
-        display_close_label = f"即時／最新價（{pending_chip_date}）"
-        pct_change = ((display_close - chip_close) / chip_close * 100.0) if chip_close else 0.0
-        pct_prefix = "今日漲跌："
-    else:
-        display_close = chip_close
-        display_close_label = "最新收盤價與區間漲跌" if valid_anchor_date == tw_today else f"{snap_rel_name}收盤價與區間漲跌"
-        prior_rows = df_price_snap[df_price_snap["date"] < start_filter]
-        base_close = float(prior_rows.iloc[-1]["close"]) if not prior_rows.empty else float(df_price.iloc[0]["close"])
-        pct_change = ((display_close - base_close) / base_close * 100.0) if base_close else 0.0
-        pct_prefix = "區間漲跌："
+    display_close = float(df_price.iloc[-1]["close"])
+    display_close_label = "最新收盤價與區間漲跌" if valid_anchor_date == tw_today else f"{snap_rel_name}收盤價與區間漲跌"
+    prior_rows = df_price_snap[df_price_snap["date"] < start_filter]
+    base_close = float(prior_rows.iloc[-1]["close"]) if not prior_rows.empty else float(df_price.iloc[0]["close"])
+    pct_change = ((display_close - base_close) / base_close * 100.0) if base_close else 0.0
+    pct_prefix = "區間漲跌："
 
     if pct_change > 0:
         pct_html = f'<span style="color:#ef5350; font-weight:700;">▲ {pct_change:+.2f}%</span>'
@@ -1164,7 +1133,6 @@ if target_stock:
     else:
         pct_html = '<span style="color:#cbd5e1; font-weight:700;">0.00%</span>'
 
-    # 方向 A：統一不覆寫 _meta.json 集中度，確保上方看板與下方走勢圖皆從 _aux.csv 計算、分數 100% 一致
     tdcc_history_saved = meta_saved.get("tdcc_history", [])
     issued_lots_saved = float(meta_saved.get("issued_lots", 0.0) or 0.0)
 
@@ -1179,6 +1147,17 @@ if target_stock:
         tdcc_history=tdcc_history_saved,
         issued_lots=issued_lots_saved,
     )
+    completeness = analysis.get("completeness") or {
+        "is_complete": True,
+        "missing_items": [],
+        "has_broker": True,
+        "has_margin": True,
+        "has_sbl": True,
+    }
+    is_chip_complete = bool(completeness.get("is_complete", True))
+    missing_chip_items = completeness.get("missing_items") or []
+    has_broker_today = bool(completeness.get("has_broker", True))
+
     broker_count = len([c for c in df_chips_full.columns if c not in ("date", "投信")])
     concentrations = analysis.get("concentrations") or {}
     scenario = analysis.get("scenario", {})
@@ -1191,12 +1170,10 @@ if target_stock:
 
     # --- 標題列 ---
     updated_str = meta_saved.get("last_updated", "")
-    if is_pending_view:
-        time_badge = f"🕒 {pending_chip_date} 盤後籌碼尚未公布（最新有效籌碼日：{latest_trade_date}）"
+    if not is_chip_complete:
+        time_badge = f"⏳ {valid_anchor_date} 籌碼結算中（待公布：{'、'.join(missing_chip_items)}）" + (f" ｜ 更新：{updated_str}" if updated_str else "")
     elif valid_anchor_date != latest_trade_date:
-        time_badge = f"⏪ 歷史回放基準日：{valid_anchor_date}（{snap_rel_name}｜最新有效籌碼日：{latest_trade_date}）"
-    elif pending_chip_date:
-        time_badge = f"🕒 籌碼基準日：{valid_anchor_date}（{pending_chip_date} 盤後籌碼尚未公布）"
+        time_badge = f"⏪ 歷史回放基準日：{valid_anchor_date}（{snap_rel_name}｜最新交易日：{latest_trade_date}）"
     else:
         time_badge = f"🕒 更新時間：{updated_str}（最新交易日：{latest_trade_date}）" if updated_str else f"🕒 最新交易日：{latest_trade_date}"
 
@@ -1214,9 +1191,9 @@ if target_stock:
     snap_cols = st.columns([1.15] + [1.35] * len(snap_options) + [3.0])
     with snap_cols[0]:
         st.markdown('<div class="snap-bar-label">📅 籌碼基準日：</div>', unsafe_allow_html=True)
-    for idx_opt, (off_val, rel_lbl, dt_val, is_pend) in enumerate(snap_options):
+    for idx_opt, (off_val, rel_lbl, dt_val, is_incomp) in enumerate(snap_options):
         short_d = dt_val[5:].replace("-", "/") if len(dt_val) >= 10 else dt_val
-        btn_txt = f"{rel_lbl} ({short_d} 待公布)" if is_pend else f"{rel_lbl} ({short_d})"
+        btn_txt = f"{rel_lbl} ({short_d} ⏳)" if is_incomp else f"{rel_lbl} ({short_d})"
         is_sel = (off_val == active_offset)
         with snap_cols[idx_opt + 1]:
             if st.button(btn_txt, key=f"btn_snap_{target_stock}_{off_val}", type="primary" if is_sel else "secondary", width="stretch"):
@@ -1224,7 +1201,7 @@ if target_stock:
                 st.rerun()
 
     # =====================================================================
-    # 區塊一：核心決策總結看板（100% 籌碼｜趨勢 60% ＋ 動能 40%）
+    # 區塊一：核心決策總結看板（100% 籌碼｜趨勢 60% ＋ 動能 40%｜方案 A）
     # =====================================================================
     bull_min = int(STRATEGY_PARAMS.get("bull_score_min", 55))
     strong_bull_min = int(STRATEGY_PARAMS.get("strong_bull_score_min", 70))
@@ -1236,13 +1213,14 @@ if target_stock:
         f"<b>100% 籌碼健康分數（0～100 分｜趨勢 60% ＋ 動能 40%｜不含技術面）</b><br>"
         "以 <b>50 分</b>為多空中性基準，分兩層累計加減（最高 ±50 分）：<br>"
         "• <b>一、中線趨勢面 (±30 分，佔 60%)：</b><br>"
-        "&nbsp;&nbsp;◦ 全體波段分點合力 20/60 日控盤與庫存均線 (±14)<br>"
-        "&nbsp;&nbsp;◦ 全市場 10/20 日中線集中度 (±8)<br>"
-        "&nbsp;&nbsp;◦ 投信 20 日動向與真實持股水位 (±4) ＋ TDCC 集保大戶 (±4)<br>"
+        "&nbsp;&nbsp;◦ 全體波段分點合力 20/60 日控盤與庫存均線 (±16)<br>"
+        "&nbsp;&nbsp;◦ 全市場 10/20 日中線集中度 (±10)<br>"
+        "&nbsp;&nbsp;◦ TDCC 集保大戶週變化 (±4)<br>"
         "• <b>二、短線動能面 (±20 分，佔 40%)：</b><br>"
         "&nbsp;&nbsp;◦ 5 日集中度 (±4) ＋ 主力分點廣度比含外資共識 (±6)<br>"
         "&nbsp;&nbsp;◦ 融資四象限 (±5) ＋ 情境借券賣出 (±5；空頭背景回補不加分)<br>"
         "• <b>三、當日隔日沖灌水濾網（偏多時單向扣分）：</b>0 ～ -10 分<br>"
+        "<span style='color:#94a3b8;'>※ 投信下單已涵蓋於本土券商分點與集中度中，為免重複計分改於下方獨立追蹤。</span>"
         '<table class="tip-mini-tbl">'
         '  <thead><tr><th>分數區間</th><th>燈號狀態</th><th>籌碼含義</th></tr></thead>'
         '  <tbody>'
@@ -1254,57 +1232,35 @@ if target_stock:
         '</table>'
     )
 
-    if is_pending_view:
-        # 做法 1：今日籌碼尚未公布時，不顯示今日分數與前一日誤導明細
-        prev_opt = next((o for o in snap_options if o[0] == -1), None)
-        prev_short_d = prev_opt[2][5:].replace("-", "/") if (prev_opt and len(prev_opt[2]) >= 10) else latest_trade_date
-        prev_btn_name = f"{prev_opt[1]} ({prev_short_d})" if prev_opt else latest_trade_date
+    # 尋找最近一個籌碼已齊全的基準日按鈕名稱（供未齊全時提示切換）
+    complete_opts = [o for o in snap_options if not o[3]]
+    if complete_opts:
+        last_comp = complete_opts[-1]
+        prev_short_d = last_comp[2][5:].replace("-", "/") if len(last_comp[2]) >= 10 else last_comp[2]
+        prev_btn_name = f"{last_comp[1]} ({prev_short_d})"
+    else:
+        prev_btn_name = "前一日"
 
+    conv_score = None
+    if not is_chip_complete:
+        # 方式 A：停在基準日，鎖定分數與定調並條列缺漏項目；下方已公布之單項指標照常顯示
+        missing_txt = "、".join(missing_chip_items)
         st.markdown(
             f'<div class="hero-panel hero-neutral">'
             f'  <div class="hero-score-box">'
             f'    <div class="hero-score-label"><span>籌碼健康分數</span><span class="tip-wrap tip-down">ⓘ<span class="tip-box tip-box-wide">{score_tip_html}</span></span></div>'
             f'    <div class="score-val" style="color:#64748b;">— <span style="font-size:0.88rem; font-weight:500; color:#64748b;">/ 100</span></div>'
             f'    <div class="score-bar-bg"><div class="score-bar-fill" style="width:0%; background:#64748b;"></div></div>'
-            f'    <div class="hero-score-sub" style="color:#fbbf24;">⏳ 盤後籌碼尚未公布</div>'
+            f'    <div class="hero-score-sub" style="color:#fbbf24;">⏳ 結算中（籌碼未齊）</div>'
             f'  </div>'
             f'  <div>'
-            f'    <div class="hero-body-title">⏳ {pending_chip_date} 盤後籌碼尚未更新，暫不顯示當日分數</div>'
-            f'    <div class="hero-body-desc">目前僅取得 {pending_chip_date} 股價資料，券商分點買賣超、投信、融資融券與借券餘額尚未公布；為避免誤將前一日籌碼當作今日分數，系統待盤後籌碼更新後再行計分。</div>'
-            f'    <div class="hero-body-action">💡 操作提示：點擊上方「<b>{prev_btn_name}</b>」即可檢視最新完整籌碼診斷；下方走勢圖與波段回測維持顯示至最新有效籌碼日（{latest_trade_date}）。</div>'
+            f'    <div class="hero-body-title">⏳ {valid_anchor_date} 籌碼尚未齊全，暫不計算當日分數</div>'
+            f'    <div class="hero-body-desc">今日尚缺以下必備日頻籌碼，等待公布：<b style="color:#fbbf24;">{missing_txt}</b>。為避免缺漏項目以空值或 0 張計分造成誤判，待資料齊全並更新後再自動顯示總分與狀態定調。</div>'
+            f'    <div class="hero-body-action">💡 下方已公布之單項卡片（收盤價、投信、集保大戶等）照常顯示；如需檢視最新完整評分，請點擊上方「<b>{prev_btn_name}</b>」。</div>'
             f'  </div>'
             f'</div>',
             unsafe_allow_html=True,
         )
-
-        c1, c2, c3 = st.columns([2.3, 2.2, 1.2])
-        with c1:
-            st.markdown(
-                f'<div class="summary-card">'
-                f'  <div class="card-label">近 60 日最大波段分點主力（已濾除隔日沖）</div>'
-                f'  <div class="card-value" style="color:#94a3b8;">⏳ 盤後籌碼待公布</div>'
-                f'  <div class="card-sub">請點擊上方「{prev_btn_name}」檢視最新有效分點明細</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-        with c2:
-            st.markdown(
-                f'<div class="summary-card">'
-                f'  <div class="card-label">區間內三大波段主力狀態</div>'
-                f'  <div class="card-value" style="color:#94a3b8;">⏳ 等待 {pending_chip_date} 盤後資料</div>'
-                f'  <div class="card-sub">目前最新有效籌碼基準日：{latest_trade_date}</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-        with c3:
-            st.markdown(
-                f'<div class="summary-card">'
-                f'  <div class="card-label">{display_close_label}</div>'
-                f'  <div class="card-value">{display_close:.2f} 元</div>'
-                f'  <div class="card-sub">{pct_prefix}{pct_html}<br>籌碼日：待公布</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
     else:
         conv_score = int(scenario.get("conviction_score", 50))
         if conv_score >= strong_bull_min:
@@ -1326,7 +1282,7 @@ if target_stock:
             t_tot = int(sb.get("trend_total", 0))
             t_wave = int(sb.get("trend_wave", 0))
             t_conc = int(sb.get("trend_conc", 0))
-            t_inst = int(sb.get("trend_inst", 0))
+            t_tdcc = int(sb.get("trend_tdcc", sb.get("tdcc", sb.get("trend_inst", 0))))
             m_tot = int(sb.get("momentum_total", 0))
             m_cb = int(sb.get("mom_conc_breadth", sb.get("conc_breadth", 0)))
             m_cs = int(sb.get("mom_credit_sbl", sb.get("credit_sbl", 0)))
@@ -1335,7 +1291,7 @@ if target_stock:
                 f'<div class="score-breakdown-row">'
                 f'  <span class="sb-pill">基準 <b>{sb.get("base", 50)}</b></span>'
                 f'  <span class="sb-pill">🌊 趨勢(60%) {_span_delta_score(t_tot)}'
-                f'    <span class="sb-pill-sub">(合力{t_wave:+d} · 10/20集中{t_conc:+d} · 投信/集保{t_inst:+d})</span></span>'
+                f'    <span class="sb-pill-sub">(合力{t_wave:+d} · 10/20集中{t_conc:+d} · 集保{t_tdcc:+d})</span></span>'
                 f'  <span class="sb-pill">⚡ 動能(40%) {_span_delta_score(m_tot)}'
                 f'    <span class="sb-pill-sub">(5日/廣度{m_cb:+d} · 資/借{m_cs:+d})</span></span>'
                 f'  <span class="sb-pill">隔日沖濾網 {_span_delta_score(dt_val)}</span>'
@@ -1384,29 +1340,42 @@ if target_stock:
                 unsafe_allow_html=True,
             )
 
-        # --- 三大核心卡片 ---
-        ctrl5 = float(analysis.get("top3_5d_ctrl_pct", 0.0) or 0.0)
-        z5 = analysis.get("top3_5d_ctrl_z")
-        z_tip_html = build_z_tooltip_html(stock_title, ctrl5, z5)
+    # --- 三大核心卡片（收盤價照常顯示；分點未公布時不顯示誤導性的「0 張鎖碼觀望」） ---
+    ctrl5 = float(analysis.get("top3_5d_ctrl_pct", 0.0) or 0.0)
+    z5 = analysis.get("top3_5d_ctrl_z")
+    z_tip_html = build_z_tooltip_html(stock_title, ctrl5, z5)
 
-        raw_status_html = analysis.get("status_html", "N/A")
-        top3_period_net = int(analysis.get("top3_period_net", 0))
-        if "吃貨中" in raw_status_html:
-            if conv_score <= bear_max:
-                display_status_html = f'🟡 區間逆勢承接（{_span_num(top3_period_net)}｜整體籌碼偏發散）'
-            elif z5 is not None and abs(z5) < 1.0:
-                display_status_html = f'🟡 區間小幅買超（{_span_num(top3_period_net)}｜屬日常波動）'
-            else:
-                display_status_html = raw_status_html
+    raw_status_html = analysis.get("status_html", "N/A")
+    top3_period_net = int(analysis.get("top3_period_net", 0))
+    if "吃貨中" in raw_status_html:
+        if is_chip_complete and conv_score is not None and conv_score <= bear_max:
+            display_status_html = f'🟡 區間逆勢承接（{_span_num(top3_period_net)}｜整體籌碼偏發散）'
+        elif z5 is not None and abs(z5) < 1.0:
+            display_status_html = f'🟡 區間小幅買超（{_span_num(top3_period_net)}｜屬日常波動）'
         else:
             display_status_html = raw_status_html
+    else:
+        display_status_html = raw_status_html
 
-        wave_agg_info = analysis.get("wave_agg_info")
-        c1, c2, c3 = st.columns([2.3, 2.2, 1.2])
-        with c1:
-            sub_html = "".join([f'<div class="card-sub">{line}</div>' for line in analysis.get("main_force_sub_lines", [])])
-            st.markdown(f'<div class="summary-card"><div class="card-label">近 60 日最大波段分點主力（已濾除隔日沖）</div><div class="card-value">{analysis.get("main_force_html", "N/A")}</div>{sub_html}</div>', unsafe_allow_html=True)
-        with c2:
+    wave_agg_info = analysis.get("wave_agg_info")
+    c1, c2, c3 = st.columns([2.3, 2.2, 1.2])
+    with c1:
+        sub_lines_c1 = list(analysis.get("main_force_sub_lines", []))
+        if not has_broker_today:
+            sub_lines_c1.append(f'<span style="color:#fbbf24;">⏳ 尚不含 {valid_anchor_date} 未公布之分點明細</span>')
+        sub_html = "".join([f'<div class="card-sub">{line}</div>' for line in sub_lines_c1])
+        st.markdown(f'<div class="summary-card"><div class="card-label">近 60 日最大波段分點主力（已濾除隔日沖）</div><div class="card-value">{analysis.get("main_force_html", "N/A")}</div>{sub_html}</div>', unsafe_allow_html=True)
+    with c2:
+        if not has_broker_today:
+            st.markdown(
+                f'<div class="summary-card">'
+                f'  <div class="card-label"><span>區間內三大波段主力狀態</span><span class="tip-wrap tip-down">ⓘ<span class="tip-box tip-box-wide">{z_tip_html}</span></span></div>'
+                f'  <div class="card-value" style="color:#94a3b8;">⏳ {valid_anchor_date} 主力分點待公布</div>'
+                f'  <div class="card-sub">{analysis.get("status_sub", "")}<br>待今日分點明細公布後自動更新，或點擊上方「{prev_btn_name}」檢視前日狀態</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+        else:
             flt5 = analysis.get("top3_5d_float_pct")
             extra_stat_parts = [f"近5日控盤 {ctrl5:+.1f}%"]
             if z5 is not None:
@@ -1421,99 +1390,101 @@ if target_stock:
                 wave_agg_line = f'<br>🌐 全體波段({w_cnt}家) 20日 {_span_num(w20_n)}（控盤 {_span_ctrl(w20_c)}）'
             status_sub_html = f'<div class="card-sub">{analysis.get("status_sub", "")}<br><span style="color:#cbd5e1;">{" ｜ ".join(extra_stat_parts)}</span>{wave_agg_line}</div>'
             st.markdown(f'<div class="summary-card"><div class="card-label"><span>區間內三大波段主力狀態</span><span class="tip-wrap tip-down">ⓘ<span class="tip-box tip-box-wide">{z_tip_html}</span></span></div><div class="card-value">{display_status_html}</div>{status_sub_html}</div>', unsafe_allow_html=True)
-        with c3:
-            st.markdown(f'<div class="summary-card"><div class="card-label">{display_close_label}</div><div class="card-value">{display_close:.2f} 元</div><div class="card-sub">{pct_prefix}{pct_html}<br>籌碼日：{valid_anchor_date}</div></div>', unsafe_allow_html=True)
+    with c3:
+        chip_dt_note = f"籌碼日：{valid_anchor_date}" if is_chip_complete else f"籌碼日：{valid_anchor_date}（結算中）"
+        st.markdown(f'<div class="summary-card"><div class="card-label">{display_close_label}</div><div class="card-value">{display_close:.2f} 元</div><div class="card-sub">{pct_prefix}{pct_html}<br>{chip_dt_note}</div></div>', unsafe_allow_html=True)
 
-        # --- 投信獨立追蹤列 ---
-        trust_info = analysis.get("trust_info")
-        if trust_info:
-            trust_tip = (
-                "投信下單分散於各大本土券商法人專戶中，系統不將其與分點張數重複加總，"
-                "並以近 20 日動向、連買賣天數與真實持股比率獨立計入中線趨勢評分（±4 分）。"
-                "動向標籤嚴格以買超紅、賣超綠呈現；持股水位 0.5%～5% 且偏買時為初升認養甜蜜期，10% 以上須留意結帳賣壓。"
-            )
-            phase = trust_info.get("phase") or {}
-            tier_style_map = {
-                "bull": ("#fca5a5", "rgba(239,83,80,0.14)", "rgba(239,83,80,0.45)"),
-                "warn": ("#fcd34d", "rgba(245,158,11,0.15)", "rgba(245,158,11,0.45)"),
-                "info": ("#cbd5e1", "#232a3b", "#334155"),
-            }
-            mom_style_map = {
-                "bull": ("#ef5350", "rgba(239,83,80,0.16)", "rgba(239,83,80,0.55)"),
-                "bear": ("#26a69a", "rgba(38,166,154,0.16)", "rgba(38,166,154,0.55)"),
-                "info": ("#94a3b8", "#232a3b", "#334155"),
-            }
-            t_col, t_bg, t_bd = tier_style_map.get(phase.get("tier_level", "info"), tier_style_map["info"])
-            m_col, m_bg, m_bd = mom_style_map.get(phase.get("momentum_level", "info"), mom_style_map["info"])
-            tier_pill = f'<span class="trust-tag" style="color:{t_col}; background:{t_bg}; border:1px solid {t_bd};">{phase.get("tier_label", "")}</span>' if phase.get("tier_label") else ""
-            mom_pill = f'<span class="trust-tag" style="color:{m_col}; background:{m_bg}; border:1px solid {m_bd};">{phase.get("momentum", "")}</span>' if phase.get("momentum") else ""
-            cost_seg = ""
-            if trust_info.get("cost", 0) > 0 and trust_info.get("pnl_pct") is not None:
-                p_val = trust_info["pnl_pct"]
-                p_col = "#ef5350" if p_val > 0 else ("#26a69a" if p_val < 0 else "#cbd5e1")
-                cost_seg = f'<span><span class="trust-lbl">60日均價</span><b style="color:#ffb74d;">{trust_info["cost"]:,.2f}</b> (<span style="color:{p_col}; font-weight:700;">{p_val:+.1f}%</span>)</span>'
-
-            st.markdown(
-                f'<div class="trust-bar">'
-                f'  <div class="trust-title">🏦 投信獨立追蹤<span class="tip-wrap tip-right">ⓘ<span class="tip-box">{trust_tip}</span></span>{tier_pill}{mom_pill}</div>'
-                f'  <div class="trust-metrics-wrap">'
-                f'    <div class="trust-primary"><span>{_span_streak(trust_info["streak"])}</span><span style="color:#475569;">｜</span><span><span class="trust-lbl">近 5 日</span>{_span_num(trust_info.get("d5", 0))}</span></div>'
-                f'    <div class="trust-secondary"><span><span class="trust-lbl">{day_word}</span>{_span_num(trust_info["d1"])}</span><span><span class="trust-lbl">區間</span>{_span_num(trust_info["period"])}</span><span><span class="trust-lbl">近 20 日</span>{_span_num(trust_info["d20"])}</span><span><span class="trust-lbl">今年</span>{_span_num(trust_info["ytd"])}</span><span><span class="trust-lbl">控盤</span>{_span_ctrl(trust_info["ctrl_pct"])}</span>{cost_seg}</div>'
-                f'  </div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-
-        # --- 四大輔助籌碼儀表板 ---
-        st.markdown(
-            _render_aux_dashboard(
-                analysis.get("breadth_info"),
-                analysis.get("margin_info"),
-                analysis.get("sbl_info"),
-                analysis.get("tdcc_info"),
-                day_word=day_word,
-            ),
-            unsafe_allow_html=True,
+    # --- 投信獨立追蹤列（已公布即照常顯示，不重複計入籌碼健康總分） ---
+    trust_info = analysis.get("trust_info")
+    if trust_info:
+        trust_tip = (
+            "投信下單分散於各大本土券商法人專戶中，其買賣流向已反映於分點明細與全市場集中度；"
+            "為避免重複計權，本區採獨立追蹤（不計入籌碼健康總分），專供監控投信連買賣動能與真實持股水位"
+            "（0.5%～5% 且偏買時為初升認養甜蜜期，10% 以上須留意結帳賣壓）。"
         )
+        phase = trust_info.get("phase") or {}
+        tier_style_map = {
+            "bull": ("#fca5a5", "rgba(239,83,80,0.14)", "rgba(239,83,80,0.45)"),
+            "warn": ("#fcd34d", "rgba(245,158,11,0.15)", "rgba(245,158,11,0.45)"),
+            "info": ("#cbd5e1", "#232a3b", "#334155"),
+        }
+        mom_style_map = {
+            "bull": ("#ef5350", "rgba(239,83,80,0.16)", "rgba(239,83,80,0.55)"),
+            "bear": ("#26a69a", "rgba(38,166,154,0.16)", "rgba(38,166,154,0.55)"),
+            "info": ("#94a3b8", "#232a3b", "#334155"),
+        }
+        t_col, t_bg, t_bd = tier_style_map.get(phase.get("tier_level", "info"), tier_style_map["info"])
+        m_col, m_bg, m_bd = mom_style_map.get(phase.get("momentum_level", "info"), mom_style_map["info"])
+        tier_pill = f'<span class="trust-tag" style="color:{t_col}; background:{t_bg}; border:1px solid {t_bd};">{phase.get("tier_label", "")}</span>' if phase.get("tier_label") else ""
+        mom_pill = f'<span class="trust-tag" style="color:{m_col}; background:{m_bg}; border:1px solid {m_bd};">{phase.get("momentum", "")}</span>' if phase.get("momentum") else ""
+        cost_seg = ""
+        if trust_info.get("cost", 0) > 0 and trust_info.get("pnl_pct") is not None:
+            p_val = trust_info["pnl_pct"]
+            p_col = "#ef5350" if p_val > 0 else ("#26a69a" if p_val < 0 else "#cbd5e1")
+            cost_seg = f'<span><span class="trust-lbl">60日均價</span><b style="color:#ffb74d;">{trust_info["cost"]:,.2f}</b> (<span style="color:{p_col}; font-weight:700;">{p_val:+.1f}%</span>)</span>'
 
-        # --- 全市場前 15 大籌碼集中度橫條 ---
-        conc_tip = (
-            "計算公式：（該區間全市場前 15 大買超分點總張數 － 前 15 大賣超分點總張數）÷ 區間總成交量 × 100%。"
-            "採區間歸戶重排口徑，並自動保存每日官方快照計算過去 60 個交易日的滾動 Z-Score 標準分數。"
-        )
         st.markdown(
-            f'<div class="conc-panel">'
-            f'  <div class="conc-header"><div class="conc-title">📊 全市場前 15 大籌碼集中度<span class="tip-wrap tip-right">ⓘ<span class="tip-box">{conc_tip}</span></span><span class="conc-sub-tag">短中線全市場視角（基準日：{valid_anchor_date}）</span></div></div>'
-            f'  <div class="conc-grid">{_format_conc_card("近 5 日集中度", concentrations.get("d5", {}))}{_format_conc_card("近 10 日集中度", concentrations.get("d10", {}))}{_format_conc_card("近 20 日集中度", concentrations.get("d20", {}))}</div>'
+            f'<div class="trust-bar">'
+            f'  <div class="trust-title">🏦 投信獨立追蹤<span class="tip-wrap tip-right">ⓘ<span class="tip-box">{trust_tip}</span></span>{tier_pill}{mom_pill}</div>'
+            f'  <div class="trust-metrics-wrap">'
+            f'    <div class="trust-primary"><span>{_span_streak(trust_info["streak"])}</span><span style="color:#475569;">｜</span><span><span class="trust-lbl">近 5 日</span>{_span_num(trust_info.get("d5", 0))}</span></div>'
+            f'    <div class="trust-secondary"><span><span class="trust-lbl">{day_word}</span>{_span_num(trust_info["d1"])}</span><span><span class="trust-lbl">區間</span>{_span_num(trust_info["period"])}</span><span><span class="trust-lbl">近 20 日</span>{_span_num(trust_info["d20"])}</span><span><span class="trust-lbl">今年</span>{_span_num(trust_info["ytd"])}</span><span><span class="trust-lbl">控盤</span>{_span_ctrl(trust_info["ctrl_pct"])}</span>{cost_seg}</div>'
+            f'  </div>'
             f'</div>',
             unsafe_allow_html=True,
         )
 
-        # --- 籌碼結構 5 大狀態判讀矩陣 ---
-        matched_id = scenario.get("id", 0)
-        with st.expander("📖 籌碼結構 5 大狀態判讀矩陣（100% 籌碼｜趨勢 60% ＋ 動能 40%）", expanded=False):
-            m_rows = []
-            for item in SCENARIO_MATRIX:
-                is_match = (item["id"] == matched_id)
-                row_cls, badge = "", ""
-                if is_match:
-                    row_cls = "matrix-active-bull" if item["type"] == "bull" else ("matrix-active-bear" if item["type"] == "bear" else "matrix-active-neutral")
-                    badge = '<br><span style="display:inline-block; margin-top:4px; padding:1px 6px; border-radius:4px; background:#f59e0b; color:#0f172a; font-weight:700; font-size:0.75rem;">👈 目前符合</span>'
-                aux_col_html = item.get("aux_cond", "")
-                if item.get("price_cond"):
-                    aux_col_html = f'{aux_col_html}<br><span style="color:#94a3b8;">{item["price_cond"]}</span>' if aux_col_html else item["price_cond"]
-                m_rows.append(
-                    f'<tr class="{row_cls}">'
-                    f'  <td style="width:17%; font-weight:700;">{item["name"]}{badge}</td>'
-                    f'  <td style="width:19%;">{item.get("main_cond", "")}</td>'
-                    f'  <td style="width:19%;">{item.get("conc_cond", "")}</td>'
-                    f'  <td style="width:20%;">{aux_col_html}</td>'
-                    f'  <td style="width:25%;">{item.get("action", "")}</td>'
-                    f'</tr>'
-                )
-            st.markdown(f'<table class="matrix-table"><thead><tr><th>籌碼結構狀態</th><th>全體波段分點合力（趨勢核心）</th><th>集中度與主力廣度</th><th>輔助籌碼與分數檢核</th><th>籌碼解讀與觀察重點</th></tr></thead><tbody>{"".join(m_rows)}</tbody></table>', unsafe_allow_html=True)
+    # --- 四大輔助籌碼儀表板（已公布卡片照常顯示，未公布顯示 ⏳ 待更新） ---
+    st.markdown(
+        _render_aux_dashboard(
+            analysis.get("breadth_info"),
+            analysis.get("margin_info"),
+            analysis.get("sbl_info"),
+            analysis.get("tdcc_info"),
+            day_word=day_word,
+        ),
+        unsafe_allow_html=True,
+    )
 
-        # --- 前三大波段券商分點主力明細 ---
+    # --- 全市場前 15 大籌碼集中度橫條 ---
+    conc_tip = (
+        "計算公式：（該區間全市場前 15 大買超分點總張數 － 前 15 大賣超分點總張數）÷ 區間總成交量 × 100%。"
+        "採區間歸戶重排口徑，並自動保存每日官方快照計算過去 60 個交易日的滾動 Z-Score 標準分數。"
+    )
+    st.markdown(
+        f'<div class="conc-panel">'
+        f'  <div class="conc-header"><div class="conc-title">📊 全市場前 15 大籌碼集中度<span class="tip-wrap tip-right">ⓘ<span class="tip-box">{conc_tip}</span></span><span class="conc-sub-tag">短中線全市場視角（基準日：{valid_anchor_date}）</span></div></div>'
+        f'  <div class="conc-grid">{_format_conc_card("近 5 日集中度", concentrations.get("d5", {}))}{_format_conc_card("近 10 日集中度", concentrations.get("d10", {}))}{_format_conc_card("近 20 日集中度", concentrations.get("d20", {}))}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    # --- 籌碼結構 5 大狀態判讀矩陣（未齊全時不亮出「目前符合」避免誤判） ---
+    matched_id = scenario.get("id", 0) if is_chip_complete else 0
+    with st.expander("📖 籌碼結構 5 大狀態判讀矩陣（100% 籌碼｜趨勢 60% ＋ 動能 40%）", expanded=False):
+        m_rows = []
+        for item in SCENARIO_MATRIX:
+            is_match = (item["id"] == matched_id)
+            row_cls, badge = "", ""
+            if is_match:
+                row_cls = "matrix-active-bull" if item["type"] == "bull" else ("matrix-active-bear" if item["type"] == "bear" else "matrix-active-neutral")
+                badge = '<br><span style="display:inline-block; margin-top:4px; padding:1px 6px; border-radius:4px; background:#f59e0b; color:#0f172a; font-weight:700; font-size:0.75rem;">👈 目前符合</span>'
+            aux_col_html = item.get("aux_cond", "")
+            if item.get("price_cond"):
+                aux_col_html = f'{aux_col_html}<br><span style="color:#94a3b8;">{item["price_cond"]}</span>' if aux_col_html else item["price_cond"]
+            m_rows.append(
+                f'<tr class="{row_cls}">'
+                f'  <td style="width:17%; font-weight:700;">{item["name"]}{badge}</td>'
+                f'  <td style="width:19%;">{item.get("main_cond", "")}</td>'
+                f'  <td style="width:19%;">{item.get("conc_cond", "")}</td>'
+                f'  <td style="width:20%;">{aux_col_html}</td>'
+                f'  <td style="width:25%;">{item.get("action", "")}</td>'
+                f'</tr>'
+            )
+        st.markdown(f'<table class="matrix-table"><thead><tr><th>籌碼結構狀態</th><th>全體波段分點合力（趨勢核心）</th><th>集中度與主力廣度</th><th>輔助籌碼與分數檢核</th><th>籌碼解讀與觀察重點</th></tr></thead><tbody>{"".join(m_rows)}</tbody></table>', unsafe_allow_html=True)
+
+    # --- 前三大波段券商分點主力明細、聰明錢雷達與排行榜（當日分點已公布才顯示） ---
+    if has_broker_today:
         st.write("")
         if top3_names:
             top3_net_val = analysis.get("top3_period_net", 0)
@@ -1613,6 +1584,8 @@ if target_stock:
                 st.markdown(_render_rank_table(f"🔴 {right_lbl}分點買超前 5 大", right_buyers, "#ef5350", f"{right_lbl}無淨買超分點", broker_tags), unsafe_allow_html=True)
             with col_ys:
                 st.markdown(_render_rank_table(f"🟢 {right_lbl}分點賣超前 5 大", right_sellers, "#26a69a", f"{right_lbl}無淨賣超分點", broker_tags), unsafe_allow_html=True)
+    else:
+        st.info(f"⏳ {valid_anchor_date} 主力分點明細尚未公布，待盤後分點資料更新後將自動顯示當日主力明細與買賣超排行榜；可先點擊上方「{prev_btn_name}」檢視前一日完整明細。")
 
     st.divider()
 
@@ -1776,8 +1749,10 @@ if target_stock:
             )
             reg_label_map = {"bull": "🔴 波段偏多", "bear": "🟢 波段偏空", "neutral": "🟡 空手觀望"}
             price_hover_texts = [
-                f"{cl_v:,.2f} 元 ｜ 籌碼 {int(round(sc_v))} 分（{reg_label_map.get(reg_v, '')}）" if pd.notna(sc_v) else f"{cl_v:,.2f} 元"
-                for cl_v, sc_v, reg_v in zip(df_plot["close"], df_plot["health_score"], regime_list)
+                f"{cl_v:,.2f} 元 ｜ 籌碼 {int(round(sc_v))} 分（{reg_label_map.get(reg_v, '')}）"
+                if pd.notna(sc_v)
+                else (f"{cl_v:,.2f} 元 ｜ ⏳ 籌碼結算中" if st_v == "結算中" else f"{cl_v:,.2f} 元")
+                for cl_v, sc_v, reg_v, st_v in zip(df_plot["close"], df_plot["health_score"], regime_list, df_plot["sub_type"].fillna(""))
             ]
             fig.add_trace(go.Scatter(x=df_plot["date"], y=df_plot["close"], name="收盤價懸浮", legend="legend", line=dict(color="#FFD700", width=2.4), opacity=0.0, showlegend=False, text=price_hover_texts, hovertemplate="%{text}<extra>收盤／籌碼</extra>"), row=1, col=1, secondary_y=False)
             fig.add_trace(go.Scatter(x=df_plot["date"], y=y_neutral, name="收盤價 (空手/中性)", legend="legend", line=dict(color="#FFD700", width=2.5), connectgaps=False, showlegend=True, hoverinfo="skip"), row=1, col=1, secondary_y=False)
@@ -1788,7 +1763,9 @@ if target_stock:
                 fig.add_vrect(x0=b_start - 0.5, x1=b_end + 0.5, fillcolor=band_color, line_width=0, layer="below", row=1, col=1)
         else:
             price_hover_texts = [
-                f"{cl_v:,.2f} 元 ｜ 籌碼 {int(round(sc_v))} 分（{st_v}）" if pd.notna(sc_v) else f"{cl_v:,.2f} 元"
+                f"{cl_v:,.2f} 元 ｜ 籌碼 {int(round(sc_v))} 分（{st_v}）"
+                if pd.notna(sc_v)
+                else (f"{cl_v:,.2f} 元 ｜ ⏳ 籌碼結算中" if st_v == "結算中" else f"{cl_v:,.2f} 元")
                 for cl_v, sc_v, st_v in zip(df_plot["close"], df_plot["health_score"], df_plot["sub_type"].fillna(""))
             ]
             fig.add_trace(go.Scatter(x=df_plot["date"], y=df_plot["close"], name="收盤價 (元)", legend="legend", line=dict(color="#FFD700", width=2.6), text=price_hover_texts, hovertemplate="%{text}<extra>收盤價</extra>"), row=1, col=1, secondary_y=False)
