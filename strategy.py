@@ -545,54 +545,94 @@ def compute_broker_breadth(
 
 
 def evaluate_trust_phase(trust_info: dict) -> dict:
-    """判定投信水位階段與短線動向（供獨立追蹤列視覺呈現，不重複計入籌碼總分）"""
+    """
+    方案二「權責分離」判定投信狀態（供獨立追蹤列視覺呈現，不重複計入籌碼總分）：
+    - 左標籤 (tier_label)：只顯示客觀持股水位，不帶方向預設立場
+    - 右標籤 (momentum)：綜合近 20 日波段、近 5 日與連買賣天數判定真實動向，
+      僅於水位 0.5%～5% 且 5 日／20 日同步買超時才標記「認養加碼中」
+    """
     if not isinstance(trust_info, dict):
         return {"tier_label": "", "tier_level": "info", "momentum": "", "momentum_level": "info"}
 
     streak = int(trust_info.get("streak", 0) or 0)
     d5 = int(trust_info.get("d5", 0) or 0)
+    d20 = int(trust_info.get("d20", 0) or 0)
     hold_pct = trust_info.get("holding_pct")
 
-    if streak >= 3 and d5 > 0:
-        momentum = f"連買 {streak} 日認養中"
-        momentum_level = "bull"
-    elif d5 > 0 and streak >= 1:
-        momentum = f"偏買（連買 {streak} 日）"
-        momentum_level = "bull"
-    elif streak <= -3 and d5 < 0:
-        momentum = f"連賣 {abs(streak)} 日調節中"
-        momentum_level = "bear"
-    elif d5 < 0 and streak <= -1:
-        momentum = f"偏賣（連賣 {abs(streak)} 日）"
-        momentum_level = "bear"
-    elif d5 > 0:
-        momentum = "近 5 日偏多小買"
-        momentum_level = "bull"
-    elif d5 < 0:
-        momentum = "近 5 日偏空小賣"
-        momentum_level = "bear"
-    else:
-        momentum = "短線觀望"
-        momentum_level = "info"
-
+    # 1. 左標籤：純客觀持股水位
     tier_label = ""
     tier_level = "info"
     if hold_pct is not None:
         if hold_pct >= 10.0:
             tier_label = f"⚠️ 高水位警戒 ({hold_pct:.2f}%)"
             tier_level = "warn"
-        elif 0.5 <= hold_pct <= 5.0 and (d5 > 0 or streak > 0):
-            tier_label = f"🎯 初升認養甜蜜期 ({hold_pct:.2f}%)"
-            tier_level = "bull"
         elif hold_pct > 5.0:
-            tier_label = f"中高度持股 ({hold_pct:.2f}%)"
-            tier_level = "info"
+            tier_label = f"中高水位 ({hold_pct:.2f}%)"
         elif hold_pct >= 0.5:
-            tier_label = f"低中水位 ({hold_pct:.2f}%)"
-            tier_level = "info"
+            tier_label = f"中低水位 ({hold_pct:.2f}%)"
         else:
-            tier_label = f"低水位觀察 ({hold_pct:.2f}%)"
-            tier_level = "info"
+            tier_label = f"低水位 ({hold_pct:.2f}%)"
+
+    # 2. 右標籤：真實波段與短線動向（嚴格以 20 日＋5 日方向為主，不被單日買賣誤導）
+    is_sweet_spot = (hold_pct is not None) and (0.5 <= hold_pct <= 5.0)
+    is_high_tier = (hold_pct is not None) and (hold_pct >= 10.0)
+
+    if d20 > 0 and d5 > 0:
+        if is_sweet_spot:
+            if streak >= 3:
+                momentum = f"🎯 認養加碼中（連買 {streak} 日）"
+            elif streak >= 1:
+                momentum = "🎯 認養加碼中"
+            else:
+                momentum = "🎯 認養加碼（今日小調）"
+        else:
+            if streak >= 3:
+                momentum = f"波段加碼（連買 {streak} 日）"
+            elif streak >= 1:
+                momentum = "波段偏多加碼"
+            else:
+                momentum = "波段偏多（今日小調）"
+        momentum_level = "bull"
+    elif d20 < 0 and d5 < 0:
+        tag_action = "結帳調節" if is_high_tier else "調節中"
+        if streak <= -3:
+            momentum = f"連賣 {abs(streak)} 日{tag_action}"
+        elif streak <= -1:
+            momentum = f"波段{tag_action}"
+        elif streak >= 1:
+            momentum = f"波段{tag_action}（今日小幅回補）"
+        else:
+            momentum = f"波段{tag_action}"
+        momentum_level = "bear"
+    elif d20 < 0 and d5 > 0:
+        if streak >= 3:
+            momentum = f"止賣轉買（連買 {streak} 日）"
+            momentum_level = "bull"
+        else:
+            momentum = "🔄 止賣轉買觀察"
+            momentum_level = "info"
+    elif d20 > 0 and d5 < 0:
+        if streak <= -3:
+            momentum = f"波段轉賣（連賣 {abs(streak)} 日）"
+        else:
+            momentum = "短線獲利調節"
+        momentum_level = "bear"
+    else:
+        if streak >= 3:
+            momentum = f"連買 {streak} 日"
+            momentum_level = "bull"
+        elif streak <= -3:
+            momentum = f"連賣 {abs(streak)} 日"
+            momentum_level = "bear"
+        elif d5 > 0:
+            momentum = "近 5 日偏多小買"
+            momentum_level = "bull"
+        elif d5 < 0:
+            momentum = "近 5 日偏空小賣"
+            momentum_level = "bear"
+        else:
+            momentum = "短線觀望"
+            momentum_level = "info"
 
     return {
         "tier_label": tier_label,
