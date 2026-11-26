@@ -47,7 +47,7 @@ FOREIGN_BROKER_KEYWORDS = (
     "巴克萊",
 )
 
-# 100% 純籌碼策略參數集中管理（趨勢 60% ＋ 動能 40%）
+# 100% 純籌碼策略參數集中管理（趨勢 60% ＋ 動能 40%，已移除投信重複計分）
 STRATEGY_PARAMS = {
     # 多空分數預設門檻（後續可依純籌碼回測數據調整）
     "bull_score_min": 55,
@@ -117,7 +117,7 @@ STRATEGY_PARAMS = {
     "winner_min_avg_ret": 3.0,
 }
 
-# 純籌碼結構 5 大狀態判讀矩陣（100% 撇除技術面均線與漲跌）
+# 純籌碼結構 5 大狀態判讀矩陣（100% 撇除技術面均線與漲跌；投信改為獨立觀察不重複計分）
 SCENARIO_MATRIX = [
     {
         "id": 1,
@@ -125,7 +125,7 @@ SCENARIO_MATRIX = [
         "name": "🔥 1. 波段趨勢強多共振",
         "main_cond": "全體波段分點 20/60 日合力明確偏多，累計庫存站上 20 日庫存均線",
         "conc_cond": "10/20 日中線集中度與 5 日集中度同向偏多 ＋ 主力廣度 ≥ 65%（大戶／外資齊心）",
-        "aux_cond": "投信 20 日偏多、融資清洗或點火、多頭借券回補或集保大戶增持；純籌碼分數 ≥ 70",
+        "aux_cond": "融資清洗或點火、多頭借券回補或集保大戶增持；純籌碼分數 ≥ 70",
         "action": "趨勢面與動能面高度共振，屬籌碼最紮實的主升鎖碼格局。",
     },
     {
@@ -134,7 +134,7 @@ SCENARIO_MATRIX = [
         "name": "📈 2. 偏多吸籌／沉澱區",
         "main_cond": "全體波段分點合力轉正或庫存穩步墊高，大戶籌碼逐步由空翻多",
         "conc_cond": "中線集中度溫和偏正或止跌收斂，主力廣度未跌破 40%（無少數硬撐跡象）",
-        "aux_cond": "常見融資清洗或投信／大戶緩步承接；純籌碼分數 55 ～ 69",
+        "aux_cond": "常見融資清洗或集保大戶緩步承接；純籌碼分數 55 ～ 69",
         "action": "大資金已開始偏向集中且尚未過熱，持續追蹤集中度與外資廣度是否擴大。",
     },
     {
@@ -161,7 +161,7 @@ SCENARIO_MATRIX = [
         "name": "🟢 5. 波段全面發散（大戶撤退）",
         "main_cond": "全體波段分點 20/60 日合力持續倒貨，累計庫存跌破 20 日庫存均線向下",
         "conc_cond": "10/20 日與 5 日集中度轉負 ＋ 主力廣度 ≤ 35%（大戶／外資集體撤退）",
-        "aux_cond": "投信連賣、散戶融資過熱或空方加壓（空頭背景借券回補不加分）；純籌碼分數 ≤ 35",
+        "aux_cond": "散戶融資過熱、借券加壓或集保大戶流出（空頭背景借券回補不加分）；純籌碼分數 ≤ 35",
         "action": "趨勢與動能同步偏空發散，大資金持續撤離且流向散戶，籌碼結構明顯不利多方。",
     },
 ]
@@ -545,7 +545,7 @@ def compute_broker_breadth(
 
 
 def evaluate_trust_phase(trust_info: dict) -> dict:
-    """判定投信水位階段與短線動向"""
+    """判定投信水位階段與短線動向（供獨立追蹤列視覺呈現，不重複計入籌碼總分）"""
     if not isinstance(trust_info, dict):
         return {"tier_label": "", "tier_level": "info", "momentum": "", "momentum_level": "info"}
 
@@ -681,17 +681,18 @@ def evaluate_chip_scenario(
     wave_agg_info: dict | None = None,
 ) -> dict:
     """
-    100% 純籌碼「趨勢 (60%) ＋ 動能 (40%)」雙層健康評分引擎（基準 50 分，總分 0～100）：
+    100% 純籌碼「趨勢 (60%) ＋ 動能 (40%)」雙層健康評分引擎（方案 A｜基準 50 分，總分 0～100）：
+    註：投信下單已涵蓋於本土券商分點與全市場集中度中，為避免重複計權，投信不納入總分，僅於獨立追蹤列呈現。
     一、中線趨勢面 (±30 分，佔 60%)：
-        1. 全體波段分點合力趨勢 (±14)：20日控盤率/Z-Score (±8) ＋ 累計庫存相對20日均線與60日斜率 (±6)
-        2. 中線集中度 10/20日 (±8)：20日集中度 (±5) ＋ 10日集中度 (±3)
-        3. 中長線法人與大戶 (±8)：投信 20日動向與持股水位 (±4) ＋ TDCC 集保大戶週變化 (±4)
+        1. 全體波段分點合力趨勢 (±16)：20日控盤率/Z-Score (±10) ＋ 累計庫存相對20日均線 (±3) ＋ 60日斜率 (±3)
+        2. 中線集中度 10/20日 (±10)：20日集中度 (±6) ＋ 10日集中度 (±4)
+        3. TDCC 集保大戶週變化 (±4)：歸戶千張/400張大戶與總股東數驗證
     二、短線動能面 (±20 分，佔 40%)：
         4. 短線集中度與廣度 (±10)：5日集中度 (±4) ＋ 主力分點廣度比含外資共識 (±6)
         5. 信用交易與情境借券 (±10)：融資四象限 (±5) ＋ 情境修正借券賣出 (±5，空頭背景回補改判 0 分)
     三、當日隔日沖灌水濾網（偏多時單向扣分 0 ～ -10 分）
     """
-    _ = (latest_close, broker_diff_info, vol_5d, top3_5d_amount_ntd, top3_5d_float_pct)
+    _ = (latest_close, trust_info, broker_diff_info, vol_5d, top3_5d_amount_ntd, top3_5d_float_pct)
     p = STRATEGY_PARAMS
     badges = []
 
@@ -703,6 +704,7 @@ def evaluate_chip_scenario(
     # =========================================================
     # 一、中線趨勢面 (±30 分，佔 60%)
     # =========================================================
+    # 1A. 全體波段分點合力趨勢 (±16 分)
     trend_wave_score = 0
     wave_20d_net = None
     wave_20d_ctrl = None
@@ -716,28 +718,31 @@ def evaluate_chip_scenario(
         wave_above_ma20 = wave_agg_info.get("cum_above_ma20")
         wave_60d_net = int(wave_agg_info.get("net_60d", 0) or 0)
 
+        # 20 日控盤率 / Z-Score (±10 分)
         if wave_20d_ctrl >= p["wave_agg_20d_strong_pct"] or (
             wave_20d_ctrl >= p["wave_agg_20d_mod_pct"] and wave_20d_z is not None and wave_20d_z >= p["z_bull_min"]
         ):
-            trend_wave_score += 8
+            trend_wave_score += 10
         elif wave_20d_ctrl >= p["wave_agg_20d_mod_pct"]:
-            trend_wave_score += 5
+            trend_wave_score += 6
         elif wave_20d_ctrl >= p["wave_agg_20d_mild_pct"]:
             trend_wave_score += 2
         elif wave_20d_ctrl <= -p["wave_agg_20d_strong_pct"] or (
             wave_20d_ctrl <= -p["wave_agg_20d_mod_pct"] and wave_20d_z is not None and wave_20d_z <= p["z_bear_max"]
         ):
-            trend_wave_score -= 8
+            trend_wave_score -= 10
         elif wave_20d_ctrl <= -p["wave_agg_20d_mod_pct"]:
-            trend_wave_score -= 5
+            trend_wave_score -= 6
         elif wave_20d_ctrl <= -p["wave_agg_20d_mild_pct"]:
             trend_wave_score -= 2
 
+        # 累計庫存相對 20 日均線 (±3 分)
         if wave_above_ma20 is True:
             trend_wave_score += 3
         elif wave_above_ma20 is False:
             trend_wave_score -= 3
 
+        # 60 日長線合力斜率 (±3 分)
         if wave_60d_net > 0 and wave_60d_ctrl >= p["wave_agg_60d_mod_pct"]:
             trend_wave_score += 3
         elif wave_60d_net > 0:
@@ -747,13 +752,13 @@ def evaluate_chip_scenario(
         elif wave_60d_net < 0:
             trend_wave_score -= 1
 
-        if trend_wave_score >= 10:
+        if trend_wave_score >= 11:
             badges.append({
                 "label": f"🌊 波段合力強多 (20日 {wave_20d_ctrl:+.1f}%)",
                 "level": "bull",
                 "detail": f"全體波段分點近 20 日合計 {wave_20d_net:+,} 張（控盤 {wave_20d_ctrl:+.1f}%），累計庫存站穩 20 日均線上方。",
             })
-        elif trend_wave_score <= -10:
+        elif trend_wave_score <= -11:
             badges.append({
                 "label": f"🌊 波段合力急撤 (20日 {wave_20d_ctrl:+.1f}%)",
                 "level": "bear",
@@ -761,41 +766,41 @@ def evaluate_chip_scenario(
             })
     else:
         if top3_5d > 0 and top3_5d_ctrl_pct >= p["top3_ctrl_strong_pct"]:
-            trend_wave_score = 10
+            trend_wave_score = 12
         elif top3_5d > 0 and top3_5d_ctrl_pct >= p["top3_ctrl_mod_pct"]:
-            trend_wave_score = 5
+            trend_wave_score = 6
         elif top3_5d < 0 and top3_5d_ctrl_pct <= -p["top3_ctrl_strong_pct"]:
-            trend_wave_score = -10
+            trend_wave_score = -12
         elif top3_5d < 0 and top3_5d_ctrl_pct <= -p["top3_ctrl_mod_pct"]:
-            trend_wave_score = -5
+            trend_wave_score = -6
 
-    trend_wave_score = max(-14, min(14, trend_wave_score))
+    trend_wave_score = max(-16, min(16, trend_wave_score))
 
-    # 1B. 中線集中度 10日／20日 (±8 分)
+    # 1B. 中線集中度 10日／20日 (±10 分：20日 ±6 ＋ 10日 ±4)
     trend_conc_score = 0
     if c20 is not None:
         if c20 >= p["conc_20d_strong_pct"]:
-            trend_conc_score += 5
+            trend_conc_score += 6
         elif c20 >= p["conc_20d_mod_pct"]:
-            trend_conc_score += 3
+            trend_conc_score += 4
         elif c20 > 0:
             trend_conc_score += 1
         elif c20 <= -p["conc_20d_strong_pct"]:
-            trend_conc_score -= 5
+            trend_conc_score -= 6
         elif c20 <= -p["conc_20d_mod_pct"]:
-            trend_conc_score -= 3
+            trend_conc_score -= 4
         elif c20 < 0:
             trend_conc_score -= 1
 
     if c10 is not None:
         if c10 >= p["conc_10d_strong_pct"]:
-            trend_conc_score += 3
+            trend_conc_score += 4
         elif c10 >= p["conc_10d_mod_pct"]:
             trend_conc_score += 2
         elif c10 > 0:
             trend_conc_score += 1
         elif c10 <= -p["conc_10d_strong_pct"]:
-            trend_conc_score -= 3
+            trend_conc_score -= 4
         elif c10 <= -p["conc_10d_mod_pct"]:
             trend_conc_score -= 2
         elif c10 < 0:
@@ -815,61 +820,9 @@ def evaluate_chip_scenario(
                 "detail": f"全市場 5/10/20 日集中度同步為負（{c5:+.1f}% / {c10:+.1f}% / {c20:+.1f}%）。",
             })
 
-    trend_conc_score = max(-8, min(8, trend_conc_score))
+    trend_conc_score = max(-10, min(10, trend_conc_score))
 
-    # 1C. 中長線法人與大戶：投信 20 日趨勢 (±4) ＋ TDCC 集保大戶 (±4)
-    trust_score = 0
-    if isinstance(trust_info, dict):
-        t_streak = int(trust_info.get("streak", 0) or 0)
-        t_d5 = int(trust_info.get("d5", 0) or 0)
-        t_d20 = int(trust_info.get("d20", t_d5) or 0)
-        t_hold = trust_info.get("holding_pct")
-
-        if t_d20 > 0 and (t_streak >= 3 or t_d5 > 0):
-            trust_score += 3
-            if t_hold is not None and 0.5 <= t_hold <= 5.0:
-                trust_score += 1
-                badges.append({
-                    "label": f"🎯 投信初升認養 (持股{t_hold:.1f}%)",
-                    "level": "bull",
-                    "detail": f"投信近 20 日淨買超 {t_d20:+,} 張且持股比率處於 0.5%～5% 甜蜜認養區間。",
-                })
-            elif t_hold is not None and t_hold >= 10.0:
-                badges.append({
-                    "label": f"⚠️ 投信高水位偏買 (持股{t_hold:.1f}%)",
-                    "level": "warn",
-                    "detail": f"投信持股比率已達 {t_hold:.1f}%，須留意波段結帳風險。",
-                })
-            elif t_streak >= 3:
-                trust_score += 1
-                badges.append({
-                    "label": f"🏦 投信連買 {t_streak} 日",
-                    "level": "bull",
-                    "detail": f"投信近 20 日淨買超 {t_d20:+,} 張（近 5 日 {t_d5:+,} 張）。",
-                })
-        elif t_d20 > 0:
-            trust_score += 2
-        elif t_d20 < 0 and (t_streak <= -3 or t_d5 < 0):
-            trust_score -= 3
-            if t_hold is not None and t_hold >= 10.0:
-                trust_score -= 1
-                badges.append({
-                    "label": f"🏦 投信高檔結帳 (持股{t_hold:.1f}%)",
-                    "level": "bear",
-                    "detail": f"投信持股比率達 {t_hold:.1f}% 且近 20 日賣超 {t_d20:+,} 張，高水位結帳賣壓明顯。",
-                })
-            elif t_streak <= -3:
-                trust_score -= 1
-                badges.append({
-                    "label": f"🏦 投信連賣 {abs(t_streak)} 日",
-                    "level": "bear",
-                    "detail": f"投信近 20 日淨賣超 {t_d20:+,} 張（近 5 日 {t_d5:+,} 張）。",
-                })
-        elif t_d20 < 0:
-            trust_score -= 2
-
-    trust_score = max(-4, min(4, trust_score))
-
+    # 1C. TDCC 集保大戶週變化 (±4 分)
     tdcc_score = 0
     if isinstance(tdcc_info, dict):
         w1000_chg = tdcc_info.get("whale_1000_chg_1w")
@@ -911,8 +864,7 @@ def evaluate_chip_scenario(
                 tdcc_score = -1
 
     tdcc_score = max(-4, min(4, tdcc_score))
-    trend_inst_score = max(-8, min(8, trust_score + tdcc_score))
-    trend_score = max(-30, min(30, trend_wave_score + trend_conc_score + trend_inst_score))
+    trend_score = max(-30, min(30, trend_wave_score + trend_conc_score + tdcc_score))
 
     # =========================================================
     # 二、短線動能面 (±20 分，佔 40%)
@@ -1221,14 +1173,15 @@ def evaluate_chip_scenario(
             "trend_total": trend_score,
             "trend_wave": trend_wave_score,
             "trend_conc": trend_conc_score,
-            "trend_inst": trend_inst_score,
+            "trend_tdcc": tdcc_score,
+            "trend_inst": tdcc_score,
             "momentum_total": momentum_score,
             "mom_conc_breadth": mom_conc_breadth_score,
             "mom_credit_sbl": mom_credit_sbl_score,
             "day_trade": dt_score,
             "conc_breadth": mom_conc_breadth_score,
             "conc_diff": mom_conc_breadth_score,
-            "wave_trust": trend_wave_score + trust_score,
+            "wave_trust": trend_wave_score,
             "credit_sbl": mom_credit_sbl_score,
             "tdcc": tdcc_score,
         },
