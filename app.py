@@ -593,7 +593,7 @@ def _render_swing_summary_html(sim_res: dict) -> str:
     if not sim_res or not sim_res.get("valid"):
         return (
             '<div class="bt-panel">'
-            '  <div class="bt-note">目前有效評分交易日樣本不足（需滿 20 日暖身期），尚無法進行純籌碼波段模擬回測。</div>'
+            '  <div class="bt-note">目前有效評分交易日樣本不足（需滿 20 日暖身期），尚無法進行籌碼波段模擬回測。</div>'
             '</div>'
         )
 
@@ -663,7 +663,7 @@ def _render_swing_summary_html(sim_res: dict) -> str:
                 f'</tr>'
             )
         compare_block_html = (
-            f'<div class="bt-sub-title">🎯 純籌碼門檻敏感度對照（多空雙向｜尋找最佳多空判斷分數）</div>'
+            f'<div class="bt-sub-title">🎯 籌碼門檻敏感度對照（多空雙向｜尋找最佳多空判斷分數）</div>'
             f'<table class="bt-table">'
             f'  <thead><tr><th>門檻組合（做多進/出 ｜ 放空進/出）</th><th>交易次數</th><th>勝率</th><th>賺賠比</th><th>單筆均報</th><th>平均持有</th><th>累積淨報酬</th><th>最大回撤 (MDD)</th></tr></thead>'
             f'  <tbody>{"".join(cmp_rows)}</tbody>'
@@ -671,16 +671,16 @@ def _render_swing_summary_html(sim_res: dict) -> str:
         )
 
     rules_note = (
-        f"規則說明（100% 純籌碼，不含均線與停損）：當日盤後算出純籌碼分數 → <b>次日開盤價</b>執行進出，每筆來回扣除 <b>{sim_res['cost_pct']:.2f}%</b> 摩擦成本。"
+        f"規則說明（100% 籌碼，不含均線與停損）：當日盤後算出籌碼分數 → <b>次日開盤價</b>執行進出，每筆來回扣除 <b>{sim_res['cost_pct']:.2f}%</b> 摩擦成本。"
         f"目前設定：做多 ≥ {l_in} 分進場、&lt; {l_out} 分出場（或直接翻空）；放空 ≤ {s_in} 分進場、&gt; {s_out} 分回補（或直接翻多）。"
         "「賺賠比」＝平均獲利交易報酬 ÷ 平均虧損交易幅度（≥ 1.5 代表大賺小賠）。"
     )
 
     return (
         f'<div class="bt-panel">'
-        f'  <div class="bt-verdict">🎯 <b>純籌碼波段總結（{sim_res["start_date"]} ~ {sim_res["end_date"]}｜共 {sim_res["total_days"]} 交易日）：</b>{sim_res["summary_text"]}</div>'
+        f'  <div class="bt-verdict">🎯 <b>籌碼波段總結（{sim_res["start_date"]} ~ {sim_res["end_date"]}｜共 {sim_res["total_days"]} 交易日）：</b>{sim_res["summary_text"]}</div>'
         f'  <div class="bt-signal-strip">'
-        f'    <span>🧭 <b>純籌碼多空雙向目前狀態／次日預告：</b>{main_s["next_signal"]}</span>'
+        f'    <span>🧭 <b>籌碼多空雙向目前狀態／次日預告：</b>{main_s["next_signal"]}</span>'
         f'    <span style="font-size:0.76rem; color:#94a3b8;">已含單筆來回摩擦成本 {sim_res["cost_pct"]:.2f}%</span>'
         f'  </div>'
         f'  <table class="bt-table bt-table-main">'
@@ -836,7 +836,7 @@ def _split_price_by_health(
     return y_bull, y_neutral, y_bear, bands, regimes
 
 
-st.markdown("### 📈 台股純籌碼集中／發散追蹤系統")
+st.markdown("### 📈 台股籌碼追蹤")
 
 tw_now = datetime.now(TW_TZ)
 tw_today = tw_now.strftime("%Y-%m-%d")
@@ -854,9 +854,9 @@ if "subchart_mode" not in st.session_state:
 
 # --- 側邊欄：新增個股、統計區間與已存個股管理 ---
 with st.sidebar:
-    st.header("🔍 新增個股建檔")
-    input_stock = st.text_input("輸入新台股代號（例如：2330、3231）", value="", placeholder="輸入 4 碼上市櫃代號").strip()
-    btn_add = st.button("➕ 新增並建檔 (2026/01/02起)", type="primary", width="stretch")
+    st.header("🔍 新增個股")
+    input_stock = st.text_input("輸入台股代號", value="", placeholder="輸入 4 碼上市櫃代號").strip()
+    btn_add = st.button("➕ 新增 (2026/01/02起)", type="primary", width="stretch")
 
     st.divider()
     st.subheader("📅 統計區間")
@@ -880,8 +880,8 @@ with st.sidebar:
     if saved_list:
         st.markdown(
             '<div class="sidebar-help-box">'
-            '全部更新：近 3 日增量更新所有個股、融資借券與集保，並單次打包同步 GitHub<br>'
-            '個股更新：全年度重抓校準（真實 VWAP、投信持股比、近 60 日新主力與歷史集中度）'
+            '全部更新：近 3 日增量更新所有個股<br>'
+            '個股更新：全年度重抓校準'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -1202,7 +1202,7 @@ if target_stock:
 
     st.markdown(
         f'<div style="display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; gap:8px;">'
-        f'  <h4 style="margin:0;">🎯 {stock_title} 純籌碼診斷結論（{period_label}｜追蹤 {broker_count} 分點）</h4>'
+        f'  <h4 style="margin:0;">🎯 {stock_title} 籌碼診斷（{period_label}｜追蹤 {broker_count} 分點）</h4>'
         f'  <span style="font-size:0.84rem; color:#94a3b8;">{time_badge}</span>'
         f'</div>',
         unsafe_allow_html=True,
@@ -1224,7 +1224,7 @@ if target_stock:
                 st.rerun()
 
     # =====================================================================
-    # 區塊一：核心決策總結看板（100% 純籌碼｜趨勢 60% ＋ 動能 40%）
+    # 區塊一：核心決策總結看板（100% 籌碼｜趨勢 60% ＋ 動能 40%）
     # =====================================================================
     bull_min = int(STRATEGY_PARAMS.get("bull_score_min", 55))
     strong_bull_min = int(STRATEGY_PARAMS.get("strong_bull_score_min", 70))
@@ -1233,7 +1233,7 @@ if target_stock:
     short_exit_default = int(STRATEGY_PARAMS.get("short_exit_score", 50))
 
     score_tip_html = (
-        f"<b>100% 純籌碼健康分數（0～100 分｜趨勢 60% ＋ 動能 40%｜不含技術面）</b><br>"
+        f"<b>100% 籌碼健康分數（0～100 分｜趨勢 60% ＋ 動能 40%｜不含技術面）</b><br>"
         "以 <b>50 分</b>為多空中性基準，分兩層累計加減（最高 ±50 分）：<br>"
         "• <b>一、中線趨勢面 (±30 分，佔 60%)：</b><br>"
         "&nbsp;&nbsp;◦ 全體波段分點合力 20/60 日控盤與庫存均線 (±14)<br>"
@@ -1244,7 +1244,7 @@ if target_stock:
         "&nbsp;&nbsp;◦ 融資四象限 (±5) ＋ 情境借券賣出 (±5；空頭背景回補不加分)<br>"
         "• <b>三、當日隔日沖灌水濾網（偏多時單向扣分）：</b>0 ～ -10 分<br>"
         '<table class="tip-mini-tbl">'
-        '  <thead><tr><th>分數區間</th><th>燈號狀態</th><th>純籌碼含義</th></tr></thead>'
+        '  <thead><tr><th>分數區間</th><th>燈號狀態</th><th>籌碼含義</th></tr></thead>'
         '  <tbody>'
         f'    <tr><td style="white-space:nowrap;"><b>{strong_bull_min} ～ 100 分</b></td><td style="color:#ef5350; font-weight:700; white-space:nowrap;">強力共振（紅）</td><td>波段趨勢與短線動能高度共振，屬籌碼最紮實的主升鎖碼格局。</td></tr>'
         f'    <tr><td style="white-space:nowrap;"><b>{bull_min} ～ {strong_bull_min - 1} 分</b></td><td style="color:#fb7185; font-weight:700; white-space:nowrap;">偏多吸籌（紅）</td><td>大資金已開始偏向集中且尚未過熱，持續觀察廣度與集中度變化。</td></tr>'
@@ -1263,7 +1263,7 @@ if target_stock:
         st.markdown(
             f'<div class="hero-panel hero-neutral">'
             f'  <div class="hero-score-box">'
-            f'    <div class="hero-score-label"><span>純籌碼健康分數</span><span class="tip-wrap tip-down">ⓘ<span class="tip-box tip-box-wide">{score_tip_html}</span></span></div>'
+            f'    <div class="hero-score-label"><span>籌碼健康分數</span><span class="tip-wrap tip-down">ⓘ<span class="tip-box tip-box-wide">{score_tip_html}</span></span></div>'
             f'    <div class="score-val" style="color:#64748b;">— <span style="font-size:0.88rem; font-weight:500; color:#64748b;">/ 100</span></div>'
             f'    <div class="score-bar-bg"><div class="score-bar-fill" style="width:0%; background:#64748b;"></div></div>'
             f'    <div class="hero-score-sub" style="color:#fbbf24;">⏳ 盤後籌碼尚未公布</div>'
@@ -1355,7 +1355,7 @@ if target_stock:
         st.markdown(
             f'<div class="hero-panel {hero_cls}">'
             f'  <div class="hero-score-box">'
-            f'    <div class="hero-score-label"><span>純籌碼健康分數</span><span class="tip-wrap tip-down">ⓘ<span class="tip-box tip-box-wide">{score_tip_html}</span></span></div>'
+            f'    <div class="hero-score-label"><span>籌碼健康分數</span><span class="tip-wrap tip-down">ⓘ<span class="tip-box tip-box-wide">{score_tip_html}</span></span></div>'
             f'    <div class="score-val" style="color:{score_col};">{conv_score} <span style="font-size:0.88rem; font-weight:500; color:#94a3b8;">/ 100</span></div>'
             f'    <div class="score-bar-bg"><div class="score-bar-fill" style="width:{conv_score}%; background:{score_col};"></div></div>'
             f'    <div class="hero-score-sub" style="color:{score_col};">{score_lbl}</div>'
@@ -1376,7 +1376,7 @@ if target_stock:
             strip_cls = "div-strip-bull" if alert_type == "bull" else ("div-strip-warn" if alert_type == "warn" else "div-strip-bear")
             raw_desc_lines = str(div_alert.get("desc", "")).split("<br>")
             compact_desc = raw_desc_lines[0] if raw_desc_lines else ""
-            full_tip_desc = str(div_alert.get("desc", "")) + "<br><span style='color:#94a3b8;'>（此項僅作價量對照參考，不參與純籌碼健康評分）</span>"
+            full_tip_desc = str(div_alert.get("desc", "")) + "<br><span style='color:#94a3b8;'>（此項僅作價量對照參考，不參與籌碼健康評分）</span>"
             st.markdown(
                 f'<div class="div-strip {strip_cls}">'
                 f'  <div><b>{div_alert["title"]}</b><span class="tip-wrap tip-down" style="margin:0 6px 0 4px;">ⓘ 詳情<span class="tip-box tip-box-wide">{full_tip_desc}</span></span>｜ {compact_desc}</div>'
@@ -1489,9 +1489,9 @@ if target_stock:
             unsafe_allow_html=True,
         )
 
-        # --- 純籌碼結構 5 大狀態判讀矩陣 ---
+        # --- 籌碼結構 5 大狀態判讀矩陣 ---
         matched_id = scenario.get("id", 0)
-        with st.expander("📖 純籌碼結構 5 大狀態判讀矩陣（100% 純籌碼｜趨勢 60% ＋ 動能 40%）", expanded=False):
+        with st.expander("📖 籌碼結構 5 大狀態判讀矩陣（100% 籌碼｜趨勢 60% ＋ 動能 40%）", expanded=False):
             m_rows = []
             for item in SCENARIO_MATRIX:
                 is_match = (item["id"] == matched_id)
@@ -1511,7 +1511,7 @@ if target_stock:
                     f'  <td style="width:25%;">{item.get("action", "")}</td>'
                     f'</tr>'
                 )
-            st.markdown(f'<table class="matrix-table"><thead><tr><th>純籌碼結構狀態</th><th>全體波段分點合力（趨勢核心）</th><th>集中度與主力廣度</th><th>輔助籌碼與分數檢核</th><th>籌碼解讀與觀察重點</th></tr></thead><tbody>{"".join(m_rows)}</tbody></table>', unsafe_allow_html=True)
+            st.markdown(f'<table class="matrix-table"><thead><tr><th>籌碼結構狀態</th><th>全體波段分點合力（趨勢核心）</th><th>集中度與主力廣度</th><th>輔助籌碼與分數檢核</th><th>籌碼解讀與觀察重點</th></tr></thead><tbody>{"".join(m_rows)}</tbody></table>', unsafe_allow_html=True)
 
         # --- 前三大波段券商分點主力明細 ---
         st.write("")
@@ -1617,9 +1617,9 @@ if target_stock:
     st.divider()
 
     # =====================================================================
-    # 區塊二：股價（模式 B 純籌碼波段持倉燈號）＋ 三合一可切換副圖
+    # 區塊二：股價（模式 B 籌碼波段持倉燈號）＋ 三合一可切換副圖
     # =====================================================================
-    st.markdown(f"#### 📉 {stock_title} 股價、純籌碼波段燈號與主力 VWAP 成本線走勢")
+    st.markdown(f"#### 📉 {stock_title} 股價、籌碼波段燈號與主力 VWAP 成本線走勢")
 
     available_brokers = [c for c in df_chips_full.columns if c != "date"]
     wave_broker_names = [n for n in (analysis.get("wave_broker_names") or []) if n in available_brokers]
@@ -1680,10 +1680,10 @@ if target_stock:
 
     c_opt1, c_opt2, c_opt3 = st.columns([1.2, 2.3, 1.7])
     with c_opt1:
-        show_ma = st.checkbox("顯示 10/20MA (純參考)", value=False, help="均線僅作主圖視覺對照，已完全排除於純籌碼評分與回測之外")
+        show_ma = st.checkbox("顯示 10/20MA (純參考)", value=False, help="均線僅作主圖視覺對照，已完全排除於籌碼評分與回測之外")
     with c_opt2:
         show_health_regime = st.checkbox(
-            f"純籌碼波段燈號 (多≥{active_bull_in}/<{active_bull_out} · 空≤{active_bear_in}/>{active_bear_out})",
+            f"籌碼波段燈號 (多≥{active_bull_in}/<{active_bull_out} · 空≤{active_bear_in}/>{active_bear_out})",
             value=bool(has_health_series),
             disabled=not bool(has_health_series),
             help=f"模式 B 波段持倉燈號，與下方回測規則 100% 同步：站上 ≥{active_bull_in} 分持續亮紅至跌破 <{active_bull_out} 分；跌破 ≤{active_bear_in} 分持續亮綠至站上 >{active_bear_out} 分。",
@@ -1776,10 +1776,10 @@ if target_stock:
             )
             reg_label_map = {"bull": "🔴 波段偏多", "bear": "🟢 波段偏空", "neutral": "🟡 空手觀望"}
             price_hover_texts = [
-                f"{cl_v:,.2f} 元 ｜ 純籌碼 {int(round(sc_v))} 分（{reg_label_map.get(reg_v, '')}）" if pd.notna(sc_v) else f"{cl_v:,.2f} 元"
+                f"{cl_v:,.2f} 元 ｜ 籌碼 {int(round(sc_v))} 分（{reg_label_map.get(reg_v, '')}）" if pd.notna(sc_v) else f"{cl_v:,.2f} 元"
                 for cl_v, sc_v, reg_v in zip(df_plot["close"], df_plot["health_score"], regime_list)
             ]
-            fig.add_trace(go.Scatter(x=df_plot["date"], y=df_plot["close"], name="收盤價懸浮", legend="legend", line=dict(color="#FFD700", width=2.4), opacity=0.0, showlegend=False, text=price_hover_texts, hovertemplate="%{text}<extra>收盤／純籌碼</extra>"), row=1, col=1, secondary_y=False)
+            fig.add_trace(go.Scatter(x=df_plot["date"], y=df_plot["close"], name="收盤價懸浮", legend="legend", line=dict(color="#FFD700", width=2.4), opacity=0.0, showlegend=False, text=price_hover_texts, hovertemplate="%{text}<extra>收盤／籌碼</extra>"), row=1, col=1, secondary_y=False)
             fig.add_trace(go.Scatter(x=df_plot["date"], y=y_neutral, name="收盤價 (空手/中性)", legend="legend", line=dict(color="#FFD700", width=2.5), connectgaps=False, showlegend=True, hoverinfo="skip"), row=1, col=1, secondary_y=False)
             fig.add_trace(go.Scatter(x=df_plot["date"], y=y_bull, name=f"波段偏多 (≥{active_bull_in}/<{active_bull_out})", legend="legend", line=dict(color="#ef5350", width=3.1), connectgaps=False, hoverinfo="skip"), row=1, col=1, secondary_y=False)
             fig.add_trace(go.Scatter(x=df_plot["date"], y=y_bear, name=f"波段偏空 (≤{active_bear_in}/>{active_bear_out})", legend="legend", line=dict(color="#26a69a", width=3.1), connectgaps=False, hoverinfo="skip"), row=1, col=1, secondary_y=False)
@@ -1788,7 +1788,7 @@ if target_stock:
                 fig.add_vrect(x0=b_start - 0.5, x1=b_end + 0.5, fillcolor=band_color, line_width=0, layer="below", row=1, col=1)
         else:
             price_hover_texts = [
-                f"{cl_v:,.2f} 元 ｜ 純籌碼 {int(round(sc_v))} 分（{st_v}）" if pd.notna(sc_v) else f"{cl_v:,.2f} 元"
+                f"{cl_v:,.2f} 元 ｜ 籌碼 {int(round(sc_v))} 分（{st_v}）" if pd.notna(sc_v) else f"{cl_v:,.2f} 元"
                 for cl_v, sc_v, st_v in zip(df_plot["close"], df_plot["health_score"], df_plot["sub_type"].fillna(""))
             ]
             fig.add_trace(go.Scatter(x=df_plot["date"], y=df_plot["close"], name="收盤價 (元)", legend="legend", line=dict(color="#FFD700", width=2.6), text=price_hover_texts, hovertemplate="%{text}<extra>收盤價</extra>"), row=1, col=1, secondary_y=False)
@@ -1802,7 +1802,7 @@ if target_stock:
             fig.add_hrect(y0=active_bull_in, y1=100, fillcolor="rgba(239, 83, 80, 0.08)", line_width=0, layer="below", row=2, col=1)
             fig.add_hrect(y0=0, y1=active_bear_in, fillcolor="rgba(38, 166, 154, 0.08)", line_width=0, layer="below", row=2, col=1)
             fig.add_trace(
-                go.Scatter(x=df_plot["date"], y=df_plot["health_score"], name="純籌碼健康分數", legend="legend2", line=dict(color="#38bdf8", width=2.5), connectgaps=False, hovertemplate="%{y:.0f} 分<extra>純籌碼分數</extra>"),
+                go.Scatter(x=df_plot["date"], y=df_plot["health_score"], name="籌碼健康分數", legend="legend2", line=dict(color="#38bdf8", width=2.5), connectgaps=False, hovertemplate="%{y:.0f} 分<extra>籌碼分數</extra>"),
                 row=2, col=1, secondary_y=False,
             )
             threshold_lines = [
@@ -1816,7 +1816,7 @@ if target_stock:
                     go.Scatter(x=df_plot["date"], y=[th_val] * n_rows, name=th_name, legend="legend2", line=dict(color=th_col, width=1.35, dash=th_dash), hoverinfo="skip"),
                     row=2, col=1, secondary_y=False,
                 )
-            fig.update_yaxes(title_text="純籌碼分數", range=[0, 102], dtick=20, row=2, col=1, secondary_y=False, showgrid=True)
+            fig.update_yaxes(title_text="籌碼分數", range=[0, 102], dtick=20, row=2, col=1, secondary_y=False, showgrid=True)
             fig.update_yaxes(row=2, col=1, secondary_y=True, visible=False)
 
         elif active_sub == "credit" and has_aux_series:
@@ -1890,13 +1890,13 @@ if target_stock:
                 st.rerun()
 
     # =====================================================================
-    # 區塊三：100% 純籌碼波段進出模擬回測與門檻敏感度對照
+    # 區塊三：100% 籌碼波段進出模擬回測與門檻敏感度對照
     # =====================================================================
     if has_health_series:
         st.divider()
         col_bt_title, col_bt_toggle = st.columns([4.2, 1.15], vertical_alignment="bottom")
         with col_bt_title:
-            st.markdown(f"#### 🧪 {stock_title} 純籌碼波段進出模擬回測（次日開盤進出｜100% 不含技術面）")
+            st.markdown(f"#### 🧪 {stock_title} 籌碼波段進出模擬回測（次日開盤進出｜100% 不含技術面）")
         with col_bt_toggle:
             toggle_lbl = "🔼 收合績效總表" if st.session_state["show_bt_summary"] else "🔽 展開績效總表"
             if st.button(toggle_lbl, key="btn_toggle_bt_summary", width="stretch"):
@@ -1930,7 +1930,7 @@ if target_stock:
 
         if sim_res.get("valid"):
             strats = sim_res["strategies"]
-            with st.expander("📋 查看純籌碼逐筆波段進出明細（含進出場日、次日開盤價、觸發分數與出場原因）", expanded=False):
+            with st.expander("📋 查看籌碼逐筆波段進出明細（含進出場日、次日開盤價、觸發分數與出場原因）", expanded=False):
                 strat_options = sim_res["strategy_order"]
                 sel_strat_key = st.radio(
                     "選擇檢視策略明細",
