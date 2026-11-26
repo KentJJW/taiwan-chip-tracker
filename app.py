@@ -1579,6 +1579,8 @@ if "active_stock" not in st.session_state:
     st.session_state["active_stock"] = saved_list[0] if saved_list else "6488"
 if "sort_mode" not in st.session_state:
     st.session_state["sort_mode"] = False
+if "show_bt_summary" not in st.session_state:
+    st.session_state["show_bt_summary"] = True
 
 # --- 側邊欄：新增個股、統計區間與已存個股管理 ---
 with st.sidebar:
@@ -2503,9 +2505,9 @@ if target_stock:
     )
     has_health_series = (not df_health.empty) and df_health["health_score"].notna().any()
 
-    # 同步讀取下方回測區自訂的多空門檻，讓主圖燈號即時反映目前測試的純籌碼門檻
-    active_bull_min = int(st.session_state.get("bt_long_entry", bull_min))
-    active_bear_max = int(st.session_state.get("bt_short_entry", bear_max))
+    # 同步讀取下方回測區自訂的多空門檻（預設 55 / 35）
+    active_bull_min = int(st.session_state.get("bt_long_entry_std", bull_min))
+    active_bear_max = int(st.session_state.get("bt_short_entry_std", bear_max))
 
     c_opt1, c_opt2, c_opt3, c_opt4 = st.columns([1.3, 1.45, 1.35, 1.7])
     with c_opt1:
@@ -2863,7 +2865,14 @@ if target_stock:
     # =====================================================================
     if has_health_series:
         st.divider()
-        st.markdown(f"#### 🧪 {stock_title} 純籌碼波段進出模擬回測（次日開盤進出｜100% 不含技術面）")
+        col_bt_title, col_bt_toggle = st.columns([4.2, 1.15], vertical_alignment="bottom")
+        with col_bt_title:
+            st.markdown(f"#### 🧪 {stock_title} 純籌碼波段進出模擬回測（次日開盤進出｜100% 不含技術面）")
+        with col_bt_toggle:
+            toggle_lbl = "🔼 收合績效總表" if st.session_state["show_bt_summary"] else "🔽 展開績效總表"
+            if st.button(toggle_lbl, key="btn_toggle_bt_summary", width="stretch"):
+                st.session_state["show_bt_summary"] = not st.session_state["show_bt_summary"]
+                st.rerun()
 
         p_col1, p_col2, p_col3, p_col4, p_col5 = st.columns(5)
         with p_col1:
@@ -2873,7 +2882,7 @@ if target_stock:
                 max_value=85,
                 value=bull_min,
                 step=5,
-                key="bt_long_entry",
+                key="bt_long_entry_std",
             )
         with p_col2:
             bt_long_out = st.number_input(
@@ -2882,7 +2891,7 @@ if target_stock:
                 max_value=70,
                 value=long_exit_default,
                 step=5,
-                key="bt_long_exit",
+                key="bt_long_exit_std",
             )
         with p_col3:
             bt_short_in = st.number_input(
@@ -2891,7 +2900,7 @@ if target_stock:
                 max_value=50,
                 value=bear_max,
                 step=5,
-                key="bt_short_entry",
+                key="bt_short_entry_std",
             )
         with p_col4:
             bt_short_out = st.number_input(
@@ -2900,7 +2909,7 @@ if target_stock:
                 max_value=75,
                 value=short_exit_default,
                 step=5,
-                key="bt_short_exit",
+                key="bt_short_exit_std",
             )
         with p_col5:
             round_trip_cost = st.number_input(
@@ -2924,69 +2933,11 @@ if target_stock:
             round_trip_cost_pct=float(round_trip_cost),
         )
 
-        st.markdown(_render_swing_summary_html(sim_res), unsafe_allow_html=True)
+        if st.session_state["show_bt_summary"]:
+            st.markdown(_render_swing_summary_html(sim_res), unsafe_allow_html=True)
 
         if sim_res.get("valid"):
-            # --- 淨值對照曲線（Base = 100） ---
-            eq_dates = sim_res["dates"]
             strats = sim_res["strategies"]
-            bh_curve = sim_res["bh"]["equity_curve"]
-
-            fig_eq = go.Figure()
-            eq_styles = [
-                ("both_pure", "#fbbf24", 3.0, "solid"),
-                ("long_pure", "#ef5350", 1.9, "solid"),
-                ("short_pure", "#26a69a", 1.9, "solid"),
-            ]
-            for s_key, s_col, s_w, s_dash in eq_styles:
-                if s_key in strats:
-                    s_obj = strats[s_key]
-                    fig_eq.add_trace(
-                        go.Scatter(
-                            x=eq_dates,
-                            y=s_obj["equity_curve"],
-                            name=f'{s_obj["label"]} ({s_obj["total_ret_pct"]:+.1f}%)',
-                            line=dict(color=s_col, width=s_w, dash=s_dash),
-                            hovertemplate="%{y:,.1f}<extra>" + s_obj["label"] + "</extra>",
-                        )
-                    )
-
-            fig_eq.add_trace(
-                go.Scatter(
-                    x=eq_dates,
-                    y=bh_curve,
-                    name=f'📌 買進持有 B&H ({sim_res["bh"]["total_ret_pct"]:+.1f}%)',
-                    line=dict(color="rgba(56, 189, 248, 0.78)", width=1.8, dash="dot"),
-                    hovertemplate="%{y:,.1f}<extra>買進持有 B&H</extra>",
-                )
-            )
-            fig_eq.add_hline(y=100.0, line_width=1, line_dash="dot", line_color="rgba(255, 255, 255, 0.28)")
-
-            n_eq = len(eq_dates)
-            eq_step = max(1, n_eq // 10)
-            eq_tick_idx = list(range(0, n_eq, eq_step))
-            if (n_eq - 1) not in eq_tick_idx:
-                eq_tick_idx.append(n_eq - 1)
-            eq_tick_vals = [eq_dates[i] for i in eq_tick_idx]
-            eq_tick_texts = [d[5:].replace("-", "/") for d in eq_tick_vals]
-
-            fig_eq.update_xaxes(
-                type="category",
-                tickmode="array",
-                tickvals=eq_tick_vals,
-                ticktext=eq_tick_texts,
-                showgrid=False,
-            )
-            fig_eq.update_yaxes(title_text="策略淨值 (基準 = 100)", showgrid=True)
-            fig_eq.update_layout(
-                height=340,
-                template="plotly_dark",
-                hovermode="x unified",
-                legend=dict(orientation="h", yanchor="bottom", y=1.03, xanchor="left", x=0),
-                margin=dict(l=20, r=20, t=55, b=20),
-            )
-            st.plotly_chart(fig_eq, width="stretch", key=f"eq_chart_{target_stock}")
-
             # --- 逐筆進出明細表（可切換策略檢視） ---
             with st.expander("📋 查看純籌碼逐筆波段進出明細（含進出場日、次日開盤價、觸發分數與出場原因）", expanded=True):
                 strat_options = sim_res["strategy_order"]
