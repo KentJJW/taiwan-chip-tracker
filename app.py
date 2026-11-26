@@ -433,7 +433,7 @@ st.markdown("""
     color: #cbd5e1;
 }
 
-/* --- 波段進出模擬回測面板 --- */
+/* --- 純籌碼波段進出模擬回測面板 --- */
 .bt-panel {
     background-color: #161b26;
     border: 1px solid #2d364a;
@@ -441,6 +441,12 @@ st.markdown("""
     padding: 13px 16px;
     margin-top: 6px;
     margin-bottom: 10px;
+}
+.bt-sub-title {
+    font-size: 0.87rem;
+    font-weight: 700;
+    color: #f1f5f9;
+    margin: 14px 0 8px 0;
 }
 .bt-verdict {
     background-color: #111622;
@@ -484,8 +490,7 @@ st.markdown("""
     font-weight: 600;
     white-space: nowrap;
 }
-.bt-table th:first-child,
-.bt-table th:last-child {
+.bt-table th:first-child {
     text-align: left;
 }
 .bt-table td {
@@ -499,13 +504,13 @@ st.markdown("""
     text-align: left;
     font-weight: 700;
 }
-.bt-table td:last-child {
+.bt-table-main th:last-child,
+.bt-table-main td:last-child {
     text-align: left;
     font-size: 0.77rem;
-    color: #cbd5e1;
 }
 .bt-row-highlight td {
-    background-color: rgba(245, 158, 11, 0.07);
+    background-color: rgba(245, 158, 11, 0.08);
 }
 .bt-row-bh td {
     background-color: rgba(56, 189, 248, 0.06);
@@ -1251,66 +1256,73 @@ def _render_aux_dashboard(
     return f'<div class="aux-grid">{breadth_card}{margin_card}{sbl_card}{tdcc_card}</div>'
 
 
-def _render_swing_summary_html(sim_res: dict, bull_min: int, long_exit: int, bear_max: int, short_exit: int) -> str:
-    """渲染波段進出模擬回測之績效對照總表（4 組策略 ＋ Buy & Hold 基準）"""
+def _fmt_bt_pct(val: float | None, neutral_zero: bool = False) -> str:
+    if val is None:
+        return '<span style="color:#64748b;">—</span>'
+    if neutral_zero and abs(val) < 1e-9:
+        return '<span style="color:#cbd5e1; font-weight:600;">0.00%</span>'
+    col = "#ef5350" if val > 0 else ("#26a69a" if val < 0 else "#cbd5e1")
+    return f'<span style="color:{col}; font-weight:700;">{val:+.2f}%</span>'
+
+
+def _fmt_bt_mdd(val: float | None) -> str:
+    if val is None:
+        return '<span style="color:#64748b;">—</span>'
+    col = "#fca5a5" if val <= -20.0 else ("#fbbf24" if val <= -10.0 else "#80cbc4")
+    return f'<span style="color:{col}; font-weight:700;">{val:.1f}%</span>'
+
+
+def _fmt_bt_pr(trade_count: int, pr: float | None) -> str:
+    if trade_count == 0:
+        return '<span style="color:#64748b;">—</span>'
+    if pr is None:
+        return '<span style="color:#ef5350; font-weight:700;">全勝</span>'
+    col = "#ef5350" if pr >= 1.5 else ("#fbbf24" if pr >= 1.0 else "#26a69a")
+    return f'<span style="color:{col}; font-weight:700;">{pr:.2f}</span>'
+
+
+def _fmt_bt_wr(trade_count: int, wr: float | None) -> str:
+    if wr is None or trade_count == 0:
+        return '<span style="color:#64748b;">—</span>'
+    col = "#fca5a5" if wr >= 55.0 else ("#80cbc4" if wr < 40.0 else "#cbd5e1")
+    return f'<span style="color:{col}; font-weight:700;">{wr:.1f}%</span>'
+
+
+def _render_swing_summary_html(sim_res: dict) -> str:
+    """渲染 100% 純籌碼波段進出模擬之績效總表與 5 組門檻敏感度對照表"""
     if not sim_res or not sim_res.get("valid"):
         return (
             '<div class="bt-panel">'
-            '  <div class="bt-note">目前有效評分交易日樣本不足（需滿 20 日暖身期），尚無法進行波段進出模擬回測。</div>'
+            '  <div class="bt-note">目前有效評分交易日樣本不足（需滿 20 日暖身期），尚無法進行純籌碼波段模擬回測。</div>'
             '</div>'
         )
 
     strategies = sim_res["strategies"]
     order = sim_res["strategy_order"]
     bh = sim_res["bh"]
-    main_s = strategies.get("both_ma20") or strategies[order[0]]
-
-    def _fmt_pct_val(val: float | None, neutral_zero: bool = False) -> str:
-        if val is None:
-            return '<span style="color:#64748b;">—</span>'
-        if neutral_zero and abs(val) < 1e-9:
-            return '<span style="color:#cbd5e1; font-weight:600;">0.00%</span>'
-        col = "#ef5350" if val > 0 else ("#26a69a" if val < 0 else "#cbd5e1")
-        return f'<span style="color:{col}; font-weight:700;">{val:+.2f}%</span>'
-
-    def _fmt_mdd(val: float | None) -> str:
-        if val is None:
-            return '<span style="color:#64748b;">—</span>'
-        col = "#fca5a5" if val <= -20.0 else ("#fbbf24" if val <= -10.0 else "#80cbc4")
-        return f'<span style="color:{col}; font-weight:700;">{val:.1f}%</span>'
-
-    def _fmt_pr(s_obj: dict) -> str:
-        if s_obj["trade_count"] == 0:
-            return '<span style="color:#64748b;">—</span>'
-        pr = s_obj.get("payoff_ratio")
-        if pr is None:
-            return '<span style="color:#ef5350; font-weight:700;">全勝</span>'
-        col = "#ef5350" if pr >= 1.5 else ("#fbbf24" if pr >= 1.0 else "#26a69a")
-        return f'<span style="color:{col}; font-weight:700;">{pr:.2f}</span>'
-
-    def _fmt_wr(s_obj: dict) -> str:
-        wr = s_obj.get("win_rate")
-        if wr is None or s_obj["trade_count"] == 0:
-            return '<span style="color:#64748b;">—</span>'
-        col = "#fca5a5" if wr >= 55.0 else ("#80cbc4" if wr < 40.0 else "#cbd5e1")
-        return f'<span style="color:{col}; font-weight:700;">{wr:.1f}%</span>'
+    params = sim_res.get("params") or {}
+    l_in = int(params.get("long_entry", 55))
+    l_out = int(params.get("long_exit", 40))
+    s_in = int(params.get("short_entry", 35))
+    s_out = int(params.get("short_exit", 50))
+    main_s = strategies.get("both_pure") or strategies[order[0]]
 
     rows_html = []
     for k in order:
         s = strategies[k]
-        row_cls = "bt-row-highlight" if k == "both_ma20" else ""
+        row_cls = "bt-row-highlight" if k == "both_pure" else ""
         cnt_txt = f"{s['trade_count']} 筆" + (" (含持倉)" if s.get("has_open") else "")
         hold_txt = f"{s['avg_hold_days']:.1f} 日" if s.get("avg_hold_days") is not None else "—"
         rows_html.append(
             f'<tr class="{row_cls}">'
             f'  <td>{s["label"]}</td>'
             f'  <td>{cnt_txt}</td>'
-            f'  <td>{_fmt_wr(s)}</td>'
-            f'  <td>{_fmt_pr(s)}</td>'
-            f'  <td>{_fmt_pct_val(s.get("avg_ret_pct"))}</td>'
+            f'  <td>{_fmt_bt_wr(s["trade_count"], s.get("win_rate"))}</td>'
+            f'  <td>{_fmt_bt_pr(s["trade_count"], s.get("payoff_ratio"))}</td>'
+            f'  <td>{_fmt_bt_pct(s.get("avg_ret_pct"))}</td>'
             f'  <td>{hold_txt}</td>'
-            f'  <td>{_fmt_pct_val(s.get("total_ret_pct"), neutral_zero=True)}</td>'
-            f'  <td>{_fmt_mdd(s.get("mdd_pct"))}</td>'
+            f'  <td>{_fmt_bt_pct(s.get("total_ret_pct"), neutral_zero=True)}</td>'
+            f'  <td>{_fmt_bt_mdd(s.get("mdd_pct"))}</td>'
             f'  <td>{s.get("next_signal", "")}</td>'
             f'</tr>'
         )
@@ -1323,27 +1335,70 @@ def _render_swing_summary_html(sim_res: dict, bull_min: int, long_exit: int, bea
         f'  <td>—</td>'
         f'  <td>—</td>'
         f'  <td>{sim_res["total_days"]} 日</td>'
-        f'  <td>{_fmt_pct_val(bh.get("total_ret_pct"), neutral_zero=True)}</td>'
-        f'  <td>{_fmt_mdd(bh.get("mdd_pct"))}</td>'
+        f'  <td>{_fmt_bt_pct(bh.get("total_ret_pct"), neutral_zero=True)}</td>'
+        f'  <td>{_fmt_bt_mdd(bh.get("mdd_pct"))}</td>'
         f'  <td>基準對照（{sim_res["start_date"][5:]} ~ {sim_res["end_date"][5:]}）</td>'
         f'</tr>'
     )
 
+    # 5 組純籌碼門檻敏感度對照表
+    compare_block_html = ""
+    cmp_list = sim_res.get("threshold_compare") or []
+    if cmp_list:
+        cmp_rows = []
+        for item in cmp_list:
+            row_cls = "bt-row-highlight" if item.get("is_current") else ""
+            cur_tag = (
+                ' <span style="font-size:0.71rem; padding:1px 6px; border-radius:4px; background:#f59e0b; color:#0f172a; font-weight:700; margin-left:4px;">目前設定</span>'
+                if item.get("is_current") else ""
+            )
+            cnt_txt = f"{item['trade_count']} 筆" + (" (含持倉)" if item.get("has_open") else "")
+            hold_txt = f"{item['avg_hold_days']:.1f} 日" if item.get("avg_hold_days") is not None else "—"
+            cmp_rows.append(
+                f'<tr class="{row_cls}">'
+                f'  <td>{item["label"]}{cur_tag}</td>'
+                f'  <td>{cnt_txt}</td>'
+                f'  <td>{_fmt_bt_wr(item["trade_count"], item.get("win_rate"))}</td>'
+                f'  <td>{_fmt_bt_pr(item["trade_count"], item.get("payoff_ratio"))}</td>'
+                f'  <td>{_fmt_bt_pct(item.get("avg_ret_pct"))}</td>'
+                f'  <td>{hold_txt}</td>'
+                f'  <td>{_fmt_bt_pct(item.get("total_ret_pct"), neutral_zero=True)}</td>'
+                f'  <td>{_fmt_bt_mdd(item.get("mdd_pct"))}</td>'
+                f'</tr>'
+            )
+        compare_block_html = (
+            f'<div class="bt-sub-title">🎯 純籌碼門檻敏感度對照（多空雙向｜尋找最佳多空判斷分數）</div>'
+            f'<table class="bt-table">'
+            f'  <thead>'
+            f'    <tr>'
+            f'      <th>門檻組合（做多進/出 ｜ 放空進/出）</th>'
+            f'      <th>交易次數</th>'
+            f'      <th>勝率</th>'
+            f'      <th>賺賠比</th>'
+            f'      <th>單筆均報</th>'
+            f'      <th>平均持有</th>'
+            f'      <th>累積淨報酬</th>'
+            f'      <th>最大回撤 (MDD)</th>'
+            f'    </tr>'
+            f'  </thead>'
+            f'  <tbody>{"".join(cmp_rows)}</tbody>'
+            f'</table>'
+        )
+
     rules_note = (
-        f"規則說明：盤後判定 → <b>次日開盤價</b>執行，每筆來回扣除 <b>{sim_res['cost_pct']:.2f}%</b> 摩擦成本（手續費＋證交稅）。"
-        f"做多條件：分數 ≥ {bull_min} 且收盤 &gt; 20MA 進場，跌破 20MA 或分數 &lt; {long_exit} 出場；"
-        f"放空條件：分數 ≤ {bear_max} 且收盤 &lt; 20MA 進場，站上 20MA 或分數 &gt; {short_exit} 回補。"
-        "「賺賠比」＝平均獲利交易報酬 ÷ 平均虧損交易幅度（≥ 1.5 代表大賺小賠，即便勝率 45%～50% 仍具高正期望值）。"
+        f"規則說明（100% 純籌碼，不含均線與停損）：當日盤後算出純籌碼分數 → <b>次日開盤價</b>執行進出，每筆來回扣除 <b>{sim_res['cost_pct']:.2f}%</b> 摩擦成本。"
+        f"目前設定：做多 ≥ {l_in} 分進場、&lt; {l_out} 分出場（或直接翻空）；放空 ≤ {s_in} 分進場、&gt; {s_out} 分回補（或直接翻多）。"
+        "「賺賠比」＝平均獲利交易報酬 ÷ 平均虧損交易幅度（≥ 1.5 代表大賺小賠）。"
     )
 
     return (
         f'<div class="bt-panel">'
-        f'  <div class="bt-verdict">🎯 <b>波段實戰總結（{sim_res["start_date"]} ~ {sim_res["end_date"]}｜共 {sim_res["total_days"]} 交易日）：</b>{sim_res["summary_text"]}</div>'
+        f'  <div class="bt-verdict">🎯 <b>純籌碼波段總結（{sim_res["start_date"]} ~ {sim_res["end_date"]}｜共 {sim_res["total_days"]} 交易日）：</b>{sim_res["summary_text"]}</div>'
         f'  <div class="bt-signal-strip">'
-        f'    <span>🧭 <b>主力模式（多空雙向＋20MA）目前狀態／次日預告：</b>{main_s["next_signal"]}</span>'
+        f'    <span>🧭 <b>純籌碼多空雙向目前狀態／次日預告：</b>{main_s["next_signal"]}</span>'
         f'    <span style="font-size:0.76rem; color:#94a3b8;">已含單筆來回摩擦成本 {sim_res["cost_pct"]:.2f}%</span>'
         f'  </div>'
-        f'  <table class="bt-table">'
+        f'  <table class="bt-table bt-table-main">'
         f'    <thead>'
         f'      <tr>'
         f'        <th>策略模式</th>'
@@ -1359,15 +1414,16 @@ def _render_swing_summary_html(sim_res: dict, bull_min: int, long_exit: int, bea
         f'    </thead>'
         f'    <tbody>{"".join(rows_html)}</tbody>'
         f'  </table>'
+        f'  {compare_block_html}'
         f'  <div class="bt-note">{rules_note}</div>'
         f'</div>'
     )
 
 
 def _render_trade_list_html(trades: list) -> str:
-    """渲染指定波段策略之逐筆進出明細表"""
+    """渲染指定純籌碼策略之逐筆進出明細表"""
     if not trades:
-        return '<div class="bt-note">此策略於今年度有效區間內尚未觸發任何進場訊號。</div>'
+        return '<div class="bt-note">此門檻設定於今年度有效區間內尚未觸發任何進場訊號。</div>'
 
     rows_html = []
     for t in trades:
@@ -1454,21 +1510,18 @@ def _render_rank_table(
 def _split_price_by_health(
     closes: pd.Series,
     scores: pd.Series,
-    ma20: pd.Series | None = None,
-    use_ma20_filter: bool = False,
     bull_min: int = 55,
     bear_max: int = 35,
 ):
     """
-    依每日純籌碼健康分數（並可選配 20MA 趨勢濾網）將收盤價折線切分為三個無縫銜接的顏色序列：
-    - y_bull: >= bull_min（預設 55 分，若啟用 20MA 濾網則須同步收盤 > 20MA），亮紅
-    - y_neutral: 中性區、被濾網過濾日或暖身期，金黃
-    - y_bear: <= bear_max（預設 35 分，若啟用 20MA 濾網則須同步收盤 < 20MA），亮綠
+    100% 依每日純籌碼健康分數將收盤價折線切分為三個無縫銜接的顏色序列：
+    - y_bull: >= bull_min（偏多集中，亮紅）
+    - y_neutral: 中性區或暖身期（金黃）
+    - y_bear: <= bear_max（明顯發散，亮綠）
     """
     n = len(closes)
     c_vals = closes.to_numpy(dtype=float)
     s_vals = scores.to_numpy(dtype=float) if scores is not None else [float("nan")] * n
-    m_vals = ma20.to_numpy(dtype=float) if ma20 is not None else [float("nan")] * n
 
     y_bull = [None] * n
     y_neutral = [None] * n
@@ -1477,18 +1530,10 @@ def _split_price_by_health(
 
     for i in range(n):
         sc = s_vals[i]
-        cl = c_vals[i]
-        mv = m_vals[i]
         if pd.notna(sc) and sc >= bull_min:
-            if (not use_ma20_filter) or (pd.notna(mv) and cl > mv):
-                regimes.append("bull")
-            else:
-                regimes.append("neutral")
+            regimes.append("bull")
         elif pd.notna(sc) and sc <= bear_max:
-            if (not use_ma20_filter) or (pd.notna(mv) and cl < mv):
-                regimes.append("bear")
-            else:
-                regimes.append("neutral")
+            regimes.append("bear")
         else:
             regimes.append("neutral")
 
@@ -1901,26 +1946,26 @@ if target_stock:
                 st.rerun()
 
     # =====================================================================
-    # 區塊一：核心決策總結看板（趨勢 60% ＋ 動能 40%，做多門檻 ≥ 55 分）
+    # 區塊一：核心決策總結看板（100% 純籌碼｜趨勢 60% ＋ 動能 40%）
     # =====================================================================
     bull_min = int(STRATEGY_PARAMS.get("bull_score_min", 55))
     strong_bull_min = int(STRATEGY_PARAMS.get("strong_bull_score_min", 70))
     bear_max = int(STRATEGY_PARAMS.get("bear_score_max", 35))
-    long_exit_sc = int(STRATEGY_PARAMS.get("long_exit_score", 40))
-    short_exit_sc = int(STRATEGY_PARAMS.get("short_exit_score", 50))
+    long_exit_default = int(STRATEGY_PARAMS.get("long_exit_score", 40))
+    short_exit_default = int(STRATEGY_PARAMS.get("short_exit_score", 50))
 
     conv_score = int(scenario.get("conviction_score", 50))
     if conv_score >= strong_bull_min:
         score_col, score_lbl = "#ef5350", f"強力籌碼集中 (≥{strong_bull_min})"
     elif conv_score >= bull_min:
-        score_col, score_lbl = "#fb7185", f"偏多進場甜蜜區 ({bull_min}~{strong_bull_min - 1})"
+        score_col, score_lbl = "#fb7185", f"偏多吸籌區 ({bull_min}~{strong_bull_min - 1})"
     elif conv_score <= bear_max:
         score_col, score_lbl = "#26a69a", f"籌碼明顯發散 (≤{bear_max})"
     else:
         score_col, score_lbl = "#94a3b8", "籌碼中性／分歧"
 
     score_tip_html = (
-        f"<b>純籌碼健康分數（0～100 分｜趨勢 60% ＋ 動能 40%｜做多門檻 ≥ {bull_min} 分）</b><br>"
+        f"<b>100% 純籌碼健康分數（0～100 分｜趨勢 60% ＋ 動能 40%｜不含技術面）</b><br>"
         "以 <b>50 分</b>為多空中性基準，分兩層累計加減（最高 ±50 分）：<br>"
         "• <b>一、中線趨勢面 (±30 分，佔 60%)：</b><br>"
         "&nbsp;&nbsp;◦ 全體波段分點合力 20/60 日控盤與庫存均線 (±14)<br>"
@@ -1933,10 +1978,10 @@ if target_stock:
         '<table class="tip-mini-tbl">'
         '  <thead><tr><th>分數區間</th><th>燈號狀態</th><th>純籌碼含義</th></tr></thead>'
         '  <tbody>'
-        f'    <tr><td style="white-space:nowrap;"><b>{strong_bull_min} ～ 100 分</b></td><td style="color:#ef5350; font-weight:700; white-space:nowrap;">強力共振（紅）</td><td>波段趨勢與短線動能高度共振，屬主升鎖碼格局；乖離大時宜等拉回。</td></tr>'
-        f'    <tr><td style="white-space:nowrap;"><b>{bull_min} ～ {strong_bull_min - 1} 分</b></td><td style="color:#fb7185; font-weight:700; white-space:nowrap;">偏多甜蜜區（紅）</td><td>已達做多門檻且尚未短線過熱，搭配站上 20MA 勝率與期望值最佳。</td></tr>'
+        f'    <tr><td style="white-space:nowrap;"><b>{strong_bull_min} ～ 100 分</b></td><td style="color:#ef5350; font-weight:700; white-space:nowrap;">強力共振（紅）</td><td>波段趨勢與短線動能高度共振，屬籌碼最紮實的主升鎖碼格局。</td></tr>'
+        f'    <tr><td style="white-space:nowrap;"><b>{bull_min} ～ {strong_bull_min - 1} 分</b></td><td style="color:#fb7185; font-weight:700; white-space:nowrap;">偏多吸籌（紅）</td><td>大資金已開始偏向集中且尚未過熱，持續觀察廣度與集中度變化。</td></tr>'
         f'    <tr><td style="white-space:nowrap;"><b>{bear_max + 1} ～ {bull_min - 1} 分</b></td><td style="color:#94a3b8; font-weight:700; white-space:nowrap;">中性／分歧（黃）</td><td>多空力道抵銷，或趨勢與動能方向衝突／少數硬撐，宜觀望。</td></tr>'
-        f'    <tr><td style="white-space:nowrap;"><b>0 ～ {bear_max} 分</b></td><td style="color:#26a69a; font-weight:700; white-space:nowrap;">明顯發散（綠）</td><td>全體波段分點持續倒貨，應避開做多；跌破 20MA 符合偏空條件。</td></tr>'
+        f'    <tr><td style="white-space:nowrap;"><b>0 ～ {bear_max} 分</b></td><td style="color:#26a69a; font-weight:700; white-space:nowrap;">明顯發散（綠）</td><td>全體波段分點持續倒貨且籌碼流向散戶，整體籌碼明顯偏空。</td></tr>'
         '  </tbody>'
         '</table>'
     )
@@ -2205,9 +2250,9 @@ if target_stock:
         unsafe_allow_html=True,
     )
 
-    # --- 可收合抽屜：純籌碼結構 5 大狀態判讀矩陣（做多門檻 ≥ 55 分） ---
+    # --- 可收合抽屜：純籌碼結構 5 大狀態判讀矩陣（100% 純籌碼） ---
     matched_id = scenario.get("id", 0)
-    with st.expander("📖 純籌碼結構 5 大狀態判讀矩陣（趨勢 60% ＋ 動能 40%｜做多門檻 ≥ 55 分）", expanded=False):
+    with st.expander("📖 純籌碼結構 5 大狀態判讀矩陣（100% 純籌碼｜趨勢 60% ＋ 動能 40%）", expanded=False):
         m_rows = []
         for item in SCENARIO_MATRIX:
             is_match = (item["id"] == matched_id)
@@ -2404,7 +2449,7 @@ if target_stock:
 
     st.divider()
 
-    # --- 區塊二：股價（含純籌碼健康分數三色燈號）、主力 VWAP 成本線 vs. 籌碼流向 ---
+    # --- 區塊二：股價（100% 純籌碼健康燈號）、主力 VWAP 成本線 vs. 籌碼流向 ---
     st.markdown(f"#### 📉 {stock_title} 股價、純籌碼健康燈號與主力 VWAP 成本線走勢")
 
     available_brokers = [c for c in df_chips_full.columns if c != "date"]
@@ -2458,28 +2503,25 @@ if target_stock:
     )
     has_health_series = (not df_health.empty) and df_health["health_score"].notna().any()
 
-    c_opt1, c_opt2, c_opt3, c_opt4, c_opt5 = st.columns([1.15, 1.35, 1.25, 1.2, 1.55])
+    # 同步讀取下方回測區自訂的多空門檻，讓主圖燈號即時反映目前測試的純籌碼門檻
+    active_bull_min = int(st.session_state.get("bt_long_entry", bull_min))
+    active_bear_max = int(st.session_state.get("bt_short_entry", bear_max))
+
+    c_opt1, c_opt2, c_opt3, c_opt4 = st.columns([1.3, 1.45, 1.35, 1.7])
     with c_opt1:
         show_ma = st.checkbox(
-            "顯示 10/20MA",
+            "顯示 10/20MA (純參考)",
             value=False,
-            help="在主圖顯示 10MA 與 20MA 均線作為視覺對照",
+            help="均線僅作主圖視覺對照，已完全排除於純籌碼評分與回測之外",
         )
     with c_opt2:
         show_health_regime = st.checkbox(
-            f"純籌碼燈號 (≥{bull_min}/≤{bear_max})",
+            f"純籌碼燈號 (≥{active_bull_min}/≤{active_bear_max})",
             value=bool(has_health_series),
             disabled=not bool(has_health_series),
-            help=f"收盤價折線與主圖背景依每日純籌碼分數動態變色：紅（≥{bull_min}分偏多）、黃（中性）、綠（≤{bear_max}分偏空）",
+            help=f"收盤價折線與主圖背景 100% 依每日純籌碼分數動態變色：紅（≥{active_bull_min}分偏多）、黃（中性）、綠（≤{active_bear_max}分偏空）",
         )
     with c_opt3:
-        use_ma20_filter = st.checkbox(
-            "套用 20MA 趨勢濾網",
-            value=bool(has_health_series),
-            disabled=not (bool(has_health_series) and show_health_regime),
-            help=f"開啟後主圖紅燈須同時滿足「分數≥{bull_min} 且 收盤>20MA」、綠燈須同時滿足「分數≤{bear_max} 且 收盤<20MA」，濾除左側接刀與急軋空",
-        )
-    with c_opt4:
         has_aux_series = (
             df_aux_full is not None
             and (
@@ -2492,7 +2534,7 @@ if target_stock:
             value=bool(has_aux_series),
             disabled=not bool(has_aux_series),
         )
-    with c_opt5:
+    with c_opt4:
         cost_basis = st.radio(
             "成本線計算基準",
             options=["近 60 日波段成本", "今年累計成本"],
@@ -2580,13 +2622,13 @@ if target_stock:
             )
             chart_height = 620
 
-        # --- Row 1：股價（依純籌碼分數 ± 20MA 濾網三色變色）、選配 10/20MA 與主力成本線 ---
+        # --- Row 1：股價（100% 依純籌碼分數三色變色）、選配 10/20MA 純參考與主力成本線 ---
         if show_ma:
             fig.add_trace(
                 go.Scatter(
                     x=df_plot["date"],
                     y=df_plot["ma10"],
-                    name="10MA",
+                    name="10MA (純參考)",
                     line=dict(color="rgba(56, 189, 248, 0.78)", width=1.3),
                     hovertemplate="%{y:,.2f} 元<extra>10MA</extra>",
                 ),
@@ -2596,19 +2638,8 @@ if target_stock:
                 go.Scatter(
                     x=df_plot["date"],
                     y=df_plot["ma20"],
-                    name="20MA",
+                    name="20MA (純參考)",
                     line=dict(color="rgba(192, 132, 252, 0.85)", width=1.5),
-                    hovertemplate="%{y:,.2f} 元<extra>20MA</extra>",
-                ),
-                row=1, col=1, secondary_y=False,
-            )
-        elif use_ma20_filter:
-            fig.add_trace(
-                go.Scatter(
-                    x=df_plot["date"],
-                    y=df_plot["ma20"],
-                    name="20MA (濾網基準)",
-                    line=dict(color="rgba(192, 132, 252, 0.82)", width=1.4, dash="dot"),
                     hovertemplate="%{y:,.2f} 元<extra>20MA</extra>",
                 ),
                 row=1, col=1, secondary_y=False,
@@ -2638,14 +2669,9 @@ if target_stock:
             y_bull, y_neutral, y_bear, regime_bands = _split_price_by_health(
                 df_plot["close"],
                 df_plot["health_score"],
-                ma20=df_plot["ma20"],
-                use_ma20_filter=use_ma20_filter,
-                bull_min=bull_min,
-                bear_max=bear_max,
+                bull_min=active_bull_min,
+                bear_max=active_bear_max,
             )
-            neutral_legend = "收盤價 (觀望/濾除)" if use_ma20_filter else "收盤價 (中性)"
-            bull_legend = f"偏多+站上20MA (≥{bull_min}分)" if use_ma20_filter else f"偏多集中 (≥{bull_min}分)"
-            bear_legend = f"偏空+跌破20MA (≤{bear_max}分)" if use_ma20_filter else f"明顯發散 (≤{bear_max}分)"
 
             # 隱形懸浮專用線（showlegend=False，避免圖例出現空白無色線段）
             fig.add_trace(
@@ -2666,7 +2692,7 @@ if target_stock:
                 go.Scatter(
                     x=df_plot["date"],
                     y=y_neutral,
-                    name=neutral_legend,
+                    name="收盤價 (中性)",
                     line=dict(color="#FFD700", width=2.5),
                     connectgaps=False,
                     showlegend=True,
@@ -2678,7 +2704,7 @@ if target_stock:
                 go.Scatter(
                     x=df_plot["date"],
                     y=y_bull,
-                    name=bull_legend,
+                    name=f"偏多集中 (≥{active_bull_min}分)",
                     line=dict(color="#ef5350", width=3.1),
                     connectgaps=False,
                     hoverinfo="skip",
@@ -2689,7 +2715,7 @@ if target_stock:
                 go.Scatter(
                     x=df_plot["date"],
                     y=y_bear,
-                    name=bear_legend,
+                    name=f"明顯發散 (≤{active_bear_max}分)",
                     line=dict(color="#26a69a", width=3.1),
                     connectgaps=False,
                     hoverinfo="skip",
@@ -2833,14 +2859,50 @@ if target_stock:
         st.plotly_chart(fig, width="stretch")
 
     # =====================================================================
-    # 區塊三：波段進出模擬回測（次日開盤進出 ＋ 20MA 出場保護）
+    # 區塊三：100% 純籌碼波段進出模擬回測與門檻敏感度對照
     # =====================================================================
     if has_health_series:
         st.divider()
-        col_bt_hdr, col_bt_cost = st.columns([3.8, 1.2], vertical_alignment="bottom")
-        with col_bt_hdr:
-            st.markdown(f"#### 🧪 {stock_title} 波段進出模擬回測（次日開盤進出｜含 20MA 出場保護）")
-        with col_bt_cost:
+        st.markdown(f"#### 🧪 {stock_title} 純籌碼波段進出模擬回測（次日開盤進出｜100% 不含技術面）")
+
+        p_col1, p_col2, p_col3, p_col4, p_col5 = st.columns(5)
+        with p_col1:
+            bt_long_in = st.number_input(
+                "做多進場分數 (≥)",
+                min_value=45,
+                max_value=85,
+                value=bull_min,
+                step=5,
+                key="bt_long_entry",
+            )
+        with p_col2:
+            bt_long_out = st.number_input(
+                "做多出場分數 (<)",
+                min_value=25,
+                max_value=70,
+                value=long_exit_default,
+                step=5,
+                key="bt_long_exit",
+            )
+        with p_col3:
+            bt_short_in = st.number_input(
+                "放空進場分數 (≤)",
+                min_value=15,
+                max_value=50,
+                value=bear_max,
+                step=5,
+                key="bt_short_entry",
+            )
+        with p_col4:
+            bt_short_out = st.number_input(
+                "放空出場分數 (>)",
+                min_value=30,
+                max_value=75,
+                value=short_exit_default,
+                step=5,
+                key="bt_short_exit",
+            )
+        with p_col5:
             round_trip_cost = st.number_input(
                 "來回交易成本 (%)",
                 min_value=0.0,
@@ -2849,23 +2911,20 @@ if target_stock:
                 step=0.10,
                 format="%.2f",
                 help="單筆進出合計扣除之手續費與證交稅摩擦成本（預設 0.50%）",
-                key=f"cost_pct_{target_stock}",
+                key="bt_cost_pct",
             )
 
         sim_res = simulate_swing_backtest(
             df_price_full=df_price_full,
             df_health=df_health,
-            long_entry=bull_min,
-            long_exit=long_exit_sc,
-            short_entry=bear_max,
-            short_exit=short_exit_sc,
+            long_entry=int(bt_long_in),
+            long_exit=int(bt_long_out),
+            short_entry=int(bt_short_in),
+            short_exit=int(bt_short_out),
             round_trip_cost_pct=float(round_trip_cost),
         )
 
-        st.markdown(
-            _render_swing_summary_html(sim_res, bull_min, long_exit_sc, bear_max, short_exit_sc),
-            unsafe_allow_html=True,
-        )
+        st.markdown(_render_swing_summary_html(sim_res), unsafe_allow_html=True)
 
         if sim_res.get("valid"):
             # --- 淨值對照曲線（Base = 100） ---
@@ -2875,10 +2934,9 @@ if target_stock:
 
             fig_eq = go.Figure()
             eq_styles = [
-                ("both_ma20", "#fbbf24", 3.0, "solid"),
-                ("long_ma20", "#ef5350", 1.8, "solid"),
-                ("short_ma20", "#26a69a", 1.8, "solid"),
-                ("both_raw", "#94a3b8", 1.7, "dash"),
+                ("both_pure", "#fbbf24", 3.0, "solid"),
+                ("long_pure", "#ef5350", 1.9, "solid"),
+                ("short_pure", "#26a69a", 1.9, "solid"),
             ]
             for s_key, s_col, s_w, s_dash in eq_styles:
                 if s_key in strats:
@@ -2930,7 +2988,7 @@ if target_stock:
             st.plotly_chart(fig_eq, width="stretch", key=f"eq_chart_{target_stock}")
 
             # --- 逐筆進出明細表（可切換策略檢視） ---
-            with st.expander("📋 查看逐筆波段進出明細（含進出場日、次日開盤價、觸發分數與出場原因）", expanded=True):
+            with st.expander("📋 查看純籌碼逐筆波段進出明細（含進出場日、次日開盤價、觸發分數與出場原因）", expanded=True):
                 strat_options = sim_res["strategy_order"]
                 sel_strat_key = st.radio(
                     "選擇檢視策略明細",
