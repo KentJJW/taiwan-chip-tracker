@@ -1166,8 +1166,96 @@ def _populate_aux_concentrations(
 
 
 # =====================================================================
-# 核心分析引擎（趨勢 60% ＋ 動能 40% 單日診斷與全年度向量化回算）
+# 核心分析引擎（三項日頻齊全檢核 ＋ 趨勢 60% ＋ 動能 40% 單日診斷與回算）
 # =====================================================================
+def check_chip_completeness(
+    df_price_full: pd.DataFrame,
+    df_chips_full: pd.DataFrame,
+    df_aux_full: pd.DataFrame = None,
+    anchor_date: str | None = None,
+) -> dict:
+    """
+    檢核指定基準日 (anchor_date) 的 3 項日頻必備籌碼是否齊全（方式 A 卡關規則）：
+    1. 主力分點明細（僅檢核純券商分點，排除「投信」，避免投信先公布造成誤算；當日成交量為 0 則豁免）
+    2. 融資融券（若該股歷史上有 margin_bal，基準日不可為 NaN）
+    3. 借券賣出（若該股歷史上有 sbl_bal，基準日不可為 NaN）
+    註：TDCC 集保大戶為週頻資料，平日沿用上週五數據，不納入每日缺漏卡關。
+    """
+    if df_price_full is None or df_price_full.empty:
+        return {
+            "is_complete": False,
+            "missing_items": ["股價資料"],
+            "has_broker": False,
+            "has_margin": False,
+            "has_sbl": False,
+            "anchor_date": "",
+        }
+
+    df_p = df_price_full.sort_values("date").reset_index(drop=True)
+    target_dt = str(anchor_date) if anchor_date else str(df_p["date"].iloc[-1])
+    df_p_sub = df_p[df_p["date"].astype(str) <= target_dt].reset_index(drop=True)
+    if df_p_sub.empty:
+        return {
+            "is_complete": False,
+            "missing_items": ["股價資料"],
+            "has_broker": False,
+            "has_margin": False,
+            "has_sbl": False,
+            "anchor_date": target_dt,
+        }
+
+    actual_dt = str(df_p_sub["date"].iloc[-1])
+    today_vol = float(pd.to_numeric(df_p_sub["volume"].iloc[-1], errors="coerce") or 0.0) if "volume" in df_p_sub.columns else 1.0
+
+    # 1. 主力分點明細檢核（排除投信）
+    has_broker = False
+    if df_chips_full is not None and not df_chips_full.empty:
+        pure_cols = [c for c in df_chips_full.columns if c not in ("date", "投信")]
+        if pure_cols:
+            if today_vol <= 0:
+                has_broker = True
+            else:
+                row_c = df_chips_full[df_chips_full["date"].astype(str) == actual_dt]
+                if not row_c.empty:
+                    abs_sum = float(row_c[pure_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0).abs().sum().sum())
+                    has_broker = abs_sum > 0
+
+    # 2. 融資融券與 3. 借券賣出檢核（僅針對歷史上有該欄位的個股要求當日必備）
+    has_margin = True
+    has_sbl = True
+    if df_aux_full is not None and not df_aux_full.empty:
+        df_a_dedup = df_aux_full.drop_duplicates(subset=["date"], keep="last").copy()
+        df_a_dedup["date"] = df_a_dedup["date"].astype(str)
+        row_a = df_a_dedup[df_a_dedup["date"] == actual_dt]
+
+        if "margin_bal" in df_a_dedup.columns:
+            s_m_all = pd.to_numeric(df_a_dedup["margin_bal"], errors="coerce")
+            if s_m_all.notna().any():
+                has_margin = (not row_a.empty) and pd.notna(pd.to_numeric(row_a["margin_bal"].iloc[-1], errors="coerce"))
+
+        if "sbl_bal" in df_a_dedup.columns:
+            s_sbl_all = pd.to_numeric(df_a_dedup["sbl_bal"], errors="coerce")
+            if s_sbl_all.notna().any():
+                has_sbl = (not row_a.empty) and pd.notna(pd.to_numeric(row_a["sbl_bal"].iloc[-1], errors="coerce"))
+
+    missing_items = []
+    if not has_broker:
+        missing_items.append("主力分點明細")
+    if not has_margin:
+        missing_items.append("融資融券")
+    if not has_sbl:
+        missing_items.append("借券賣出")
+
+    return {
+        "is_complete": len(missing_items) == 0,
+        "missing_items": missing_items,
+        "has_broker": has_broker,
+        "has_margin": has_margin,
+        "has_sbl": has_sbl,
+        "anchor_date": actual_dt,
+    }
+
+
 def analyze_main_force(
     df_price: pd.DataFrame,
     df_chips: pd.DataFrame,
@@ -1182,9 +1270,9 @@ def analyze_main_force(
 ) -> dict:
     """
     整合全體波段分點合力、滾動 60 日波段三大主力、主力分點廣度比(含外資共識)、
-    投信真實持股比、融資四象限、情境借券、集保大戶與純籌碼「趨勢60%＋動能40%」健康評分：
+    投信獨立追蹤(不重複計分)、融資四象限、情境借券、集保大戶與純籌碼「趨勢60%＋動能40%」健康評分：
     - 嚴格以 full_price 最後一筆交易日作為基準日 (anchor_date)，支援前天／昨天／今天即時回放
-    - 基準日當天若資券或借券尚未公布，不混用前一日數據且不計分
+    - 基準日若「主力分點明細、融資融券、借券賣出」任一未齊全，鎖定總分為 None（方式 A）
     """
     _ = broker_diff_diag
     all_cols = [c for c in df_chips.columns if c != "date"]
@@ -1201,30 +1289,38 @@ def analyze_main_force(
             how="left",
         )
 
+    anchor_dt_chk = str(full_price["date"].iloc[-1]) if not full_price.empty else ""
+    completeness = check_chip_completeness(full_price, full_df, df_aux_full, anchor_date=anchor_dt_chk)
+
     # --- 1. 整理集中度並結合基準日之 _aux.csv 歷史序列計算 60 日滾動 Z-Score ---
     conc_out = {}
     raw_conc = concentrations if isinstance(concentrations, dict) else {}
     aux_conc_map = {"d5": "conc_5d", "d10": "conc_10d", "d20": "conc_20d"}
-    for k, aux_col in aux_conc_map.items():
-        base_item = dict(raw_conc.get(k, {})) if isinstance(raw_conc.get(k), dict) else {}
-        z_val = base_item.get("z_score")
-        z_samples = int(base_item.get("z_samples", 0) or 0)
-        if aux_aligned is not None and aux_col in aux_aligned.columns:
-            s_raw = pd.to_numeric(aux_aligned[aux_col], errors="coerce")
-            s_clean = s_raw.dropna()
-            z_samples = len(s_clean)
-            if base_item.get("pct") is None and pd.notna(s_raw.iloc[-1]):
-                base_item["pct"] = round(float(s_raw.iloc[-1]), 2)
-            if pd.notna(s_raw.iloc[-1]):
-                z_calc = compute_rolling_zscore(s_clean, window=STRATEGY_PARAMS["zscore_window"], min_periods=15)
-                if z_calc is not None:
-                    z_val = z_calc
-        base_item["z_score"] = z_val
-        base_item["z_samples"] = z_samples
-        conc_out[k] = base_item
+    if completeness["has_broker"]:
+        for k, aux_col in aux_conc_map.items():
+            base_item = dict(raw_conc.get(k, {})) if isinstance(raw_conc.get(k), dict) else {}
+            z_val = base_item.get("z_score")
+            z_samples = int(base_item.get("z_samples", 0) or 0)
+            if aux_aligned is not None and aux_col in aux_aligned.columns:
+                s_raw = pd.to_numeric(aux_aligned[aux_col], errors="coerce")
+                s_clean = s_raw.dropna()
+                z_samples = len(s_clean)
+                if base_item.get("pct") is None and pd.notna(s_raw.iloc[-1]):
+                    base_item["pct"] = round(float(s_raw.iloc[-1]), 2)
+                if pd.notna(s_raw.iloc[-1]):
+                    z_calc = compute_rolling_zscore(s_clean, window=STRATEGY_PARAMS["zscore_window"], min_periods=15)
+                    if z_calc is not None:
+                        z_val = z_calc
+            base_item["z_score"] = z_val
+            base_item["z_samples"] = z_samples
+            conc_out[k] = base_item
+    else:
+        for k in aux_conc_map:
+            conc_out[k] = {"pct": None, "net": 0, "buy15": 0, "sell15": 0, "z_score": None, "z_samples": 0}
 
     if df_price.empty or (not pure_broker_cols and "投信" not in all_cols):
         return {
+            "completeness": completeness,
             "main_force_html": "無分點資料",
             "main_force_sub_lines": [],
             "status_html": "⚪ 無法判定",
@@ -1233,10 +1329,12 @@ def analyze_main_force(
             "scenario": {
                 "id": 0, "type": "neutral", "sub_type": "無資料",
                 "title": "⚪ 無資料", "desc": "", "action": "",
-                "badges": [], "conviction_score": 50,
+                "badges": [], "conviction_score": None if not completeness["is_complete"] else 50,
+                "is_incomplete": not completeness["is_complete"],
+                "missing_items": completeness["missing_items"],
                 "score_breakdown": {
                     "base": 50,
-                    "trend_total": 0, "trend_wave": 0, "trend_conc": 0, "trend_inst": 0,
+                    "trend_total": 0, "trend_wave": 0, "trend_conc": 0, "trend_tdcc": 0, "trend_inst": 0,
                     "momentum_total": 0, "mom_conc_breadth": 0, "mom_credit_sbl": 0,
                     "day_trade": 0, "conc_breadth": 0, "conc_diff": 0,
                     "wave_trust": 0, "credit_sbl": 0, "tdcc": 0,
@@ -1280,7 +1378,7 @@ def analyze_main_force(
     lb_days = STRATEGY_PARAMS["wave_lookback_days"]
     z_win = STRATEGY_PARAMS["zscore_window"]
 
-    # --- 2. 投信獨立追蹤（嚴格對齊基準日之真實持股比率） ---
+    # --- 2. 投信獨立追蹤（嚴格對齊基準日之真實持股比率；獨立呈現不重複計分） ---
     trust_info = None
     if "投信" in full_df.columns:
         t_ytd = int(round(full_df["投信"].sum()))
@@ -1408,7 +1506,11 @@ def analyze_main_force(
     top3_names, filtered_dt = select_wave_main_forces(profiles, top_n=3, exclude_day_traders=True)
     wave_agg_info = compute_wave_aggregate(full_price, full_df, profiles=profiles)
     wave_broker_names = wave_agg_info.get("wave_broker_names", []) if isinstance(wave_agg_info, dict) else []
-    breadth_info = compute_broker_breadth(full_df, profiles=profiles, lookback_days=5)
+    breadth_info = (
+        compute_broker_breadth(full_df, profiles=profiles, lookback_days=5)
+        if completeness["has_broker"]
+        else None
+    )
 
     dom_5d_buys = sorted(
         [v["net_5d"] for v in profiles.values() if not v.get("is_foreign") and not v.get("is_day_trader") and v["net_5d"] > 0],
@@ -1474,7 +1576,15 @@ def analyze_main_force(
             sbl_info["sbl_mode"] = scenario.get("sbl_mode", "neutral")
         if breadth_info is not None:
             breadth_info["few_holding_up"] = bool(scenario.get("few_holding_up", False))
+        if not completeness["is_complete"]:
+            scenario["is_incomplete"] = True
+            scenario["missing_items"] = completeness["missing_items"]
+            scenario["conviction_score"] = None
+        else:
+            scenario["is_incomplete"] = False
+            scenario["missing_items"] = []
         return {
+            "completeness": completeness,
             "main_force_html": "無波段買超分點主力（偏空格局）",
             "main_force_sub_lines": ["近 60 日追蹤券商分點累計皆為淨賣超"],
             "status_html": "🟢 空方主導／出貨格局",
@@ -1569,18 +1679,22 @@ def analyze_main_force(
 
     # --- 6. 呼叫 strategy.py 判定視覺背離警報與 100% 純籌碼健康評分 ---
     c5_pct = conc_out.get("d5", {}).get("pct")
-    divergence_alert = evaluate_divergence_alert(
-        price_5d_pct=price_5d_pct,
-        top3_5d=top3_5d,
-        top3_5d_ctrl_pct=top3_5d_ctrl_pct,
-        latest_close=latest_close_full,
-        top3_5d_amount_ntd=top3_5d_amount_ntd,
-        top3_5d_ctrl_z=top3_5d_ctrl_z,
-        conc_5d=c5_pct,
-        trust_info=trust_info,
-        margin_info=margin_info,
-        sbl_info=sbl_info,
-        wave_agg_info=wave_agg_info,
+    divergence_alert = (
+        evaluate_divergence_alert(
+            price_5d_pct=price_5d_pct,
+            top3_5d=top3_5d,
+            top3_5d_ctrl_pct=top3_5d_ctrl_pct,
+            latest_close=latest_close_full,
+            top3_5d_amount_ntd=top3_5d_amount_ntd,
+            top3_5d_ctrl_z=top3_5d_ctrl_z,
+            conc_5d=c5_pct,
+            trust_info=trust_info,
+            margin_info=margin_info,
+            sbl_info=sbl_info,
+            wave_agg_info=wave_agg_info,
+        )
+        if completeness["is_complete"]
+        else None
     )
 
     scenario = evaluate_chip_scenario(
@@ -1607,6 +1721,14 @@ def analyze_main_force(
         sbl_info["sbl_mode"] = scenario.get("sbl_mode", "neutral")
     if breadth_info is not None:
         breadth_info["few_holding_up"] = bool(scenario.get("few_holding_up", False))
+
+    if not completeness["is_complete"]:
+        scenario["is_incomplete"] = True
+        scenario["missing_items"] = completeness["missing_items"]
+        scenario["conviction_score"] = None
+    else:
+        scenario["is_incomplete"] = False
+        scenario["missing_items"] = []
 
     # --- 7. 前三大波段主力明細列 ---
     top3_rows = []
@@ -1636,6 +1758,7 @@ def analyze_main_force(
     top_sell_text = f"**{sorted_period.index[-1]}**（{_fmt_md_num(int(round(sorted_period.iloc[-1])))}）" if sorted_period.iloc[-1] < 0 else "無"
 
     return {
+        "completeness": completeness,
         "main_force_html": main_force_html,
         "main_force_sub_lines": main_force_sub_lines,
         "status_html": status_html,
@@ -1682,8 +1805,8 @@ def compute_daily_health_scores(
 ) -> pd.DataFrame:
     """
     向量化回算今年每一個交易日的「純籌碼健康分數 (0~100)」與對應狀態：
-    - 100% 撇除均線與漲跌，與即時看板套用同一套「趨勢 60% ＋ 動能 40%」純籌碼評分規則
-    - 同步逐日計算全體波段分點合力(20/60日控盤率與庫存均線)、主力廣度、隔日沖、融資四象限與情境借券
+    - 100% 撇除均線與漲跌，與即時看板套用同一套「趨勢 60% ＋ 動能 40%」純籌碼評分規則（方案 A）
+    - 若當日分點明細或近 3 日融資／借券尚未齊全，該日不計分 (NaN)，確保圖表與回測不誤觸
     """
     if df_price_full is None or df_price_full.empty or df_chips_full is None or df_chips_full.empty:
         return pd.DataFrame(columns=["date", "health_score", "scenario_id", "sub_type"])
@@ -1800,11 +1923,24 @@ def compute_daily_health_scores(
         std_v = float(np.std(sl))
         return round((float(sl[-1]) - float(np.mean(sl))) / std_v, 2) if std_v > 1e-9 else 0.0
 
+    pure_row_abs_sum = np.abs(df_c[pure_cols].to_numpy(dtype=float)).sum(axis=1)
+    has_hist_margin = bool(np.any(~np.isnan(m_arr)))
+    has_hist_sbl = bool(np.any(~np.isnan(sbl_arr)))
+
     records = []
     for i in range(n):
         dt_str = str(df_p.loc[i, "date"])
         if i + 1 < min_warmup_days or np.isnan(c5_arr[i]):
             records.append({"date": dt_str, "health_score": np.nan, "scenario_id": 0, "sub_type": ""})
+            continue
+
+        # 檢核當日分點及近 3 個交易日之融資／借券是否齊全，未齊全則不計分（與看板方式 A 同步）
+        is_recent_day = (i >= n - 3)
+        broker_missing_i = (vol_arr[i] > 0) and (pure_row_abs_sum[i] <= 0)
+        margin_missing_i = is_recent_day and has_hist_margin and np.isnan(m_arr[i])
+        sbl_missing_i = is_recent_day and has_hist_sbl and np.isnan(sbl_arr[i])
+        if broker_missing_i or margin_missing_i or sbl_missing_i:
+            records.append({"date": dt_str, "health_score": np.nan, "scenario_id": 0, "sub_type": "結算中"})
             continue
 
         # 1. 全體波段分點合力當日狀態
@@ -1901,7 +2037,7 @@ def compute_daily_health_scores(
             if len(pos_dom) > 0:
                 dom_buy_5d = int(round(np.sort(pos_dom)[::-1][:3].sum()))
 
-        # 5. 投信當日狀態（含 20 日累計與真實持股水位）
+        # 5. 投信當日狀態（保留相容欄位，方案 A 不計入總分）
         t_hold_i = None
         if not np.isnan(trust_pct_arr[i]):
             t_hold_i = round(float(trust_pct_arr[i]), 2)
