@@ -1510,14 +1510,16 @@ def _render_rank_table(
 def _split_price_by_health(
     closes: pd.Series,
     scores: pd.Series,
-    bull_min: int = 55,
-    bear_max: int = 35,
+    long_entry: int = 55,
+    long_exit: int = 40,
+    short_entry: int = 35,
+    short_exit: int = 50,
 ):
     """
-    100% 依每日純籌碼健康分數將收盤價折線切分為三個無縫銜接的顏色序列：
-    - y_bull: >= bull_min（偏多集中，亮紅）
-    - y_neutral: 中性區或暖身期（金黃）
-    - y_bear: <= bear_max（明顯發散，亮綠）
+    模式 B「純籌碼波段持倉燈號」：完整連動四項進出門檻，與波段模擬回測 100% 對齊：
+    - 空手時：分數 >= long_entry 轉波段偏多（紅）；分數 <= short_entry 轉波段偏空（綠）
+    - 偏多中：維持紅燈直到分數 < long_exit（轉黃空手）或 <= short_entry（直接翻綠）
+    - 偏空中：維持綠燈直到分數 > short_exit（轉黃空手）或 >= long_entry（直接翻紅）
     """
     n = len(closes)
     c_vals = closes.to_numpy(dtype=float)
@@ -1528,11 +1530,31 @@ def _split_price_by_health(
     y_bear = [None] * n
     regimes = []
 
+    pos = 0  # 0=空手/中性, 1=波段偏多, -1=波段偏空
     for i in range(n):
         sc = s_vals[i]
-        if pd.notna(sc) and sc >= bull_min:
+        if pd.notna(sc):
+            can_long = (sc >= long_entry) and (long_entry > short_entry)
+            can_short = (sc <= short_entry) and (long_entry > short_entry)
+            if pos == 1:
+                if can_short:
+                    pos = -1
+                elif sc < long_exit:
+                    pos = 0
+            elif pos == -1:
+                if can_long:
+                    pos = 1
+                elif sc > short_exit:
+                    pos = 0
+            else:
+                if can_long:
+                    pos = 1
+                elif can_short:
+                    pos = -1
+
+        if pos == 1:
             regimes.append("bull")
-        elif pd.notna(sc) and sc <= bear_max:
+        elif pos == -1:
             regimes.append("bear")
         else:
             regimes.append("neutral")
@@ -1569,7 +1591,7 @@ def _split_price_by_health(
     if cur_reg in ("bull", "bear"):
         bands.append((start_i, n - 1, cur_reg))
 
-    return y_bull, y_neutral, y_bear, bands
+    return y_bull, y_neutral, y_bear, bands, regimes
 
 
 st.markdown("### 📈 台股純籌碼集中／發散追蹤系統")
@@ -1580,7 +1602,7 @@ if "active_stock" not in st.session_state:
 if "sort_mode" not in st.session_state:
     st.session_state["sort_mode"] = False
 if "show_bt_summary" not in st.session_state:
-    st.session_state["show_bt_summary"] = True
+    st.session_state["show_bt_summary"] = False
 
 # --- 側邊欄：新增個股、統計區間與已存個股管理 ---
 with st.sidebar:
@@ -2451,8 +2473,8 @@ if target_stock:
 
     st.divider()
 
-    # --- 區塊二：股價（100% 純籌碼健康燈號）、主力 VWAP 成本線 vs. 籌碼流向 ---
-    st.markdown(f"#### 📉 {stock_title} 股價、純籌碼健康燈號與主力 VWAP 成本線走勢")
+    # --- 區塊二：股價（模式 B 純籌碼波段持倉燈號）、主力 VWAP 成本線 vs. 籌碼流向 ---
+    st.markdown(f"#### 📉 {stock_title} 股價、純籌碼波段燈號與主力 VWAP 成本線走勢")
 
     available_brokers = [c for c in df_chips_full.columns if c != "date"]
     wave_broker_names = [n for n in (analysis.get("wave_broker_names") or []) if n in available_brokers]
@@ -2505,11 +2527,13 @@ if target_stock:
     )
     has_health_series = (not df_health.empty) and df_health["health_score"].notna().any()
 
-    # 同步讀取下方回測區自訂的多空門檻（預設 55 / 35）
-    active_bull_min = int(st.session_state.get("bt_long_entry_std", bull_min))
-    active_bear_max = int(st.session_state.get("bt_short_entry_std", bear_max))
+    # 同步讀取下方回測區四項進出門檻（預設 多≥55/<40 · 空≤35/>50）
+    active_bull_in = int(st.session_state.get("bt_long_entry_std", bull_min))
+    active_bull_out = int(st.session_state.get("bt_long_exit_std", long_exit_default))
+    active_bear_in = int(st.session_state.get("bt_short_entry_std", bear_max))
+    active_bear_out = int(st.session_state.get("bt_short_exit_std", short_exit_default))
 
-    c_opt1, c_opt2, c_opt3, c_opt4 = st.columns([1.3, 1.45, 1.35, 1.7])
+    c_opt1, c_opt2, c_opt3, c_opt4 = st.columns([1.15, 1.95, 1.2, 1.5])
     with c_opt1:
         show_ma = st.checkbox(
             "顯示 10/20MA (純參考)",
@@ -2518,10 +2542,14 @@ if target_stock:
         )
     with c_opt2:
         show_health_regime = st.checkbox(
-            f"純籌碼燈號 (≥{active_bull_min}/≤{active_bear_max})",
+            f"純籌碼波段燈號 (多≥{active_bull_in}/<{active_bull_out} · 空≤{active_bear_in}/>{active_bear_out})",
             value=bool(has_health_series),
             disabled=not bool(has_health_series),
-            help=f"收盤價折線與主圖背景 100% 依每日純籌碼分數動態變色：紅（≥{active_bull_min}分偏多）、黃（中性）、綠（≤{active_bear_max}分偏空）",
+            help=(
+                f"模式 B 波段持倉燈號，與下方回測規則 100% 同步："
+                f"站上 ≥{active_bull_in} 分持續亮紅至跌破 <{active_bull_out} 分；"
+                f"跌破 ≤{active_bear_in} 分持續亮綠至站上 >{active_bear_out} 分。"
+            ),
         )
     with c_opt3:
         has_aux_series = (
@@ -2608,29 +2636,32 @@ if target_stock:
                 rows=3,
                 cols=1,
                 shared_xaxes=True,
-                vertical_spacing=0.05,
-                row_heights=[0.48, 0.30, 0.22],
+                vertical_spacing=0.115,
+                row_heights=[0.46, 0.30, 0.24],
                 specs=[[{"secondary_y": True}], [{"secondary_y": True}], [{"secondary_y": True}]],
             )
-            chart_height = 740
+            chart_height = 860
+            bottom_margin = 95
         else:
             fig = make_subplots(
                 rows=2,
                 cols=1,
                 shared_xaxes=True,
-                vertical_spacing=0.06,
+                vertical_spacing=0.13,
                 row_heights=[0.56, 0.44],
                 specs=[[{"secondary_y": True}], [{"secondary_y": True}]],
             )
-            chart_height = 620
+            chart_height = 700
+            bottom_margin = 90
 
-        # --- Row 1：股價（100% 依純籌碼分數三色變色）、選配 10/20MA 純參考與主力成本線 ---
+        # --- Row 1：股價（模式 B 波段持倉三色燈號）、選配 10/20MA 純參考與主力成本線（圖例放第一圖下方） ---
         if show_ma:
             fig.add_trace(
                 go.Scatter(
                     x=df_plot["date"],
                     y=df_plot["ma10"],
                     name="10MA (純參考)",
+                    legend="legend",
                     line=dict(color="rgba(56, 189, 248, 0.78)", width=1.3),
                     hovertemplate="%{y:,.2f} 元<extra>10MA</extra>",
                 ),
@@ -2641,6 +2672,7 @@ if target_stock:
                     x=df_plot["date"],
                     y=df_plot["ma20"],
                     name="20MA (純參考)",
+                    legend="legend",
                     line=dict(color="rgba(192, 132, 252, 0.85)", width=1.5),
                     hovertemplate="%{y:,.2f} 元<extra>20MA</extra>",
                 ),
@@ -2653,6 +2685,7 @@ if target_stock:
                     x=df_plot["date"],
                     y=cost_series,
                     name=f"{target_label} 成本線",
+                    legend="legend",
                     line=dict(color="#FF9100", width=2.2, dash="dash"),
                     connectgaps=False,
                     hovertemplate="%{y:,.2f} 元<extra>主力成本均價</extra>",
@@ -2660,20 +2693,25 @@ if target_stock:
                 row=1, col=1, secondary_y=False,
             )
 
-        price_hover_texts = []
-        for cl_v, sc_v, st_v in zip(df_plot["close"], df_plot["health_score"], df_plot["sub_type"].fillna("")):
-            if pd.notna(sc_v):
-                price_hover_texts.append(f"{cl_v:,.2f} 元 ｜ 純籌碼 {int(round(sc_v))} 分（{st_v}）")
-            else:
-                price_hover_texts.append(f"{cl_v:,.2f} 元")
-
         if show_health_regime and has_health_series:
-            y_bull, y_neutral, y_bear, regime_bands = _split_price_by_health(
+            y_bull, y_neutral, y_bear, regime_bands, regime_list = _split_price_by_health(
                 df_plot["close"],
                 df_plot["health_score"],
-                bull_min=active_bull_min,
-                bear_max=active_bear_max,
+                long_entry=active_bull_in,
+                long_exit=active_bull_out,
+                short_entry=active_bear_in,
+                short_exit=active_bear_out,
             )
+
+            reg_label_map = {"bull": "🔴 波段偏多", "bear": "🟢 波段偏空", "neutral": "🟡 空手觀望"}
+            price_hover_texts = []
+            for cl_v, sc_v, reg_v in zip(df_plot["close"], df_plot["health_score"], regime_list):
+                if pd.notna(sc_v):
+                    price_hover_texts.append(
+                        f"{cl_v:,.2f} 元 ｜ 純籌碼 {int(round(sc_v))} 分（{reg_label_map.get(reg_v, '')}）"
+                    )
+                else:
+                    price_hover_texts.append(f"{cl_v:,.2f} 元")
 
             # 隱形懸浮專用線（showlegend=False，避免圖例出現空白無色線段）
             fig.add_trace(
@@ -2681,6 +2719,7 @@ if target_stock:
                     x=df_plot["date"],
                     y=df_plot["close"],
                     name="收盤價懸浮",
+                    legend="legend",
                     line=dict(color="#FFD700", width=2.4),
                     opacity=0.0,
                     showlegend=False,
@@ -2689,12 +2728,13 @@ if target_stock:
                 ),
                 row=1, col=1, secondary_y=False,
             )
-            # 真正顯示於圖面與圖例的黃色中性折線
+            # 真正顯示於圖面與第一圖下方圖例的黃／紅／綠折線
             fig.add_trace(
                 go.Scatter(
                     x=df_plot["date"],
                     y=y_neutral,
-                    name="收盤價 (中性)",
+                    name="收盤價 (空手/中性)",
+                    legend="legend",
                     line=dict(color="#FFD700", width=2.5),
                     connectgaps=False,
                     showlegend=True,
@@ -2706,7 +2746,8 @@ if target_stock:
                 go.Scatter(
                     x=df_plot["date"],
                     y=y_bull,
-                    name=f"偏多集中 (≥{active_bull_min}分)",
+                    name=f"波段偏多 (≥{active_bull_in}/<{active_bull_out})",
+                    legend="legend",
                     line=dict(color="#ef5350", width=3.1),
                     connectgaps=False,
                     hoverinfo="skip",
@@ -2717,7 +2758,8 @@ if target_stock:
                 go.Scatter(
                     x=df_plot["date"],
                     y=y_bear,
-                    name=f"明顯發散 (≤{active_bear_max}分)",
+                    name=f"波段偏空 (≤{active_bear_in}/>{active_bear_out})",
+                    legend="legend",
                     line=dict(color="#26a69a", width=3.1),
                     connectgaps=False,
                     hoverinfo="skip",
@@ -2736,11 +2778,19 @@ if target_stock:
                     col=1,
                 )
         else:
+            price_hover_texts = []
+            for cl_v, sc_v, st_v in zip(df_plot["close"], df_plot["health_score"], df_plot["sub_type"].fillna("")):
+                if pd.notna(sc_v):
+                    price_hover_texts.append(f"{cl_v:,.2f} 元 ｜ 純籌碼 {int(round(sc_v))} 分（{st_v}）")
+                else:
+                    price_hover_texts.append(f"{cl_v:,.2f} 元")
+
             fig.add_trace(
                 go.Scatter(
                     x=df_plot["date"],
                     y=df_plot["close"],
                     name="收盤價 (元)",
+                    legend="legend",
                     line=dict(color="#FFD700", width=2.6),
                     text=price_hover_texts,
                     hovertemplate="%{text}<extra>收盤價</extra>",
@@ -2751,7 +2801,7 @@ if target_stock:
         fig.update_yaxes(row=1, col=1, secondary_y=True, visible=False)
         fig.update_yaxes(title_text="股價／成本 (元)", row=1, col=1, secondary_y=False, showgrid=True)
 
-        # --- Row 2：主力買賣超長條圖 ＋ 累計張數折線 ---
+        # --- Row 2：主力買賣超長條圖 ＋ 累計張數折線（圖例放第二圖下方） ---
         bar_colors = ["#ef5350" if v >= 0 else "#26a69a" for v in daily_net]
         bar_label = f"{target_label} 每日買賣超"
         fig.add_trace(
@@ -2759,6 +2809,7 @@ if target_stock:
                 x=df_plot["date"],
                 y=daily_net,
                 name=f"{bar_label} (張)",
+                legend="legend2",
                 marker_color=bar_colors,
                 opacity=0.85,
                 hovertemplate="%{y:+,.0f} 張<extra>" + bar_label + "</extra>",
@@ -2772,6 +2823,7 @@ if target_stock:
                 x=df_plot["date"],
                 y=cum_total,
                 name=f"{line_label} (累計張)",
+                legend="legend2",
                 line=dict(color="#00E5FF", width=2.4),
                 hovertemplate="%{y:+,.0f} 張<extra>" + line_label + "</extra>",
             ),
@@ -2781,7 +2833,7 @@ if target_stock:
         fig.update_yaxes(title_text="每日買賣超 (張)", row=2, col=1, secondary_y=False, showgrid=True, zeroline=True, tickformat=",.0f")
         fig.update_yaxes(title_text="統計張數 (累計張)", row=2, col=1, secondary_y=True, showgrid=False, tickformat=",.0f")
 
-        # --- Row 3（選配）：融資餘額 vs 借券賣出餘額 ---
+        # --- Row 3（選配）：融資餘額 vs 借券賣出餘額（圖例放第三圖下方） ---
         if use_aux_row:
             if "margin_bal" in df_plot.columns and df_plot["margin_bal"].notna().any():
                 fig.add_trace(
@@ -2789,6 +2841,7 @@ if target_stock:
                         x=df_plot["date"],
                         y=df_plot["margin_bal"],
                         name="融資餘額 (張)",
+                        legend="legend3",
                         line=dict(color="#f59e0b", width=2.0),
                         connectgaps=True,
                         hovertemplate="%{y:,.0f} 張<extra>融資餘額</extra>",
@@ -2801,6 +2854,7 @@ if target_stock:
                         x=df_plot["date"],
                         y=df_plot["sbl_bal"],
                         name="借券賣出餘額 (張)",
+                        legend="legend3",
                         line=dict(color="#a78bfa", width=2.0, dash="dot"),
                         connectgaps=True,
                         hovertemplate="%{y:,.0f} 張<extra>借券賣出餘額</extra>",
@@ -2850,12 +2904,45 @@ if target_stock:
             showgrid=False,
         )
 
+        # --- 各子圖專屬橫向圖例：動態對齊各子圖正下方 ---
+        d1_low = float(fig.layout.yaxis.domain[0]) if (fig.layout.yaxis and fig.layout.yaxis.domain) else (0.64 if use_aux_row else 0.49)
+        d2_low = float(fig.layout.yaxis3.domain[0]) if (fig.layout.yaxis3 and fig.layout.yaxis3.domain) else (0.29 if use_aux_row else 0.0)
+
+        legend_layout = dict(
+            legend=dict(
+                orientation="h",
+                yanchor="top",
+                y=d1_low - (0.012 if use_aux_row else 0.015),
+                xanchor="left",
+                x=0,
+                bgcolor="rgba(0,0,0,0)",
+            ),
+            legend2=dict(
+                orientation="h",
+                yanchor="top",
+                y=(d2_low - 0.012) if use_aux_row else (d2_low - 0.075),
+                xanchor="left",
+                x=0,
+                bgcolor="rgba(0,0,0,0)",
+            ),
+        )
+        if use_aux_row:
+            d3_low = float(fig.layout.yaxis5.domain[0]) if (fig.layout.yaxis5 and fig.layout.yaxis5.domain) else 0.0
+            legend_layout["legend3"] = dict(
+                orientation="h",
+                yanchor="top",
+                y=d3_low - 0.062,
+                xanchor="left",
+                x=0,
+                bgcolor="rgba(0,0,0,0)",
+            )
+
         fig.update_layout(
             height=chart_height,
             template="plotly_dark",
             hovermode="x unified",
-            legend=dict(orientation="h", yanchor="bottom", y=1.03, xanchor="left", x=0),
-            margin=dict(l=20, r=20, t=72, b=20),
+            margin=dict(l=20, r=20, t=28, b=bottom_margin),
+            **legend_layout,
         )
 
         st.plotly_chart(fig, width="stretch")
@@ -2938,8 +3025,8 @@ if target_stock:
 
         if sim_res.get("valid"):
             strats = sim_res["strategies"]
-            # --- 逐筆進出明細表（可切換策略檢視） ---
-            with st.expander("📋 查看純籌碼逐筆波段進出明細（含進出場日、次日開盤價、觸發分數與出場原因）", expanded=True):
+            # --- 逐筆進出明細表（預設收合，可切換策略檢視） ---
+            with st.expander("📋 查看純籌碼逐筆波段進出明細（含進出場日、次日開盤價、觸發分數與出場原因）", expanded=False):
                 strat_options = sim_res["strategy_order"]
                 sel_strat_key = st.radio(
                     "選擇檢視策略明細",
