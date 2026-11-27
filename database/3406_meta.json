@@ -1,14 +1,11 @@
 {
   "completeness": {
-    "is_complete": false,
-    "missing_items": [
-      "融資融券",
-      "借券賣出"
-    ],
+    "is_complete": true,
+    "missing_items": [],
     "has_broker": true,
     "has_conc5": true,
-    "has_margin": false,
-    "has_sbl": false,
+    "has_margin": true,
+    "has_sbl": true,
     "has_trust": true,
     "anchor_date": "2026-11-27"
   },
@@ -35,7 +32,7 @@
         "detail": "全市場 5/10/20 日集中度同步為負（-2.3% / -3.6% / -2.0%）。"
       }
     ],
-    "conviction_score": null,
+    "conviction_score": 38,
     "score_breakdown": {
       "base": 50,
       "trend_total": -11,
@@ -56,11 +53,8 @@
     "margin_quadrant": 0,
     "sbl_mode": "neutral",
     "few_holding_up": false,
-    "is_incomplete": true,
-    "missing_items": [
-      "融資融券",
-      "借券賣出"
-    ]
+    "is_incomplete": false,
+    "missing_items": []
   },
   "concentrations": {
     "d5": {
@@ -344,8 +338,32 @@
     "few_holding_up": false
   },
   "broker_diff_info": null,
-  "margin_info": null,
-  "sbl_info": null,
+  "margin_info": {
+    "date": "2026-11-27",
+    "lag_days": 0,
+    "is_latest": true,
+    "latest_bal": 2947,
+    "chg_5d": -57,
+    "chg_5d_pct": -1.9,
+    "chg_5d_z": 0.14,
+    "chg_5d_vol_pct": 0.18,
+    "short_bal": 128,
+    "short_margin_ratio": 4.34,
+    "quadrant": 0,
+    "domestic_top_buy_5d": 273
+  },
+  "sbl_info": {
+    "date": "2026-11-27",
+    "lag_days": 0,
+    "is_latest": true,
+    "latest_bal": 9753,
+    "chg_5d": -256,
+    "chg_5d_pct": -2.56,
+    "chg_5d_z": -0.94,
+    "chg_5d_vol_pct": 0.8,
+    "chg_1d": -18,
+    "sbl_mode": "neutral"
+  },
   "tdcc_info": {
     "date": "2026-11-20",
     "age_days": 7,
@@ -696,7 +714,7 @@
       "total_holders": 35837
     }
   ],
-  "last_updated": "2026-11-27 20:13",
+  "last_updated": "2026-11-27 21:13",
   "debug_notes": [],
   "github_sync": "✅ 已單次打包同步（全部更新 9 檔）"
 }

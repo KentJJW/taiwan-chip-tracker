@@ -1,14 +1,11 @@
 {
   "completeness": {
-    "is_complete": false,
-    "missing_items": [
-      "融資融券",
-      "借券賣出"
-    ],
+    "is_complete": true,
+    "missing_items": [],
     "has_broker": true,
     "has_conc5": true,
-    "has_margin": false,
-    "has_sbl": false,
+    "has_margin": true,
+    "has_sbl": true,
     "has_trust": true,
     "anchor_date": "2026-11-27"
   },
@@ -45,7 +42,7 @@
         "detail": "千張大戶比率下滑且總股東人數增加。"
       }
     ],
-    "conviction_score": null,
+    "conviction_score": 24,
     "score_breakdown": {
       "base": 50,
       "trend_total": -25,
@@ -66,11 +63,8 @@
     "margin_quadrant": 0,
     "sbl_mode": "neutral",
     "few_holding_up": false,
-    "is_incomplete": true,
-    "missing_items": [
-      "融資融券",
-      "借券賣出"
-    ]
+    "is_incomplete": false,
+    "missing_items": []
   },
   "concentrations": {
     "d5": {
@@ -357,8 +351,32 @@
     "few_holding_up": false
   },
   "broker_diff_info": null,
-  "margin_info": null,
-  "sbl_info": null,
+  "margin_info": {
+    "date": "2026-11-27",
+    "lag_days": 0,
+    "is_latest": true,
+    "latest_bal": 154,
+    "chg_5d": 9,
+    "chg_5d_pct": 6.21,
+    "chg_5d_z": 0.25,
+    "chg_5d_vol_pct": 0.37,
+    "short_bal": 2,
+    "short_margin_ratio": 1.3,
+    "quadrant": 0,
+    "domestic_top_buy_5d": 151
+  },
+  "sbl_info": {
+    "date": "2026-11-27",
+    "lag_days": 0,
+    "is_latest": true,
+    "latest_bal": 214,
+    "chg_5d": 6,
+    "chg_5d_pct": 2.88,
+    "chg_5d_z": -0.07,
+    "chg_5d_vol_pct": 0.24,
+    "chg_1d": 4,
+    "sbl_mode": "neutral"
+  },
   "tdcc_info": {
     "date": "2026-11-20",
     "age_days": 7,
@@ -683,7 +701,7 @@
       "total_holders": 77024
     }
   ],
-  "last_updated": "2026-11-27 20:14",
+  "last_updated": "2026-11-27 21:14",
   "debug_notes": [],
   "github_sync": "✅ 已單次打包同步（全部更新 9 檔）"
 }

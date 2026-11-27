@@ -1,14 +1,11 @@
 {
   "completeness": {
-    "is_complete": false,
-    "missing_items": [
-      "融資融券",
-      "借券賣出"
-    ],
+    "is_complete": true,
+    "missing_items": [],
     "has_broker": true,
     "has_conc5": true,
-    "has_margin": false,
-    "has_sbl": false,
+    "has_margin": true,
+    "has_sbl": true,
     "has_trust": true,
     "anchor_date": "2026-11-27"
   },
@@ -38,9 +35,14 @@
         "label": "⚠️ 集保大戶流出 (-0.48%)",
         "level": "bear",
         "detail": "千張大戶比率下滑且總股東人數增加。"
+      },
+      {
+        "label": "ℹ️ 借券獲利回補 (5日 -1,386張)",
+        "level": "info",
+        "detail": "借券賣出餘額雖下降，但波段分點與集中度仍偏空，研判為空單順勢獲利回補（不予多方加分）。"
       }
     ],
-    "conviction_score": null,
+    "conviction_score": 34,
     "score_breakdown": {
       "base": 50,
       "trend_total": -15,
@@ -59,13 +61,10 @@
       "tdcc": -3
     },
     "margin_quadrant": 0,
-    "sbl_mode": "neutral",
+    "sbl_mode": "profit_cover",
     "few_holding_up": false,
-    "is_incomplete": true,
-    "missing_items": [
-      "融資融券",
-      "借券賣出"
-    ]
+    "is_incomplete": false,
+    "missing_items": []
   },
   "concentrations": {
     "d5": {
@@ -357,8 +356,32 @@
     "few_holding_up": false
   },
   "broker_diff_info": null,
-  "margin_info": null,
-  "sbl_info": null,
+  "margin_info": {
+    "date": "2026-11-27",
+    "lag_days": 0,
+    "is_latest": true,
+    "latest_bal": 8116,
+    "chg_5d": 22,
+    "chg_5d_pct": 0.27,
+    "chg_5d_z": 0.2,
+    "chg_5d_vol_pct": 0.06,
+    "short_bal": 104,
+    "short_margin_ratio": 1.28,
+    "quadrant": 0,
+    "domestic_top_buy_5d": 481
+  },
+  "sbl_info": {
+    "date": "2026-11-27",
+    "lag_days": 0,
+    "is_latest": true,
+    "latest_bal": 9327,
+    "chg_5d": -1386,
+    "chg_5d_pct": -12.94,
+    "chg_5d_z": -0.12,
+    "chg_5d_vol_pct": 4.03,
+    "chg_1d": -489,
+    "sbl_mode": "profit_cover"
+  },
   "tdcc_info": {
     "date": "2026-11-20",
     "age_days": 7,
@@ -700,7 +723,7 @@
       "total_holders": 179231
     }
   ],
-  "last_updated": "2026-11-27 20:12",
+  "last_updated": "2026-11-27 21:13",
   "debug_notes": [],
   "github_sync": "✅ 已單次打包同步（全部更新 9 檔）"
 }

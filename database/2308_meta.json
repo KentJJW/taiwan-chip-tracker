@@ -1,14 +1,11 @@
 {
   "completeness": {
-    "is_complete": false,
-    "missing_items": [
-      "融資融券",
-      "借券賣出"
-    ],
+    "is_complete": true,
+    "missing_items": [],
     "has_broker": true,
     "has_conc5": true,
-    "has_margin": false,
-    "has_sbl": false,
+    "has_margin": true,
+    "has_sbl": true,
     "has_trust": true,
     "anchor_date": "2026-11-27"
   },
@@ -39,7 +36,7 @@
         "detail": "當日隔日沖熱點（富邦證券）買超佔成交量 5.9%，提防隔日開高倒貨賣壓。"
       }
     ],
-    "conviction_score": null,
+    "conviction_score": 26,
     "score_breakdown": {
       "base": 50,
       "trend_total": -22,
@@ -60,11 +57,8 @@
     "margin_quadrant": 0,
     "sbl_mode": "neutral",
     "few_holding_up": false,
-    "is_incomplete": true,
-    "missing_items": [
-      "融資融券",
-      "借券賣出"
-    ]
+    "is_incomplete": false,
+    "missing_items": []
   },
   "concentrations": {
     "d5": {
@@ -354,8 +348,32 @@
     "few_holding_up": false
   },
   "broker_diff_info": null,
-  "margin_info": null,
-  "sbl_info": null,
+  "margin_info": {
+    "date": "2026-11-27",
+    "lag_days": 0,
+    "is_latest": true,
+    "latest_bal": 9385,
+    "chg_5d": -370,
+    "chg_5d_pct": -3.79,
+    "chg_5d_z": -0.71,
+    "chg_5d_vol_pct": 0.34,
+    "short_bal": 68,
+    "short_margin_ratio": 0.72,
+    "quadrant": 0,
+    "domestic_top_buy_5d": 7608
+  },
+  "sbl_info": {
+    "date": "2026-11-27",
+    "lag_days": 0,
+    "is_latest": true,
+    "latest_bal": 11475,
+    "chg_5d": -708,
+    "chg_5d_pct": -5.81,
+    "chg_5d_z": -0.63,
+    "chg_5d_vol_pct": 0.65,
+    "chg_1d": 127,
+    "sbl_mode": "neutral"
+  },
   "tdcc_info": {
     "date": "2026-11-20",
     "age_days": 7,
@@ -679,7 +697,7 @@
       "total_holders": 729969
     }
   ],
-  "last_updated": "2026-11-27 20:14",
+  "last_updated": "2026-11-27 21:14",
   "debug_notes": [],
   "github_sync": "✅ 已單次打包同步（全部更新 9 檔）"
 }

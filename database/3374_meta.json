@@ -1,14 +1,11 @@
 {
   "completeness": {
-    "is_complete": false,
-    "missing_items": [
-      "融資融券",
-      "借券賣出"
-    ],
+    "is_complete": true,
+    "missing_items": [],
     "has_broker": true,
     "has_conc5": true,
-    "has_margin": false,
-    "has_sbl": false,
+    "has_margin": true,
+    "has_sbl": true,
     "has_trust": true,
     "anchor_date": "2026-11-27"
   },
@@ -20,7 +17,11 @@
   ],
   "status_html": "🔴 區間內三大波段主力吃貨中（<span style=\"color:#ef5350; font-weight:700;\">+11,238 張</span>）",
   "status_sub": "近 60 日波段三大主力：富邦證券, 凱基, 國泰證券",
-  "divergence_alert": null,
+  "divergence_alert": {
+    "type": "bear",
+    "title": "⚠️ 價漲籌碼散（空方頂背離）",
+    "desc": "近 5 日股價上漲 +3.44%，但全體波段分點逢高調節且全市場 5 日集中度轉負至 -6.89%。<br>代表大資金正趁拉抬派發籌碼，追高風險顯著升高。"
+  },
   "scenario": {
     "id": 5,
     "type": "bear",
@@ -40,7 +41,7 @@
         "detail": "千張大戶比率單週顯著下滑且股東人數增加，歸戶籌碼明顯發散。"
       }
     ],
-    "conviction_score": null,
+    "conviction_score": 28,
     "score_breakdown": {
       "base": 50,
       "trend_total": -20,
@@ -61,11 +62,8 @@
     "margin_quadrant": 0,
     "sbl_mode": "neutral",
     "few_holding_up": false,
-    "is_incomplete": true,
-    "missing_items": [
-      "融資融券",
-      "借券賣出"
-    ]
+    "is_incomplete": false,
+    "missing_items": []
   },
   "concentrations": {
     "d5": {
@@ -371,8 +369,32 @@
     "few_holding_up": false
   },
   "broker_diff_info": null,
-  "margin_info": null,
-  "sbl_info": null,
+  "margin_info": {
+    "date": "2026-11-27",
+    "lag_days": 0,
+    "is_latest": true,
+    "latest_bal": 19123,
+    "chg_5d": 1207,
+    "chg_5d_pct": 6.74,
+    "chg_5d_z": 0.96,
+    "chg_5d_vol_pct": 1.69,
+    "short_bal": 352,
+    "short_margin_ratio": 1.84,
+    "quadrant": 0,
+    "domestic_top_buy_5d": 1737
+  },
+  "sbl_info": {
+    "date": "2026-11-27",
+    "lag_days": 0,
+    "is_latest": true,
+    "latest_bal": 11434,
+    "chg_5d": 620,
+    "chg_5d_pct": 5.73,
+    "chg_5d_z": 0.45,
+    "chg_5d_vol_pct": 0.87,
+    "chg_1d": 74,
+    "sbl_mode": "neutral"
+  },
   "tdcc_info": {
     "date": "2026-11-20",
     "age_days": 7,
@@ -717,7 +739,7 @@
       "total_holders": 60640
     }
   ],
-  "last_updated": "2026-11-27 20:13",
+  "last_updated": "2026-11-27 21:13",
   "debug_notes": [],
   "github_sync": "✅ 已單次打包同步（全部更新 9 檔）"
 }
