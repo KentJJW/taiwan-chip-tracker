@@ -149,6 +149,16 @@ st.markdown("""
     padding-right: 8px !important;
     font-variant-numeric: tabular-nums;
 }
+[class*="st-key-sel_active_"] button {
+    background-color: rgba(56, 189, 248, 0.16) !important;
+    border-color: #38bdf8 !important;
+    border-left: 4px solid #38bdf8 !important;
+    padding-left: 7px !important;
+}
+[class*="st-key-sel_active_"] button:hover {
+    background-color: rgba(56, 189, 248, 0.22) !important;
+    border-color: #7dd3fc !important;
+}
 [class*="st-key-sel_"] button > div {
     width: 100% !important;
     display: flex !important;
@@ -163,12 +173,15 @@ st.markdown("""
     text-overflow: ellipsis;
     margin: 0 !important;
 }
+[class*="st-key-sel_"] button strong {
+    display: inline-block;
+    min-width: 3.8rem;
+    margin-right: 0.65rem;
+    text-align: left;
+}
 [class*="st-key-sel_"] button strong,
 [class*="st-key-sel_"] button strong span {
     color: #fbbf24 !important;
-    display: inline-block;
-    min-width: 2.35rem;
-    text-align: left;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -1077,8 +1090,9 @@ with st.sidebar:
                 score_txt = get_stock_sidebar_score(sid)
                 with col_s:
                     is_current = (sid == st.session_state.get("active_stock"))
-                    btn_label = f":orange[**{score_txt}**] ▶ {display_name}" if is_current else f":orange[**{score_txt}**] {display_name}"
-                    if st.button(btn_label, key=f"sel_{sid}", width="stretch"):
+                    btn_label = f":orange[**{score_txt}**] {display_name}"
+                    btn_key = f"sel_active_{sid}" if is_current else f"sel_{sid}"
+                    if st.button(btn_label, key=btn_key, width="stretch"):
                         st.session_state["active_stock"] = sid
                         st.rerun()
                 with col_del:
