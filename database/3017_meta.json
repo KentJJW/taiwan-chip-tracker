@@ -2,48 +2,53 @@
   "completeness": {
     "is_complete": false,
     "missing_items": [
-      "主力分點明細",
       "融資融券",
       "借券賣出"
     ],
-    "has_broker": false,
-    "has_conc5": false,
+    "has_broker": true,
+    "has_conc5": true,
     "has_margin": false,
     "has_sbl": false,
     "has_trust": true,
     "anchor_date": "2026-11-27"
   },
-  "main_force_html": "永豐金證券（近60日 <span style=\"color:#ef5350; font-weight:700;\">+1,651 張</span>）",
+  "main_force_html": "永豐金證券（近60日 <span style=\"color:#ef5350; font-weight:700;\">+1,697 張</span>）",
   "main_force_sub_lines": [
-    "今年累計 <span style=\"color:#ef5350; font-weight:700;\">+2,387 張</span> ｜ 單一均價 <b style='color:#e2e8f0;'>2,875.32 元</b>",
-    "三大主力合計成本：<b style='color:#ffb74d;'>2,897.32 元</b>（帳面 <span style=\"color:#26a69a; font-weight:700;\">-3.19%</span>）"
+    "今年累計 <span style=\"color:#ef5350; font-weight:700;\">+2,433 張</span> ｜ 單一均價 <b style='color:#e2e8f0;'>2,874.62 元</b>",
+    "三大主力合計成本：<b style='color:#ffb74d;'>3,002.67 元</b>（帳面 <span style=\"color:#26a69a; font-weight:700;\">-6.58%</span>）"
   ],
-  "status_html": "🔴 區間內三大波段主力吃貨中（<span style=\"color:#ef5350; font-weight:700;\">+6,743 張</span>）",
-  "status_sub": "近 60 日波段三大主力：永豐金證券, 群益金鼎, 中國信託",
+  "status_html": "🔴 區間內三大波段主力吃貨中（<span style=\"color:#ef5350; font-weight:700;\">+7,780 張</span>）",
+  "status_sub": "近 60 日波段三大主力：永豐金證券, 群益金鼎, 元大證券",
   "divergence_alert": null,
   "scenario": {
     "id": 3,
     "type": "neutral",
     "sub_type": "籌碼中性",
     "title": "⚪ 純籌碼狀態：3. 籌碼中性／換手觀望（31～59 分）",
-    "desc": "全體波段分點 20 日合計 -815 張（控盤 -1.0%／庫存站上20日均線）；全市場集中度 5/10/20 日分別為 N/A / N/A / N/A，主力廣度累積中，多空力道大致平衡（趨勢 +0 ／ 動能 +0）。",
+    "desc": "全體波段分點 20 日合計 -1,072 張（控盤 -1.4%／庫存跌破20日均線）；全市場集中度 5/10/20 日分別為 +1.5% / -0.5% / +0.1%，主力廣度 66%，多空力道大致平衡（趨勢 -6 ／ 動能 +5）。",
     "action": "大資金尚未展現單邊波段傾向，宜等待全體波段分點庫存方向表態。",
-    "badges": [],
+    "badges": [
+      {
+        "label": "🧭 主力共識 (66%)",
+        "level": "bull",
+        "detail": "近 5 日波段分點 19 買 / 10 賣，多數大戶方向一致偏多。"
+      }
+    ],
     "conviction_score": null,
     "score_breakdown": {
       "base": 50,
-      "trend_total": 0,
-      "trend_wave": 0,
+      "trend_total": -6,
+      "trend_wave": -6,
       "trend_conc": 0,
       "trend_tdcc": 0,
       "trend_inst": 0,
-      "momentum_total": 0,
-      "mom_conc_breadth": 0,
+      "momentum_total": 5,
+      "mom_conc_breadth": 5,
       "mom_credit_sbl": 0,
       "day_trade": 0,
-      "conc_breadth": 0,
-      "conc_diff": 0,
-      "wave_trust": 0,
+      "conc_breadth": 5,
+      "conc_diff": 5,
+      "wave_trust": -6,
       "credit_sbl": 0,
       "tdcc": 0
     },
@@ -52,35 +57,34 @@
     "few_holding_up": false,
     "is_incomplete": true,
     "missing_items": [
-      "主力分點明細",
       "融資融券",
       "借券賣出"
     ]
   },
   "concentrations": {
     "d5": {
-      "pct": null,
-      "net": 0,
-      "buy15": 0,
-      "sell15": 0,
-      "z_score": null,
-      "z_samples": 0
+      "pct": 1.47,
+      "net": 341,
+      "buy15": 2477,
+      "sell15": 2136,
+      "z_score": 0.58,
+      "z_samples": 214
     },
     "d10": {
-      "pct": null,
-      "net": 0,
-      "buy15": 0,
-      "sell15": 0,
-      "z_score": null,
-      "z_samples": 0
+      "pct": -0.48,
+      "net": -207,
+      "buy15": 3093,
+      "sell15": 3300,
+      "z_score": 0.09,
+      "z_samples": 209
     },
     "d20": {
-      "pct": null,
-      "net": 0,
-      "buy15": 0,
-      "sell15": 0,
-      "z_score": null,
-      "z_samples": 0
+      "pct": 0.11,
+      "net": 91,
+      "buy15": 5928,
+      "sell15": 5837,
+      "z_score": -0.05,
+      "z_samples": 199
     }
   },
   "broker_tags": {
@@ -113,7 +117,7 @@
       "🌐 外資"
     ],
     "凱基": [
-      "⚡ 隔日沖"
+      "🏆 贏家"
     ],
     "群益金鼎": [
       "🏆 贏家"
@@ -182,6 +186,7 @@
       "摩根大通",
       "永豐金證券",
       "台灣摩根士丹利",
+      "凱基",
       "台新-台北",
       "群益金鼎",
       "港商野村",
@@ -206,19 +211,19 @@
       "元大-松江",
       "中國信託-新竹"
     ],
-    "broker_count": 31,
-    "net_1d": 0,
-    "net_5d": 512,
-    "net_10d": -77,
-    "net_20d": -815,
-    "net_60d": -1972,
-    "ctrl_5d_pct": 2.2,
-    "ctrl_20d_pct": -1.03,
-    "ctrl_60d_pct": -0.98,
-    "ctrl_20d_z": -0.25,
-    "cum_now": 10982,
-    "cum_ma20": 10790,
-    "cum_above_ma20": true
+    "broker_count": 32,
+    "net_1d": -332,
+    "net_5d": 134,
+    "net_10d": -524,
+    "net_20d": -1072,
+    "net_60d": -1838,
+    "ctrl_5d_pct": 0.58,
+    "ctrl_20d_pct": -1.35,
+    "ctrl_60d_pct": -0.91,
+    "ctrl_20d_z": -0.46,
+    "cum_now": 12888,
+    "cum_ma20": 13040,
+    "cum_above_ma20": false
   },
   "wave_broker_names": [
     "美商高盛",
@@ -229,6 +234,7 @@
     "摩根大通",
     "永豐金證券",
     "台灣摩根士丹利",
+    "凱基",
     "台新-台北",
     "群益金鼎",
     "港商野村",
@@ -256,68 +262,68 @@
   "top3_names": [
     "永豐金證券",
     "群益金鼎",
-    "中國信託"
+    "元大證券"
   ],
-  "top3_period_net": 6743,
-  "top3_period_ctrl_pct": 0.6,
+  "top3_period_net": 7780,
+  "top3_period_ctrl_pct": 0.7,
   "top3_5d_ctrl_pct": 2.9,
-  "top3_5d_ctrl_z": 0.46,
+  "top3_5d_ctrl_z": 0.15,
   "top3_5d_float_pct": 0.17,
-  "top3_cost": 2897.32,
+  "top3_cost": 3002.67,
   "top3_rows": [
     {
       "name": "永豐金證券",
-      "net_60d": 1651,
-      "ytd": 2387,
-      "period": 2387,
-      "d1": 0,
-      "d10": 858,
-      "d20": 919,
-      "streak": 0,
+      "net_60d": 1697,
+      "ytd": 2433,
+      "period": 2433,
+      "d1": 46,
+      "d10": 904,
+      "d20": 965,
+      "streak": 3,
       "ctrl_pct": 0.2,
       "tags": [
         "🏆 贏家"
       ],
       "win_rate": 69.2,
       "avg_fwd_ret": 11.44,
-      "churn_ratio": 1.97
+      "churn_ratio": 1.94
     },
     {
       "name": "群益金鼎",
-      "net_60d": 1363,
-      "ytd": 2239,
-      "period": 2239,
-      "d1": 0,
-      "d10": 337,
-      "d20": 1102,
-      "streak": 0,
+      "net_60d": 1360,
+      "ytd": 2236,
+      "period": 2236,
+      "d1": -3,
+      "d10": 334,
+      "d20": 1099,
+      "streak": -1,
       "ctrl_pct": 0.2,
       "tags": [
         "🏆 贏家"
       ],
       "win_rate": 69.2,
       "avg_fwd_ret": 6.74,
-      "churn_ratio": 2.16
+      "churn_ratio": 2.17
     },
     {
-      "name": "中國信託",
-      "net_60d": 1149,
-      "ytd": 2117,
-      "period": 2117,
-      "d1": 0,
-      "d10": 227,
-      "d20": 654,
-      "streak": 0,
-      "ctrl_pct": 0.2,
+      "name": "元大證券",
+      "net_60d": 1290,
+      "ytd": 3111,
+      "period": 3111,
+      "d1": 226,
+      "d10": -92,
+      "d20": -57,
+      "streak": 1,
+      "ctrl_pct": 0.3,
       "tags": [
         "🏆 贏家"
       ],
-      "win_rate": 66.7,
-      "avg_fwd_ret": 9.17,
-      "churn_ratio": 1.86
+      "win_rate": 69.2,
+      "avg_fwd_ret": 6.5,
+      "churn_ratio": 4.47
     }
   ],
-  "remark_md": "- 💡 備註：本檢視區間分點買超第一名為 **港商麥格理**（:red[**+3,964 張**]） ｜ 分點賣超第一名為 **富邦證券**（:green[**-3,420 張**]）",
+  "remark_md": "- 💡 備註：本檢視區間分點買超第一名為 **港商麥格理**（:red[**+3,955 張**]） ｜ 分點賣超第一名為 **富邦證券**（:green[**-3,482 張**]）",
   "trust_info": {
     "date": "2026-11-27",
     "is_pending": false,
@@ -341,7 +347,24 @@
       "momentum_level": "bull"
     }
   },
-  "breadth_info": null,
+  "breadth_info": {
+    "breadth_5d": 65.5,
+    "buy_5d": 19,
+    "sell_5d": 10,
+    "active_5d": 29,
+    "breadth_1d": 44.0,
+    "buy_1d": 11,
+    "sell_1d": 14,
+    "active_1d": 25,
+    "foreign_breadth_5d": 45.5,
+    "foreign_buy_5d": 5,
+    "foreign_sell_5d": 6,
+    "foreign_active_5d": 11,
+    "high_streak": 0,
+    "low_streak": 0,
+    "total_wave_brokers": 32,
+    "few_holding_up": false
+  },
   "broker_diff_info": null,
   "margin_info": null,
   "sbl_info": null,
@@ -369,13 +392,13 @@
     },
     {
       "name": "香港上海匯豐",
-      "net_1d": 0,
-      "net_5d": 35,
-      "net_10d": -71,
-      "net_20d": -29,
-      "net_60d": 261,
-      "net_ytd": 1271,
-      "churn_ratio": 2.59,
+      "net_1d": -2,
+      "net_5d": 33,
+      "net_10d": -73,
+      "net_20d": -31,
+      "net_60d": 259,
+      "net_ytd": 1269,
+      "churn_ratio": 2.62,
       "flip_rate": 0.27,
       "is_foreign": true,
       "is_day_trader": false,
@@ -390,14 +413,14 @@
     },
     {
       "name": "兆豐證券",
-      "net_1d": 0,
-      "net_5d": 112,
-      "net_10d": 253,
-      "net_20d": 316,
-      "net_60d": 1,
-      "net_ytd": 2062,
-      "churn_ratio": 1717.0,
-      "flip_rate": 0.37,
+      "net_1d": -66,
+      "net_5d": 46,
+      "net_10d": 187,
+      "net_20d": 250,
+      "net_60d": -65,
+      "net_ytd": 1996,
+      "churn_ratio": 27.43,
+      "flip_rate": 0.41,
       "is_foreign": false,
       "is_day_trader": false,
       "is_winner": true,
@@ -410,13 +433,13 @@
     },
     {
       "name": "永豐金證券",
-      "net_1d": 0,
-      "net_5d": 292,
-      "net_10d": 858,
-      "net_20d": 919,
-      "net_60d": 1651,
-      "net_ytd": 2387,
-      "churn_ratio": 1.97,
+      "net_1d": 46,
+      "net_5d": 338,
+      "net_10d": 904,
+      "net_20d": 965,
+      "net_60d": 1697,
+      "net_ytd": 2433,
+      "churn_ratio": 1.94,
       "flip_rate": 0.29,
       "is_foreign": false,
       "is_day_trader": false,
@@ -430,14 +453,14 @@
     },
     {
       "name": "群益金鼎",
-      "net_1d": 0,
-      "net_5d": 335,
-      "net_10d": 337,
-      "net_20d": 1102,
-      "net_60d": 1363,
-      "net_ytd": 2239,
-      "churn_ratio": 2.16,
-      "flip_rate": 0.36,
+      "net_1d": -3,
+      "net_5d": 332,
+      "net_10d": 334,
+      "net_20d": 1099,
+      "net_60d": 1360,
+      "net_ytd": 2236,
+      "churn_ratio": 2.17,
+      "flip_rate": 0.38,
       "is_foreign": false,
       "is_day_trader": false,
       "is_winner": true,
@@ -450,42 +473,54 @@
     }
   ],
   "recent_10d_rising": {
-    "永豐金證券": 858,
-    "新加坡商瑞銀": 410,
-    "群益金鼎": 337,
-    "兆豐證券": 253,
-    "中國信託": 227
+    "永豐金證券": 904,
+    "群益金鼎": 334,
+    "新加坡商瑞銀": 255,
+    "中國信託": 224,
+    "凱基": 221
   },
   "top_buyers": {
-    "永豐金證券": 1651,
-    "群益金鼎": 1363,
-    "中國信託": 1149,
-    "元大證券": 1064,
-    "國票-敦北法人": 696
+    "永豐金證券": 1697,
+    "群益金鼎": 1360,
+    "元大證券": 1290,
+    "中國信託": 1146,
+    "凱基": 802
   },
   "top_sellers": {
-    "摩根大通": -3561,
+    "摩根大通": -3552,
     "美林": -1686,
-    "富邦證券": -1166,
-    "花旗環球": -933,
-    "台灣摩根士丹利": -909
+    "富邦證券": -1228,
+    "台灣摩根士丹利": -1017,
+    "花旗環球": -897
   },
   "ytd_top_buyers": {
-    "港商麥格理": 3964,
+    "港商麥格理": 3955,
     "美林": 3446,
-    "元大證券": 2885,
-    "永豐金證券": 2387,
-    "群益金鼎": 2239
+    "元大證券": 3111,
+    "凱基": 2574,
+    "永豐金證券": 2433
   },
   "ytd_top_sellers": {
-    "富邦證券": -3420,
-    "美商高盛": -1896,
-    "摩根大通": -1537,
-    "台灣摩根士丹利": -1485,
-    "港商野村": -1082
+    "富邦證券": -3482,
+    "美商高盛": -2228,
+    "台灣摩根士丹利": -1593,
+    "摩根大通": -1528,
+    "港商野村": -1160
   },
-  "today_buyers": {},
-  "today_sellers": {},
+  "today_buyers": {
+    "凱基": 336,
+    "元大證券": 226,
+    "凱基-台北": 66,
+    "華南永昌": 63,
+    "永豐金證券": 46
+  },
+  "today_sellers": {
+    "美商高盛": -332,
+    "凱基-城中": -175,
+    "新加坡商瑞銀": -155,
+    "台灣摩根士丹利": -108,
+    "港商野村": -78
+  },
   "stock_id": "3017",
   "stock_name": "奇鋐",
   "ticker_suffix": ".TW",
@@ -638,7 +673,7 @@
     }
   },
   "tdcc_history": [],
-  "last_updated": "2026-11-27 17:12",
+  "last_updated": "2026-11-27 17:32",
   "debug_notes": [],
-  "github_sync": "✅ 已單次打包同步 4 個檔案至 GitHub database/"
+  "github_sync": "✅ 已單次打包同步（全部更新 9 檔）"
 }
