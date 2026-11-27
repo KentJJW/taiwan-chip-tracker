@@ -140,6 +140,8 @@ st.markdown("""
 .matrix-active-neutral td { background-color: rgba(245, 158, 11, 0.13); color: #ffffff; border-top: 1px solid rgba(245, 158, 11, 0.45); border-bottom: 1px solid rgba(245, 158, 11, 0.45); }
 .sidebar-help-box { background-color: #1a1f2b; border: 1px solid #2d3548; border-radius: 6px; padding: 7px 10px; font-size: 0.78rem; color: #94a3b8; line-height: 1.5; margin-bottom: 8px; }
 .snap-bar-label { font-size: 0.82rem; color: #94a3b8; padding-top: 8px; font-weight: 600; }
+[class*="st-key-sel_"] button { justify-content: flex-start !important; padding-left: 12px !important; padding-right: 8px !important; font-variant-numeric: tabular-nums; }
+[class*="st-key-sel_"] button p { white-space: nowrap !important; overflow: hidden; text-overflow: ellipsis; text-align: left !important; margin: 0 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -230,6 +232,24 @@ def get_stock_display_label(stock_id: str) -> str:
         return f"{stock_id} {fetched_name}"
 
     return stock_id
+
+def get_stock_sidebar_score(stock_id: str) -> str:
+    """從 _meta.json 讀取最新籌碼健康分數（結算中或無分數回傳 TBD）"""
+    meta_path = os.path.join(DB_DIR, f"{stock_id}_meta.json")
+    if not os.path.exists(meta_path):
+        return "TBD"
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta_data = json.load(f)
+        sc = meta_data.get("scenario") if isinstance(meta_data, dict) else None
+        if not isinstance(sc, dict) or sc.get("is_incomplete"):
+            return "TBD"
+        score = sc.get("conviction_score")
+        if score is None or pd.isna(score):
+            return "TBD"
+        return str(int(round(float(score))))
+    except Exception:
+        return "TBD"
 
 
 def parse_manual_date(text: str, fallback: str) -> str:
@@ -965,11 +985,12 @@ with st.sidebar:
                         st.rerun()
         else:
             for sid in saved_list:
-                col_s, col_upd, col_del = st.columns([3.3, 0.85, 0.85])
+                col_s, col_upd, col_del = st.columns([3.5, 0.75, 0.75])
                 display_name = get_stock_display_label(sid)
+                score_txt = get_stock_sidebar_score(sid)
                 with col_s:
                     is_current = (sid == st.session_state.get("active_stock"))
-                    btn_label = f"▶ {display_name}" if is_current else display_name
+                    btn_label = f"{score_txt} ▶ {display_name}" if is_current else f"{score_txt} {display_name}"
                     if st.button(btn_label, key=f"sel_{sid}", width="stretch"):
                         st.session_state["active_stock"] = sid
                         st.rerun()
