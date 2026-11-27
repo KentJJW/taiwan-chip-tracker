@@ -22,23 +22,28 @@
     "type": "neutral",
     "sub_type": "籌碼中性",
     "title": "⚪ 純籌碼狀態：3. 籌碼中性／換手觀望（31～59 分）",
-    "desc": "全體波段分點 20 日合計 -556 張（控盤 -0.7%／庫存站上20日均線）；全市場集中度 5/10/20 日分別為 +1.5% / -0.5% / +0.1%，主力廣度 67%，多空力道大致平衡（趨勢 +0 ／ 動能 +5）。",
+    "desc": "全體波段分點 20 日合計 -556 張（控盤 -0.7%／庫存站上20日均線）；全市場集中度 5/10/20 日分別為 +1.5% / -0.5% / +0.1%，主力廣度 67%，多空力道大致平衡（趨勢 +3 ／ 動能 +5）。",
     "action": "大資金尚未展現單邊波段傾向，宜等待全體波段分點庫存方向表態。",
     "badges": [
+      {
+        "label": "🐋 集保大戶增持 (+0.35%)",
+        "level": "bull",
+        "detail": "千張大戶比率上升且散戶總人數減少，確認籌碼往大戶集中。"
+      },
       {
         "label": "🧭 主力共識 (67%)",
         "level": "bull",
         "detail": "近 5 日波段分點 20 買 / 10 賣，多數大戶方向一致偏多。"
       }
     ],
-    "conviction_score": 55,
+    "conviction_score": 58,
     "score_breakdown": {
       "base": 50,
-      "trend_total": 0,
+      "trend_total": 3,
       "trend_wave": 0,
       "trend_conc": 0,
-      "trend_tdcc": 0,
-      "trend_inst": 0,
+      "trend_tdcc": 3,
+      "trend_inst": 3,
       "momentum_total": 5,
       "mom_conc_breadth": 5,
       "mom_credit_sbl": 0,
@@ -47,7 +52,7 @@
       "conc_diff": 5,
       "wave_trust": 0,
       "credit_sbl": 0,
-      "tdcc": 0
+      "tdcc": 3
     },
     "margin_quadrant": 0,
     "sbl_mode": "neutral",
@@ -392,15 +397,15 @@
     "sbl_mode": "neutral"
   },
   "tdcc_info": {
-    "date": "2026-11-20",
-    "age_days": 7,
+    "date": "2026-11-27",
+    "age_days": 0,
     "is_stale": false,
-    "whale_1000_pct": 53.56,
-    "whale_400_pct": 67.21,
-    "total_holders": 116214,
-    "whale_1000_chg_1w": -0.19,
-    "whale_400_chg_1w": 0.1,
-    "holders_chg_1w": 2495
+    "whale_1000_pct": 53.91,
+    "whale_400_pct": 67.67,
+    "total_holders": 114447,
+    "whale_1000_chg_1w": 0.35,
+    "whale_400_chg_1w": 0.46,
+    "holders_chg_1w": -1767
   },
   "winner_brokers": [
     {
@@ -721,9 +726,15 @@
       "whale_1000_pct": 53.56,
       "whale_400_pct": 67.21,
       "total_holders": 116214
+    },
+    {
+      "date": "2026-11-27",
+      "whale_1000_pct": 53.91,
+      "whale_400_pct": 67.67,
+      "total_holders": 114447
     }
   ],
-  "last_updated": "2026-11-27 21:13",
+  "last_updated": "2026-11-28 04:00",
   "debug_notes": [],
-  "github_sync": "✅ 已單次打包同步（全部更新 9 檔）"
+  "github_sync": "✅ GitHub Actions 自動滾動同步（近 22 日）"
 }

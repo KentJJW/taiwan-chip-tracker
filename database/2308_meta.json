@@ -375,15 +375,15 @@
     "sbl_mode": "neutral"
   },
   "tdcc_info": {
-    "date": "2026-11-20",
-    "age_days": 7,
+    "date": "2026-11-27",
+    "age_days": 0,
     "is_stale": false,
-    "whale_1000_pct": 72.63,
-    "whale_400_pct": 79.38,
-    "total_holders": 729969,
-    "whale_1000_chg_1w": -0.01,
-    "whale_400_chg_1w": 0.0,
-    "holders_chg_1w": 9592
+    "whale_1000_pct": 72.47,
+    "whale_400_pct": 79.17,
+    "total_holders": 732006,
+    "whale_1000_chg_1w": -0.16,
+    "whale_400_chg_1w": -0.21,
+    "holders_chg_1w": 2037
   },
   "winner_brokers": [
     {
@@ -695,9 +695,15 @@
       "whale_1000_pct": 72.63,
       "whale_400_pct": 79.38,
       "total_holders": 729969
+    },
+    {
+      "date": "2026-11-27",
+      "whale_1000_pct": 72.47,
+      "whale_400_pct": 79.17,
+      "total_holders": 732006
     }
   ],
-  "last_updated": "2026-11-27 21:14",
+  "last_updated": "2026-11-28 04:00",
   "debug_notes": [],
-  "github_sync": "✅ 已單次打包同步（全部更新 9 檔）"
+  "github_sync": "✅ GitHub Actions 自動滾動同步（近 22 日）"
 }

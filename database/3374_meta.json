@@ -36,7 +36,7 @@
         "detail": "全市場 5/10/20 日集中度同步為負（-6.9% / -9.9% / -2.3%）。"
       },
       {
-        "label": "⚠️ 集保大戶大減 (-4.22%)",
+        "label": "⚠️ 集保大戶大減 (-1.42%)",
         "level": "bear",
         "detail": "千張大戶比率單週顯著下滑且股東人數增加，歸戶籌碼明顯發散。"
       }
@@ -396,15 +396,15 @@
     "sbl_mode": "neutral"
   },
   "tdcc_info": {
-    "date": "2026-11-20",
-    "age_days": 7,
+    "date": "2026-11-27",
+    "age_days": 0,
     "is_stale": false,
-    "whale_1000_pct": 61.79,
-    "whale_400_pct": 65.49,
-    "total_holders": 60640,
-    "whale_1000_chg_1w": -4.22,
-    "whale_400_chg_1w": -4.71,
-    "holders_chg_1w": 9665
+    "whale_1000_pct": 60.37,
+    "whale_400_pct": 63.52,
+    "total_holders": 63934,
+    "whale_1000_chg_1w": -1.42,
+    "whale_400_chg_1w": -1.97,
+    "holders_chg_1w": 3294
   },
   "winner_brokers": [
     {
@@ -737,9 +737,15 @@
       "whale_1000_pct": 61.79,
       "whale_400_pct": 65.49,
       "total_holders": 60640
+    },
+    {
+      "date": "2026-11-27",
+      "whale_1000_pct": 60.37,
+      "whale_400_pct": 63.52,
+      "total_holders": 63934
     }
   ],
-  "last_updated": "2026-11-27 21:13",
+  "last_updated": "2026-11-28 04:01",
   "debug_notes": [],
-  "github_sync": "✅ 已單次打包同步（全部更新 9 檔）"
+  "github_sync": "✅ GitHub Actions 自動滾動同步（近 22 日）"
 }
