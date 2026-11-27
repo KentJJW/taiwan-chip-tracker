@@ -2510,19 +2510,21 @@ def update_stock_database(stock_id: str, incremental_days: int = None, sync_gith
 
     # 6. 合併或覆蓋資料庫
     if is_incremental:
-        df_price_kept = df_price_old[df_price_old["date"] < fetch_start].copy()
+        recent_dates = set(df_price_recent["date"].astype(str).tolist())
+
+        df_price_kept = df_price_old[~df_price_old["date"].astype(str).isin(recent_dates)].copy()
         df_price = pd.concat([df_price_kept, df_price_recent], ignore_index=True, sort=False).sort_values("date").reset_index(drop=True)
         if "adj_factor" in df_price.columns:
             df_price["adj_factor"] = pd.to_numeric(df_price["adj_factor"], errors="coerce").ffill().bfill().fillna(1.0)
 
-        df_chips_kept = df_chips_old[df_chips_old["date"] < fetch_start].copy()
+        df_chips_kept = df_chips_old[~df_chips_old["date"].astype(str).isin(recent_dates)].copy()
         df_chips = pd.concat([df_chips_kept, df_chips_recent], ignore_index=True, sort=False).fillna(0.0)
         df_chips = df_chips.sort_values("date").reset_index(drop=True)
         total_brokers = len([c for c in df_chips.columns if c not in ("date", "投信")])
 
         if os.path.exists(aux_path):
             df_aux_old = pd.read_csv(aux_path)
-            df_aux_kept = df_aux_old[df_aux_old["date"] < fetch_start].copy()
+            df_aux_kept = df_aux_old[~df_aux_old["date"].astype(str).isin(recent_dates)].copy()
             df_aux = pd.concat([df_aux_kept, df_aux_recent], ignore_index=True, sort=False).sort_values("date").reset_index(drop=True)
         else:
             df_aux = df_aux_recent
