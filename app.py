@@ -140,6 +140,52 @@ st.markdown("""
 .matrix-active-neutral td { background-color: rgba(245, 158, 11, 0.13); color: #ffffff; border-top: 1px solid rgba(245, 158, 11, 0.45); border-bottom: 1px solid rgba(245, 158, 11, 0.45); }
 .sidebar-help-box { background-color: #1a1f2b; border: 1px solid #2d3548; border-radius: 6px; padding: 7px 10px; font-size: 0.78rem; color: #94a3b8; line-height: 1.5; margin-bottom: 8px; }
 .snap-bar-label { font-size: 0.82rem; color: #94a3b8; padding-top: 8px; font-weight: 600; }
+/* 左側已存個股清單：分數置於最左側、股號對齊、選中改冰藍底框 */
+section[data-testid="stSidebar"] [class*="st-key-sel_"] button {
+    display: flex !important;
+    justify-content: flex-start !important;
+    align-items: center !important;
+    text-align: left !important;
+    padding-left: 10px !important;
+    padding-right: 8px !important;
+    font-variant-numeric: tabular-nums;
+}
+section[data-testid="stSidebar"] [class*="st-key-sel_active_"] button {
+    background-color: rgba(56, 189, 248, 0.16) !important;
+    border-color: #38bdf8 !important;
+    border-left: 4px solid #38bdf8 !important;
+    padding-left: 7px !important;
+}
+section[data-testid="stSidebar"] [class*="st-key-sel_active_"] button:hover {
+    background-color: rgba(56, 189, 248, 0.22) !important;
+    border-color: #7dd3fc !important;
+}
+section[data-testid="stSidebar"] [class*="st-key-sel_"] button > div {
+    width: 100% !important;
+    display: flex !important;
+    justify-content: flex-start !important;
+    text-align: left !important;
+}
+section[data-testid="stSidebar"] [class*="st-key-sel_"] button p {
+    width: 100% !important;
+    text-align: left !important;
+    white-space: nowrap !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin: 0 !important;
+}
+section[data-testid="stSidebar"] [class*="st-key-sel_"] button strong {
+    display: inline-block;
+    min-width: 2.3rem;
+    margin-right: 0.55rem;
+    text-align: left;
+}
+section[data-testid="stSidebar"] [class*="st-key-sel_"] button strong,
+section[data-testid="stSidebar"] [class*="st-key-sel_"] button strong span {
+    color: #fbbf24 !important;
+}
+
+/* 右側籌碼基準日按鈕：分數置於最左側 */
 [class*="st-key-btn_snap_"] button {
     display: flex !important;
     justify-content: flex-start !important;
