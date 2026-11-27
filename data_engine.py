@@ -54,7 +54,7 @@ DJ_MIRRORS = [
 
 FINMIND_API_URL = "https://api.finmindtrade.com/api/v4/data"
 
-_TDCC_CACHE: dict = {"ts": 0.0, "text": ""}
+_TDCC_CACHE: dict = {"ts": 0.0, "map": {}}
 _TDCC_CACHE_TTL = 3600
 _SBL_OFFICIAL_CACHE: dict[tuple[str, str], dict[str, float]] = {}
 
@@ -1012,68 +1012,211 @@ def fetch_sbl_history(
     return df_out
 
 
-def _get_tdcc_csv_text(session: requests.Session) -> str:
+def _get_tdcc_market_map(session: requests.Session) -> dict[str, dict]:
+    """
+    下載全市場 TDCC 集保 CSV 並直接解析為 {stock_id: entry} 字典快取（TTL 1 小時）：
+    - 雙官方網址備援（opendata / smart）＋ timeout 拉長至 25 秒
+    - 使用 csv.reader + strip() 徹底解決證券代號尾端空白 (e.g. '2454  ') 造成比對失敗的 BUG
+    - 嚴格驗證解析出超過 100 檔有效股票才寫入快取，防止 HTML 錯誤頁汙染快取
+    """
     now = time.time()
-    if _TDCC_CACHE["text"] and (now - _TDCC_CACHE["ts"]) < _TDCC_CACHE_TTL:
-        return _TDCC_CACHE["text"]
-    try:
-        url = "https://opendata.tdcc.com.tw/getOD.ashx?id=1-5"
-        resp = session.get(url, timeout=15, verify=False)
-        if resp.status_code == 200 and len(resp.content) > 1000:
+    if _TDCC_CACHE.get("map") and (now - _TDCC_CACHE.get("ts", 0.0)) < _TDCC_CACHE_TTL:
+        return _TDCC_CACHE["map"]
+
+    urls = [
+        "https://opendata.tdcc.com.tw/getOD.ashx?id=1-5",
+        "https://smart.tdcc.com.tw/opendata/getOD.ashx?id=1-5",
+    ]
+    for url in urls:
+        try:
+            resp = session.get(url, timeout=25, verify=False)
+            if resp.status_code != 200 or len(resp.content) < 10000:
+                continue
             text = resp.content.decode("utf-8-sig", errors="ignore")
-            _TDCC_CACHE["ts"] = now
-            _TDCC_CACHE["text"] = text
-            return text
+            head_lower = text[:400].lower()
+            if "<html" in head_lower or "<!doctype" in head_lower:
+                continue
+
+            acc: dict[str, dict] = {}
+            for row in csv.reader(io.StringIO(text)):
+                if len(row) < 6:
+                    continue
+                raw_dt = row[0].strip().replace("-", "").replace("/", "")
+                if len(raw_dt) != 8 or not raw_dt.isdigit():
+                    continue
+                sid = row[1].strip()
+                if not sid:
+                    continue
+                try:
+                    level = int(row[2].strip())
+                    holders = int(round(float(row[3].strip().replace(",", ""))))
+                    pct = float(row[5].strip().replace(",", "").replace("%", ""))
+                except ValueError:
+                    continue
+
+                rec = acc.get(sid)
+                if rec is None:
+                    rec = {
+                        "raw_dt": raw_dt,
+                        "w1000": 0.0,
+                        "w400": 0.0,
+                        "total_holders": 0,
+                        "sum_holders": 0,
+                    }
+                    acc[sid] = rec
+
+                if level == 17:
+                    rec["total_holders"] = holders
+                elif 1 <= level <= 15:
+                    rec["sum_holders"] += max(0, holders)
+                    if level >= 12:
+                        rec["w400"] += pct
+                    if level == 15:
+                        rec["w1000"] += pct
+
+            market_map: dict[str, dict] = {}
+            for sid, rec in acc.items():
+                holders_final = rec["total_holders"] if rec["total_holders"] > 0 else rec["sum_holders"]
+                if rec["w1000"] > 0 or rec["w400"] > 0 or holders_final > 0:
+                    rd = rec["raw_dt"]
+                    market_map[sid] = {
+                        "date": f"{rd[:4]}-{rd[4:6]}-{rd[6:8]}",
+                        "whale_1000_pct": round(rec["w1000"], 2),
+                        "whale_400_pct": round(rec["w400"], 2),
+                        "total_holders": int(holders_final),
+                    }
+
+            if len(market_map) >= 100:
+                _TDCC_CACHE["ts"] = now
+                _TDCC_CACHE["map"] = market_map
+                return market_map
+        except Exception:
+            continue
+
+    return _TDCC_CACHE.get("map") or {}
+
+
+def _fetch_tdcc_from_qry_stock(session: requests.Session, stock_id: str, max_weeks: int = 2) -> list[dict]:
+    """
+    備援／首週補歷史：透過集保官方單股查詢頁 (qryStock) 直接抓最新 1～2 週股權分散表，
+    避免全市場大檔超時，並讓新加入的個股當下即可算出週變化。
+    """
+    qry_url = "https://www.tdcc.com.tw/portal/zh/smWeb/qryStock"
+
+    def _parse_form(soup: BeautifulSoup):
+        tok_el = soup.find("input", {"name": "SYNCHRONIZER_TOKEN"})
+        uri_el = soup.find("input", {"name": "SYNCHRONIZER_URI"})
+        fir_el = soup.find("input", {"name": "firDate"})
+        sel_el = soup.find("select", {"name": "scaDate"})
+        dates = []
+        if sel_el:
+            for opt in sel_el.find_all("option"):
+                v = str(opt.get("value", "")).strip()
+                if re.match(r"^\d{8}$", v):
+                    dates.append(v)
+        token = str(tok_el.get("value", "")).strip() if tok_el else ""
+        uri = str(uri_el.get("value", "/portal/zh/smWeb/qryStock")).strip() if uri_el else "/portal/zh/smWeb/qryStock"
+        fir_date = (str(fir_el.get("value", "")).strip() if fir_el else "") or (dates[0] if dates else "")
+        return token, uri, fir_date, dates
+
+    results = []
+    try:
+        resp_get = session.get(qry_url, timeout=15, verify=False)
+        if resp_get.status_code != 200:
+            return []
+        token, uri, fir_date, avail_dates = _parse_form(BeautifulSoup(resp_get.text, "html.parser"))
+        if not token or not avail_dates:
+            return []
+
+        for target_dt in avail_dates[:max_weeks]:
+            if not token:
+                break
+            payload = {
+                "SYNCHRONIZER_TOKEN": token,
+                "SYNCHRONIZER_URI": uri,
+                "method": "submit",
+                "firDate": fir_date,
+                "scaDate": target_dt,
+                "sqlMethod": "StockNo",
+                "stockNo": stock_id,
+                "stockName": "",
+            }
+            resp_post = session.post(qry_url, data=payload, headers={"Referer": qry_url}, timeout=15, verify=False)
+            if resp_post.status_code != 200:
+                break
+            post_soup = BeautifulSoup(resp_post.text, "html.parser")
+            next_tok, next_uri, next_fir, _ = _parse_form(post_soup)
+            token = next_tok
+            if next_uri:
+                uri = next_uri
+            if next_fir:
+                fir_date = next_fir
+
+            w1000_pct, w400_pct = 0.0, 0.0
+            total_holders, sum_holders = 0, 0
+            for tr in post_soup.find_all("tr"):
+                tds = [
+                    td.get_text(strip=True).replace("\u3000", "").replace(" ", "")
+                    for td in tr.find_all("td", recursive=False)
+                ]
+                if not tds:
+                    continue
+                if any("合計" in c for c in tds[:2]):
+                    for idx_c, cell_txt in enumerate(tds):
+                        if "合計" in cell_txt and idx_c + 1 < len(tds):
+                            h_val = _to_clean_float(tds[idx_c + 1])
+                            if h_val is not None and h_val > 0:
+                                total_holders = int(round(h_val))
+                            break
+                    continue
+                if len(tds) >= 5 and tds[0].isdigit():
+                    lv = int(tds[0])
+                    h_val = _to_clean_float(tds[2])
+                    p_val = _to_clean_float(tds[4])
+                    if 1 <= lv <= 15:
+                        if h_val is not None and h_val >= 0:
+                            sum_holders += int(round(h_val))
+                        if p_val is not None:
+                            if lv >= 12:
+                                w400_pct += p_val
+                            if lv == 15:
+                                w1000_pct += p_val
+
+            holders_final = total_holders if total_holders > 0 else sum_holders
+            if w1000_pct > 0 or w400_pct > 0 or holders_final > 0:
+                results.append({
+                    "date": f"{target_dt[:4]}-{target_dt[4:6]}-{target_dt[6:8]}",
+                    "whale_1000_pct": round(w1000_pct, 2),
+                    "whale_400_pct": round(w400_pct, 2),
+                    "total_holders": int(holders_final),
+                })
     except Exception:
         pass
-    return _TDCC_CACHE["text"]
+    return results
 
 
 def fetch_tdcc_snapshot(session: requests.Session, stock_id: str, existing_history: list = None) -> list:
-    history = list(existing_history) if isinstance(existing_history, list) else []
-    try:
-        text = _get_tdcc_csv_text(session)
-        if not text:
-            return history
-        lines = [line.strip() for line in text.splitlines() if f",{stock_id}," in f",{line},"]
-        if not lines:
-            return history
+    """抓取集保大戶股權分散表並合併進歷史週序列（全市場 CSV 為主，失敗或不足 2 週自動走官方 qryStock 補齊）"""
+    stock_id = str(stock_id).strip()
+    by_date: dict[str, dict] = {}
+    if isinstance(existing_history, list):
+        for h in existing_history:
+            if isinstance(h, dict) and h.get("date"):
+                by_date[str(h["date"])] = h
 
-        w1000_pct, w400_pct, total_holders, raw_date = 0.0, 0.0, 0, ""
-        for line in lines:
-            parts = [p.strip() for p in line.split(",")]
-            if len(parts) < 6 or parts[1] != stock_id:
-                continue
-            raw_date = parts[0]
-            try:
-                level = int(parts[2])
-                holders = int(parts[3])
-                pct = float(parts[5])
-            except ValueError:
-                continue
-            if level == 17:
-                total_holders = holders
-            elif 1 <= level <= 15:
-                if level >= 12:
-                    w400_pct += pct
-                if level == 15:
-                    w1000_pct += pct
+    market_map = _get_tdcc_market_map(session)
+    found_in_csv = False
+    if stock_id in market_map:
+        entry = market_map[stock_id]
+        by_date[entry["date"]] = entry
+        found_in_csv = True
 
-        if raw_date and len(raw_date) == 8 and (w1000_pct > 0 or w400_pct > 0):
-            fmt_dt = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:8]}"
-            entry = {
-                "date": fmt_dt,
-                "whale_1000_pct": round(w1000_pct, 2),
-                "whale_400_pct": round(w400_pct, 2),
-                "total_holders": total_holders,
-            }
-            history = [h for h in history if h.get("date") != fmt_dt]
-            history.append(entry)
-            history.sort(key=lambda x: x.get("date", ""))
-            return history[-24:]
-    except Exception:
-        pass
-    return history
+    if (not found_in_csv) or (len(by_date) < 2):
+        for entry in _fetch_tdcc_from_qry_stock(session, stock_id, max_weeks=2):
+            by_date[entry["date"]] = entry
+
+    history = sorted(by_date.values(), key=lambda x: x.get("date", ""))
+    return history[-24:]
 
 
 def _populate_aux_concentrations(
