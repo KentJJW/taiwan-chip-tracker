@@ -49,18 +49,19 @@ FOREIGN_BROKER_KEYWORDS = (
 
 # 100% 純籌碼策略參數集中管理（趨勢 60% ＋ 動能 40%，已移除投信重複計分）
 STRATEGY_PARAMS = {
-    # 多空分數預設門檻（後續可依純籌碼回測數據調整）
+    # 多空分數預設門檻
     "bull_score_min": 55,
     "strong_bull_score_min": 70,
     "bear_score_max": 35,
     "long_exit_score": 40,
     "short_exit_score": 50,
 
-    # 滾動視窗與 Z-Score 門檻
+    # 滾動視窗、Z-Score 與集保時效門檻
     "wave_lookback_days": 60,
     "zscore_window": 60,
     "z_bull_min": 1.0,
     "z_bear_max": -1.0,
+    "tdcc_max_age_days": 14,
 
     # 全體波段分點合力控盤率門檻（趨勢核心）
     "wave_agg_20d_strong_pct": 4.0,
@@ -161,7 +162,7 @@ SCENARIO_MATRIX = [
         "name": "🟢 5. 波段全面發散（大戶撤退）",
         "main_cond": "全體波段分點 20/60 日合力持續倒貨，累計庫存跌破 20 日庫存均線向下",
         "conc_cond": "10/20 日與 5 日集中度轉負 ＋ 主力廣度 ≤ 35%（大戶／外資集體撤退）",
-        "aux_cond": "散戶融資過熱、借券加壓或集保大戶流出（空頭背景借券回補不加分）；純籌碼分數 ≤ 35",
+        "aux_cond": "散戶融資過熱、借券加壓或集保大戶流出（空頭背景借券回補不加分）；純籌碼分數 ≤ 35 或中線趨勢重挫",
         "action": "趨勢與動能同步偏空發散，大資金持續撤離且流向散戶，籌碼結構明顯不利多方。",
     },
 ]
@@ -246,7 +247,6 @@ def profile_brokers(
         gross_60d = float(np.abs(arr_lb).sum())
         churn_ratio = round(gross_60d / max(abs(float(net_60d)), 1.0), 2) if gross_60d > 0 else 0.0
 
-        # 動態隔日沖偵測（統計買超日後隔天立刻轉賣超的比例）
         active_days = int((arr_lb != 0).sum())
         buy_days_idx = np.where(arr_lb[:-1] > 0)[0]
         flip_rate = 0.0
@@ -265,7 +265,6 @@ def profile_brokers(
         )
         is_day_trader = bool(is_static_dt or is_dynamic_dt)
 
-        # 獨立事件 20 日前瞻勝率回測（僅對非隔日沖分點計算）
         win_rate = None
         avg_fwd_ret = None
         buy_signals = 0
@@ -365,11 +364,7 @@ def compute_wave_aggregate(
     df_chips_full: pd.DataFrame,
     profiles: dict | None = None,
 ) -> dict | None:
-    """
-    計算「全體波段分點合力」（排除隔日沖與投信，涵蓋買賣兩端所有追蹤核心分點）：
-    - 解決只抓「近 60 日最大買超前三名」在空頭段只看到接刀手、看不到砸盤黑手的盲區
-    - 產出 5/10/20/60 日淨流向、20/60 日控盤率、20 日控盤 Z-Score 與累計庫存相對 20 日均線位置
-    """
+    """計算全體波段分點合力（排除隔日沖與投信，涵蓋買賣兩端所有追蹤核心分點）"""
     if df_price_full is None or df_price_full.empty or df_chips_full is None or df_chips_full.empty:
         return None
 
@@ -443,11 +438,7 @@ def compute_broker_breadth(
     profiles: dict | None = None,
     lookback_days: int = 5,
 ) -> dict | None:
-    """
-    計算「主力分點廣度比（含外資分點共識度）」：
-    - 排除「投信」與隔日沖分點，統計追蹤波段分點中「淨買超家數 ÷ (買超家數 + 賣超家數)」
-    - 獨立拆出外資分點近 5 日買賣家數與共識比率，快速辨識外資集體買賣或對作
-    """
+    """計算主力分點廣度比（含外資分點共識度）"""
     if df_chips_full is None or df_chips_full.empty:
         return None
 
@@ -459,7 +450,6 @@ def compute_broker_breadth(
         wave_cols = [c for c in pure_cols if not profiles.get(c, {}).get("is_day_trader", c in DAY_TRADE_BROKERS)]
     else:
         wave_cols = [c for c in pure_cols if c not in DAY_TRADE_BROKERS]
-
     if not wave_cols:
         wave_cols = pure_cols
 
@@ -468,24 +458,19 @@ def compute_broker_breadth(
     if mat.shape[0] == 0:
         return None
 
-    # 近 5 日整體波段分點廣度
     sum_5d = mat[-lookback_days:].sum(axis=0)
     buy_5d = int((sum_5d > 0).sum())
     sell_5d = int((sum_5d < 0).sum())
     active_5d = buy_5d + sell_5d
     breadth_5d = round(buy_5d / active_5d * 100.0, 1) if active_5d > 0 else None
 
-    # 今日單日整體波段分點廣度
     day_1 = mat[-1]
     buy_1d = int((day_1 > 0).sum())
     sell_1d = int((day_1 < 0).sum())
     active_1d = buy_1d + sell_1d
     breadth_1d = round(buy_1d / active_1d * 100.0, 1) if active_1d > 0 else None
 
-    # 外資分點近 5 日共識度
-    f_buy_5d = 0
-    f_sell_5d = 0
-    f_active_5d = 0
+    f_buy_5d = f_sell_5d = f_active_5d = 0
     f_breadth_5d = None
     if foreign_cols:
         f_idx = [wave_cols.index(c) for c in foreign_cols]
@@ -507,8 +492,7 @@ def compute_broker_breadth(
         a_i = b_i + s_i
         if a_i < 4:
             break
-        pct_i = b_i / a_i * 100.0
-        if pct_i >= high_thresh:
+        if (b_i / a_i * 100.0) >= high_thresh:
             high_streak += 1
         else:
             break
@@ -519,8 +503,7 @@ def compute_broker_breadth(
         a_i = b_i + s_i
         if a_i < 4:
             break
-        pct_i = b_i / a_i * 100.0
-        if pct_i <= low_thresh:
+        if (b_i / a_i * 100.0) <= low_thresh:
             low_streak += 1
         else:
             break
@@ -559,7 +542,6 @@ def evaluate_trust_phase(trust_info: dict) -> dict:
     d20 = int(trust_info.get("d20", 0) or 0)
     hold_pct = trust_info.get("holding_pct")
 
-    # 1. 左標籤：純客觀持股水位
     tier_label = ""
     tier_level = "info"
     if hold_pct is not None:
@@ -573,7 +555,6 @@ def evaluate_trust_phase(trust_info: dict) -> dict:
         else:
             tier_label = f"低水位 ({hold_pct:.2f}%)"
 
-    # 2. 右標籤：真實波段與短線動向（嚴格以 20 日＋5 日方向為主，不被單日買賣誤導）
     is_sweet_spot = (hold_pct is not None) and (0.5 <= hold_pct <= 5.0)
     is_high_tier = (hold_pct is not None) and (hold_pct >= 10.0)
 
@@ -721,15 +702,14 @@ def evaluate_chip_scenario(
     wave_agg_info: dict | None = None,
 ) -> dict:
     """
-    100% 純籌碼「趨勢 (60%) ＋ 動能 (40%)」雙層健康評分引擎（方案 A｜基準 50 分，總分 0～100）：
-    註：投信下單已涵蓋於本土券商分點與全市場集中度中，為避免重複計權，投信不納入總分，僅於獨立追蹤列呈現。
+    100% 純籌碼「趨勢 (60%) ＋ 動能 (40%)」雙層健康評分引擎（基準 50 分，總分 0～100）：
     一、中線趨勢面 (±30 分，佔 60%)：
         1. 全體波段分點合力趨勢 (±16)：20日控盤率/Z-Score (±10) ＋ 累計庫存相對20日均線 (±3) ＋ 60日斜率 (±3)
         2. 中線集中度 10/20日 (±10)：20日集中度 (±6) ＋ 10日集中度 (±4)
-        3. TDCC 集保大戶週變化 (±4)：歸戶千張/400張大戶與總股東數驗證
+        3. TDCC 集保大戶週變化 (±4)：附 14 天過期保護
     二、短線動能面 (±20 分，佔 40%)：
         4. 短線集中度與廣度 (±10)：5日集中度 (±4) ＋ 主力分點廣度比含外資共識 (±6)
-        5. 信用交易與情境借券 (±10)：融資四象限 (±5) ＋ 情境修正借券賣出 (±5，空頭背景回補改判 0 分)
+        5. 信用交易與情境借券 (±10)：融資四象限 (±5) ＋ 情境修正借券賣出 (±5)
     三、當日隔日沖灌水濾網（偏多時單向扣分 0 ～ -10 分）
     """
     _ = (latest_close, trust_info, broker_diff_info, vol_5d, top3_5d_amount_ntd, top3_5d_float_pct)
@@ -744,7 +724,6 @@ def evaluate_chip_scenario(
     # =========================================================
     # 一、中線趨勢面 (±30 分，佔 60%)
     # =========================================================
-    # 1A. 全體波段分點合力趨勢 (±16 分)
     trend_wave_score = 0
     wave_20d_net = None
     wave_20d_ctrl = None
@@ -758,7 +737,6 @@ def evaluate_chip_scenario(
         wave_above_ma20 = wave_agg_info.get("cum_above_ma20")
         wave_60d_net = int(wave_agg_info.get("net_60d", 0) or 0)
 
-        # 20 日控盤率 / Z-Score (±10 分)
         if wave_20d_ctrl >= p["wave_agg_20d_strong_pct"] or (
             wave_20d_ctrl >= p["wave_agg_20d_mod_pct"] and wave_20d_z is not None and wave_20d_z >= p["z_bull_min"]
         ):
@@ -776,13 +754,11 @@ def evaluate_chip_scenario(
         elif wave_20d_ctrl <= -p["wave_agg_20d_mild_pct"]:
             trend_wave_score -= 2
 
-        # 累計庫存相對 20 日均線 (±3 分)
         if wave_above_ma20 is True:
             trend_wave_score += 3
         elif wave_above_ma20 is False:
             trend_wave_score -= 3
 
-        # 60 日長線合力斜率 (±3 分)
         if wave_60d_net > 0 and wave_60d_ctrl >= p["wave_agg_60d_mod_pct"]:
             trend_wave_score += 3
         elif wave_60d_net > 0:
@@ -816,7 +792,7 @@ def evaluate_chip_scenario(
 
     trend_wave_score = max(-16, min(16, trend_wave_score))
 
-    # 1B. 中線集中度 10日／20日 (±10 分：20日 ±6 ＋ 10日 ±4)
+    # 1B. 中線集中度 10日／20日 (±10 分)
     trend_conc_score = 0
     if c20 is not None:
         if c20 >= p["conc_20d_strong_pct"]:
@@ -862,46 +838,53 @@ def evaluate_chip_scenario(
 
     trend_conc_score = max(-10, min(10, trend_conc_score))
 
-    # 1C. TDCC 集保大戶週變化 (±4 分)
+    # 1C. TDCC 集保大戶週變化 (±4 分｜超過 14 天未更新則過期歸零)
     tdcc_score = 0
     if isinstance(tdcc_info, dict):
-        w1000_chg = tdcc_info.get("whale_1000_chg_1w")
-        w400_chg = tdcc_info.get("whale_400_chg_1w")
-        h_chg = tdcc_info.get("holders_chg_1w")
+        age_days = tdcc_info.get("age_days")
+        max_tdcc_age = int(p.get("tdcc_max_age_days", 14))
+        is_tdcc_stale = bool(tdcc_info.get("is_stale", False)) or (
+            age_days is not None and int(age_days) > max_tdcc_age
+        )
 
-        if w1000_chg is not None:
-            if w1000_chg >= 0.5 and (h_chg is None or h_chg < 0):
-                tdcc_score = 4
-                badges.append({
-                    "label": f"🐋 集保大戶強吸 (+{w1000_chg:.2f}%)",
-                    "level": "bull",
-                    "detail": "千張大戶持股比率單週大增且總股東人數減少，歸戶籌碼強烈集中。",
-                })
-            elif w1000_chg >= 0.2 and (h_chg is None or h_chg < 0):
-                tdcc_score = 3
-                badges.append({
-                    "label": f"🐋 集保大戶增持 (+{w1000_chg:.2f}%)",
-                    "level": "bull",
-                    "detail": "千張大戶比率上升且散戶總人數減少，確認籌碼往大戶集中。",
-                })
-            elif w1000_chg >= 0.2 or (w400_chg is not None and w400_chg >= 0.3 and (h_chg is not None and h_chg < 0)):
-                tdcc_score = 1
-            elif w1000_chg <= -0.5 and (h_chg is None or h_chg > 0):
-                tdcc_score = -4
-                badges.append({
-                    "label": f"⚠️ 集保大戶大減 ({w1000_chg:+.2f}%)",
-                    "level": "bear",
-                    "detail": "千張大戶比率單週顯著下滑且股東人數增加，歸戶籌碼明顯發散。",
-                })
-            elif w1000_chg <= -0.2 and (h_chg is None or h_chg > 0):
-                tdcc_score = -3
-                badges.append({
-                    "label": f"⚠️ 集保大戶流出 ({w1000_chg:+.2f}%)",
-                    "level": "bear",
-                    "detail": "千張大戶比率下滑且總股東人數增加。",
-                })
-            elif w1000_chg <= -0.2 or (w400_chg is not None and w400_chg <= -0.3 and (h_chg is not None and h_chg > 0)):
-                tdcc_score = -1
+        if not is_tdcc_stale:
+            w1000_chg = tdcc_info.get("whale_1000_chg_1w")
+            w400_chg = tdcc_info.get("whale_400_chg_1w")
+            h_chg = tdcc_info.get("holders_chg_1w")
+
+            if w1000_chg is not None:
+                if w1000_chg >= 0.5 and (h_chg is None or h_chg < 0):
+                    tdcc_score = 4
+                    badges.append({
+                        "label": f"🐋 集保大戶強吸 (+{w1000_chg:.2f}%)",
+                        "level": "bull",
+                        "detail": "千張大戶持股比率單週大增且總股東人數減少，歸戶籌碼強烈集中。",
+                    })
+                elif w1000_chg >= 0.2 and (h_chg is None or h_chg < 0):
+                    tdcc_score = 3
+                    badges.append({
+                        "label": f"🐋 集保大戶增持 (+{w1000_chg:.2f}%)",
+                        "level": "bull",
+                        "detail": "千張大戶比率上升且散戶總人數減少，確認籌碼往大戶集中。",
+                    })
+                elif w1000_chg >= 0.2 or (w400_chg is not None and w400_chg >= 0.3 and (h_chg is not None and h_chg < 0)):
+                    tdcc_score = 1
+                elif w1000_chg <= -0.5 and (h_chg is None or h_chg > 0):
+                    tdcc_score = -4
+                    badges.append({
+                        "label": f"⚠️ 集保大戶大減 ({w1000_chg:+.2f}%)",
+                        "level": "bear",
+                        "detail": "千張大戶比率單週顯著下滑且股東人數增加，歸戶籌碼明顯發散。",
+                    })
+                elif w1000_chg <= -0.2 and (h_chg is None or h_chg > 0):
+                    tdcc_score = -3
+                    badges.append({
+                        "label": f"⚠️ 集保大戶流出 ({w1000_chg:+.2f}%)",
+                        "level": "bear",
+                        "detail": "千張大戶比率下滑且總股東人數增加。",
+                    })
+                elif w1000_chg <= -0.2 or (w400_chg is not None and w400_chg <= -0.3 and (h_chg is not None and h_chg > 0)):
+                    tdcc_score = -1
 
     tdcc_score = max(-4, min(4, tdcc_score))
     trend_score = max(-30, min(30, trend_wave_score + trend_conc_score + tdcc_score))
@@ -1137,7 +1120,7 @@ def evaluate_chip_scenario(
     conviction_score = int(max(0, min(100, raw_before_dt + dt_score)))
 
     # =========================================================
-    # 判定 5 大純籌碼結構狀態（100% 純籌碼，不含任何均線）
+    # 判定 5 大純籌碼結構狀態（動態對齊標題與實際觸發條件）
     # =========================================================
     bull_min = p["bull_score_min"]
     strong_bull_min = p["strong_bull_score_min"]
@@ -1174,7 +1157,10 @@ def evaluate_chip_scenario(
         sc_id = 5
         sc_type = "bear"
         sub_type = "波段全面發散"
-        title = f"🟢 純籌碼狀態：5. 波段全面發散（≤{bear_max} 分｜大戶撤退）"
+        if conviction_score <= bear_max:
+            title = f"🟢 純籌碼狀態：5. 波段全面發散（≤{bear_max} 分｜大戶撤退）"
+        else:
+            title = f"🟢 純籌碼狀態：5. 波段全面發散（中線趨勢重挫 {trend_score:+d}｜大戶撤退）"
         desc = f"{summary_prefix}，中線趨勢（{trend_score:+d}）與短線動能（{momentum_score:+d}）明顯偏空發散。"
         action = "波段主力持續撤離且籌碼流向散戶，整體籌碼結構偏空。"
     elif few_holding_up or trend_mom_conflict or heavy_dt_distortion:
@@ -1294,13 +1280,28 @@ def simulate_swing_backtest(
     round_trip_cost_pct: float = 0.5,
 ) -> dict:
     """
-    100% 純籌碼波段進出模擬回測引擎（完全不含技術面均線與停損濾網）：
-    - 嚴格採用「當日盤後純籌碼分數判定 → 次日開盤價執行進出場」，杜絕未來函數
-    - 預設扣除來回交易摩擦成本（手續費＋證交稅，預設 0.50%）
-    - 產出：
-        1. 使用者選定門檻之「純籌碼多空雙向」、「純做多」、「純放空」與同期 Buy & Hold 基準
-        2. 5 組常用純籌碼門檻敏感度對照表（55/35、60/35、65/35、70/30、60/40），方便實證討論最佳分數門檻
+    100% 純籌碼波段進出模擬回測引擎（次日開盤進出｜附門檻交叉防呆）：
+    - 自動防呆不合理門檻（如 做多出場 > 做多進場、放空出場 < 放空進場、放空進場 ≥ 做多進場）並回傳 param_warnings
     """
+    param_warnings = []
+    eff_long_exit = int(long_exit)
+    eff_short_exit = int(short_exit)
+
+    if eff_long_exit > long_entry:
+        param_warnings.append(
+            f"做多出場分數 ({long_exit}) 高於做多進場分數 ({long_entry})，已自動防呆收斂為 {long_entry} 分，避免區間內無限進出洗盤。"
+        )
+        eff_long_exit = int(long_entry)
+    if eff_short_exit < short_entry:
+        param_warnings.append(
+            f"放空出場分數 ({short_exit}) 低於放空進場分數 ({short_entry})，已自動防呆收斂為 {short_entry} 分，避免區間內無限進出洗盤。"
+        )
+        eff_short_exit = int(short_entry)
+    if short_entry >= long_entry:
+        param_warnings.append(
+            f"放空進場分數 (≤{short_entry}) 高於或等於做多進場分數 (≥{long_entry})，多空雙向策略無法同時成立，請調低放空進場或調高做多進場。"
+        )
+
     empty_res = {
         "valid": False,
         "dates": [],
@@ -1310,10 +1311,11 @@ def simulate_swing_backtest(
         "cost_pct": round_trip_cost_pct,
         "params": {
             "long_entry": long_entry,
-            "long_exit": long_exit,
+            "long_exit": eff_long_exit,
             "short_entry": short_entry,
-            "short_exit": short_exit,
+            "short_exit": eff_short_exit,
         },
+        "param_warnings": param_warnings,
         "bh": {"total_ret_pct": 0.0, "mdd_pct": 0.0, "equity_curve": []},
         "strategies": {},
         "strategy_order": [],
@@ -1335,7 +1337,7 @@ def simulate_swing_backtest(
     df["open"] = df["open"].where(df["open"] > 0, df["close"])
     df["health_score"] = pd.to_numeric(df["health_score"], errors="coerce")
 
-    valid_idx = df.index[df["health_score"].notna() & df["close"].notna()].tolist()
+    valid_idx = df.index[df["health_score"].notna() & df["close"].notna() & (df["close"] > 0)].tolist()
     if len(valid_idx) < 5:
         return empty_res
 
@@ -1348,11 +1350,11 @@ def simulate_swing_backtest(
     close_arr = sub["close"].to_numpy(dtype=float)
     score_arr = sub["health_score"].to_numpy(dtype=float)
 
-    # 同期買進持有基準 (Base = 100)
-    bh_curve = (100.0 * (close_arr / close_arr[0])).tolist()
+    base_px = close_arr[0] if close_arr[0] > 0 else 1.0
+    bh_curve = (100.0 * (close_arr / base_px)).tolist()
     bh_np = np.array(bh_curve, dtype=float)
     bh_peak = np.maximum.accumulate(bh_np)
-    bh_mdd = round(float(((bh_np - bh_peak) / bh_peak * 100.0).min()), 2)
+    bh_mdd = round(float(((bh_np - bh_peak) / np.where(bh_peak > 0, bh_peak, 1.0) * 100.0).min()), 2)
     bh_total_ret = round(float(bh_np[-1] - 100.0), 2)
 
     cost_dec = max(0.0, float(round_trip_cost_pct)) / 100.0
@@ -1367,20 +1369,22 @@ def simulate_swing_backtest(
         s_in: int,
         s_out: int,
     ) -> dict:
-        pos = 0  # 0=空手, 1=持多單, -1=持空單
+        safe_l_out = min(l_out, l_in)
+        safe_s_out = max(s_out, s_in)
+
+        pos = 0
         entry_idx = -1
         entry_px = 0.0
         entry_date = ""
         entry_score = 0.0
         realized_eq = 100.0
-        pending_action = None  # tuple: (action_type, reason, signal_score)
+        pending_action = None
         trades = []
         eq_curve = []
 
         for i in range(n):
             exec_px = float(open_arr[i]) if (pd.notna(open_arr[i]) and open_arr[i] > 0) else float(close_arr[i])
 
-            # 1. 次日開盤執行前一日盤後純籌碼訊號
             if pending_action is not None:
                 act_type, act_reason, sig_sc = pending_action
 
@@ -1418,7 +1422,6 @@ def simulate_swing_backtest(
 
                 pending_action = None
 
-            # 2. 收盤按市價結算當日權益淨值
             cl_i = float(close_arr[i])
             if pos == 0:
                 eq_curve.append(round(realized_eq, 2))
@@ -1429,7 +1432,6 @@ def simulate_swing_backtest(
                 unr = (entry_px - cl_i) / entry_px - half_cost
                 eq_curve.append(round(max(0.0, realized_eq * (1.0 + unr)), 2))
 
-            # 3. 盤後純籌碼分數判定次日開盤動作
             sc_i = score_arr[i]
             if pd.isna(sc_i):
                 continue
@@ -1438,24 +1440,23 @@ def simulate_swing_backtest(
             can_short = (mode in ("short_only", "both")) and (sc_i <= s_in) and (l_in > s_in or mode == "short_only")
 
             if pos == 1:
-                if sc_i < l_out or can_short:
+                if sc_i < safe_l_out or can_short:
                     if can_short:
                         pending_action = ("rev_to_short", f"分數翻空 (≤{s_in})", sc_i)
                     else:
-                        pending_action = ("exit", f"籌碼轉弱 (<{l_out})", sc_i)
+                        pending_action = ("exit", f"籌碼轉弱 (<{safe_l_out})", sc_i)
             elif pos == -1:
-                if sc_i > s_out or can_long:
+                if sc_i > safe_s_out or can_long:
                     if can_long:
                         pending_action = ("rev_to_long", f"分數翻多 (≥{l_in})", sc_i)
                     else:
-                        pending_action = ("exit", f"籌碼轉強 (>{s_out})", sc_i)
+                        pending_action = ("exit", f"籌碼轉強 (>{safe_s_out})", sc_i)
             else:
                 if can_long:
                     pending_action = ("enter_long", f"純籌碼 ≥{l_in} 分", sc_i)
                 elif can_short:
                     pending_action = ("enter_short", f"純籌碼 ≤{s_in} 分", sc_i)
 
-        # 若最新交易日仍在持倉，按最新收盤價計入未實現損益
         has_open = False
         open_dir_txt = "空手觀望"
         if pos != 0:
@@ -1480,7 +1481,9 @@ def simulate_swing_backtest(
             })
 
         next_signal_txt = open_dir_txt
-        if pending_action is not None:
+        if mode == "both" and l_in <= s_in:
+            next_signal_txt = "⚠️ 門檻重疊（放空進場 ≥ 做多進場）"
+        elif pending_action is not None:
             pa_type, pa_reason, _ = pending_action
             if pa_type == "enter_long":
                 next_signal_txt = f"🔴 盤後觸發做多（{pa_reason}｜次日開盤進場）"
@@ -1541,22 +1544,20 @@ def simulate_swing_backtest(
             "trades": trades,
         }
 
-    # --- 1. 主回測（依目前設定門檻，純籌碼多空／純多／純空） ---
     strat_defs = [
         ("both_pure", f"⚡ 純籌碼多空雙向（多≥{long_entry} / 空≤{short_entry}）", "both"),
-        ("long_pure", f"🔴 純籌碼純做多（≥{long_entry} 進 / <{long_exit} 出）", "long_only"),
-        ("short_pure", f"🟢 純籌碼純放空（≤{short_entry} 進 / >{short_exit} 出）", "short_only"),
+        ("long_pure", f"🔴 純籌碼純做多（≥{long_entry} 進 / <{eff_long_exit} 出）", "long_only"),
+        ("short_pure", f"🟢 純籌碼純放空（≤{short_entry} 進 / >{eff_short_exit} 出）", "short_only"),
     ]
 
     strategies = {}
     order = []
     for s_key, s_lbl, s_mode in strat_defs:
         strategies[s_key] = _run_pure_sim(
-            s_key, s_lbl, s_mode, long_entry, long_exit, short_entry, short_exit
+            s_key, s_lbl, s_mode, long_entry, eff_long_exit, short_entry, eff_short_exit
         )
         order.append(s_key)
 
-    # --- 2. 5 組純籌碼門檻敏感度對照（皆採多空雙向純籌碼） ---
     presets = [
         ("寬鬆標準（多≥55/<40 ｜ 空≤35/>50）", 55, 40, 35, 50),
         ("中庸偏多（多≥60/<45 ｜ 空≤35/>50）", 60, 45, 35, 50),
@@ -1574,7 +1575,7 @@ def simulate_swing_backtest(
             "short_entry": p_si,
             "short_exit": p_so,
             "is_current": (
-                p_li == long_entry and p_lo == long_exit and p_si == short_entry and p_so == short_exit
+                p_li == long_entry and p_lo == eff_long_exit and p_si == short_entry and p_so == eff_short_exit
             ),
             "trade_count": res_p["trade_count"],
             "has_open": res_p["has_open"],
@@ -1608,10 +1609,11 @@ def simulate_swing_backtest(
         "cost_pct": round_trip_cost_pct,
         "params": {
             "long_entry": long_entry,
-            "long_exit": long_exit,
+            "long_exit": eff_long_exit,
             "short_entry": short_entry,
-            "short_exit": short_exit,
+            "short_exit": eff_short_exit,
         },
+        "param_warnings": param_warnings,
         "bh": {
             "total_ret_pct": bh_total_ret,
             "mdd_pct": bh_mdd,
