@@ -185,7 +185,6 @@ def _load_stock_data_cached(stock_id: str, cache_key: str):
 def _compute_daily_health_cached(
     stock_id: str,
     cache_key: str,
-    pending_chip_date: str | None,
     _df_price_full: pd.DataFrame,
     _df_chips_full: pd.DataFrame,
     _df_aux_full: pd.DataFrame | None,
@@ -520,7 +519,7 @@ def _render_aux_dashboard(
             f'</div>'
         )
 
-    tdcc_tip = "集保中心每週五公布之歸戶股權分散表，可破解主力拆單藏分點與匯撥。大戶比率上升且總股東人數減少為標準籌碼集中訊號（納入中線趨勢面 ±4 分）。"
+    tdcc_tip = "集保中心每週五公布之歸戶股權分散表，可破解主力拆單藏分點與匯撥。大戶比率上升且總股東人數減少為標準籌碼集中訊號（納入中線趨勢面 ±4 分；超過 14 天未更新自動歸零不計分）。"
     if tdcc_info:
         w1000 = tdcc_info["whale_1000_pct"]
         w1000_chg = tdcc_info.get("whale_1000_chg_1w")
@@ -528,9 +527,12 @@ def _render_aux_dashboard(
         holders = tdcc_info["total_holders"]
         h_chg = tdcc_info.get("holders_chg_1w")
         t_dt = tdcc_info.get("date", "")
+        is_stale = bool(tdcc_info.get("is_stale", False))
         chg_txt = _span_float(w1000_chg, "%") if w1000_chg is not None else '<span style="color:#94a3b8;">首週</span>'
         h_chg_txt = _span_num(h_chg, " 人", invert_color=True) if h_chg is not None else "—"
-        if w1000_chg is not None and w1000_chg >= 0.2 and (h_chg is None or h_chg < 0):
+        if is_stale:
+            t_badge = _aux_badge("⚠️ 逾期 (0分)", "warn")
+        elif w1000_chg is not None and w1000_chg >= 0.2 and (h_chg is None or h_chg < 0):
             t_badge = _aux_badge("🐋 大戶增持", "bull")
         elif w1000_chg is not None and w1000_chg <= -0.2 and (h_chg is None or h_chg > 0):
             t_badge = _aux_badge("⚠️ 大戶流出", "bear")
@@ -767,22 +769,20 @@ def _render_rank_table(
     )
 
 
-def _split_price_by_health(
-    closes: pd.Series,
+def _compute_health_regimes(
     scores: pd.Series,
     long_entry: int = 55,
     long_exit: int = 40,
     short_entry: int = 35,
     short_exit: int = 50,
 ):
-    """模式 B 波段持倉燈號：完整連動四項進出門檻，與波段模擬回測 100% 對齊"""
-    n = len(closes)
-    c_vals = closes.to_numpy(dtype=float)
+    """模式 B 波段持倉區塊：完整連動四項進出門檻（含交叉防呆），與波段模擬回測 100% 對齊"""
+    safe_l_out = min(long_exit, long_entry)
+    safe_s_out = max(short_exit, short_entry)
+    n = len(scores)
     s_vals = scores.to_numpy(dtype=float) if scores is not None else [float("nan")] * n
 
-    y_bull, y_neutral, y_bear = [None] * n, [None] * n, [None] * n
     regimes = []
-
     pos = 0
     for i in range(n):
         sc = s_vals[i]
@@ -792,12 +792,12 @@ def _split_price_by_health(
             if pos == 1:
                 if can_short:
                     pos = -1
-                elif sc < long_exit:
+                elif sc < safe_l_out:
                     pos = 0
             elif pos == -1:
                 if can_long:
                     pos = 1
-                elif sc > short_exit:
+                elif sc > safe_s_out:
                     pos = 0
             else:
                 if can_long:
@@ -806,23 +806,6 @@ def _split_price_by_health(
                     pos = -1
 
         regimes.append("bull" if pos == 1 else ("bear" if pos == -1 else "neutral"))
-
-    if n > 0:
-        if regimes[0] == "bull":
-            y_bull[0] = c_vals[0]
-        elif regimes[0] == "bear":
-            y_bear[0] = c_vals[0]
-        else:
-            y_neutral[0] = c_vals[0]
-
-    for i in range(1, n):
-        reg = regimes[i]
-        if reg == "bull":
-            y_bull[i - 1], y_bull[i] = c_vals[i - 1], c_vals[i]
-        elif reg == "bear":
-            y_bear[i - 1], y_bear[i] = c_vals[i - 1], c_vals[i]
-        else:
-            y_neutral[i - 1], y_neutral[i] = c_vals[i - 1], c_vals[i]
 
     bands = []
     cur_reg, start_i = None, 0
@@ -834,7 +817,7 @@ def _split_price_by_health(
     if cur_reg in ("bull", "bear"):
         bands.append((start_i, n - 1, cur_reg))
 
-    return y_bull, y_neutral, y_bear, bands, regimes
+    return bands, regimes
 
 
 st.markdown("### 📈 台股籌碼追蹤")
@@ -1016,6 +999,7 @@ with st.sidebar:
     else:
         st.caption("目前 database 尚無資料，請在上方輸入代號新增。")
 
+prev_active_stock = st.session_state.get("active_stock", "").strip()
 if btn_add and input_stock:
     st.session_state["active_stock"] = input_stock
 
@@ -1028,7 +1012,13 @@ if target_stock:
         with st.spinner(f"正在抓取 {target_stock} 真實 VWAP 股價、投信持股比、波段分點、歷史集中度、融資借券與集保大戶資料..."):
             ok = update_stock_database(target_stock, incremental_days=None, sync_github=True)
             if not ok:
-                st.error(f"找不到股票代號 `{target_stock}`，請確認是否為正確的上市櫃代號（目前不支援興櫃）。")
+                fallback_stock = (
+                    prev_active_stock
+                    if (prev_active_stock and prev_active_stock != target_stock and prev_active_stock in saved_list)
+                    else (saved_list[0] if saved_list else "")
+                )
+                st.session_state["active_stock"] = fallback_stock
+                st.error(f"找不到股票代號 `{target_stock}`，請確認是否為正確的上市櫃代號（目前不支援興櫃）。已自動還原回原本個股。")
                 st.stop()
             cur_order = get_saved_stocks()
             if target_stock not in cur_order:
@@ -1046,12 +1036,10 @@ if target_stock:
 
     stock_title = get_stock_display_label(target_stock)
 
-    # --- 基準日回放選項（方式 A：保留今日於基準列，逐日檢核分點／融資／借券是否齊全） ---
-    pending_chip_date = None
-    is_pending_view = False
+    # --- 基準日回放選項（逐日檢核分點／集中度／融資／借券是否齊全） ---
     valid_dates = df_price_full["date"].astype(str).tolist()
     n_valid = len(valid_dates)
-    snap_options = []  # tuple: (offset, rel_lbl, date_str, is_incomplete)
+    snap_options = []
 
     is_latest_today = (n_valid > 0 and valid_dates[-1] == tw_today)
     cand_defs = []
@@ -1153,6 +1141,7 @@ if target_stock:
         "has_broker": True,
         "has_margin": True,
         "has_sbl": True,
+        "has_trust": True,
     }
     is_chip_complete = bool(completeness.get("is_complete", True))
     missing_chip_items = completeness.get("missing_items") or []
@@ -1201,7 +1190,7 @@ if target_stock:
                 st.rerun()
 
     # =====================================================================
-    # 區塊一：核心決策總結看板（100% 籌碼｜趨勢 60% ＋ 動能 40%｜方案 A）
+    # 區塊一：核心決策總結看板（100% 籌碼｜趨勢 60% ＋ 動能 40%）
     # =====================================================================
     bull_min = int(STRATEGY_PARAMS.get("bull_score_min", 55))
     strong_bull_min = int(STRATEGY_PARAMS.get("strong_bull_score_min", 70))
@@ -1215,7 +1204,7 @@ if target_stock:
         "• <b>一、中線趨勢面 (±30 分，佔 60%)：</b><br>"
         "&nbsp;&nbsp;◦ 全體波段分點合力 20/60 日控盤與庫存均線 (±16)<br>"
         "&nbsp;&nbsp;◦ 全市場 10/20 日中線集中度 (±10)<br>"
-        "&nbsp;&nbsp;◦ TDCC 集保大戶週變化 (±4)<br>"
+        "&nbsp;&nbsp;◦ TDCC 集保大戶週變化 (±4｜逾 14 天不計分)<br>"
         "• <b>二、短線動能面 (±20 分，佔 40%)：</b><br>"
         "&nbsp;&nbsp;◦ 5 日集中度 (±4) ＋ 主力分點廣度比含外資共識 (±6)<br>"
         "&nbsp;&nbsp;◦ 融資四象限 (±5) ＋ 情境借券賣出 (±5；空頭背景回補不加分)<br>"
@@ -1232,7 +1221,6 @@ if target_stock:
         '</table>'
     )
 
-    # 尋找最近一個籌碼已齊全的基準日按鈕名稱（供未齊全時提示切換）
     complete_opts = [o for o in snap_options if not o[3]]
     if complete_opts:
         last_comp = complete_opts[-1]
@@ -1243,7 +1231,6 @@ if target_stock:
 
     conv_score = None
     if not is_chip_complete:
-        # 方式 A：停在基準日，鎖定分數與定調並條列缺漏項目；下方已公布之單項指標照常顯示
         missing_txt = "、".join(missing_chip_items)
         st.markdown(
             f'<div class="hero-panel hero-neutral">'
@@ -1325,7 +1312,6 @@ if target_stock:
             unsafe_allow_html=True,
         )
 
-        # --- 背離警示條（純視覺參考） ---
         div_alert = analysis.get("divergence_alert")
         if div_alert:
             alert_type = div_alert.get("type", "bull")
@@ -1340,7 +1326,7 @@ if target_stock:
                 unsafe_allow_html=True,
             )
 
-    # --- 三大核心卡片（收盤價照常顯示；分點未公布時不顯示誤導性的「0 張鎖碼觀望」） ---
+    # --- 三大核心卡片 ---
     ctrl5 = float(analysis.get("top3_5d_ctrl_pct", 0.0) or 0.0)
     z5 = analysis.get("top3_5d_ctrl_z")
     z_tip_html = build_z_tooltip_html(stock_title, ctrl5, z5)
@@ -1394,7 +1380,7 @@ if target_stock:
         chip_dt_note = f"籌碼日：{valid_anchor_date}" if is_chip_complete else f"籌碼日：{valid_anchor_date}（結算中）"
         st.markdown(f'<div class="summary-card"><div class="card-label">{display_close_label}</div><div class="card-value">{display_close:.2f} 元</div><div class="card-sub">{pct_prefix}{pct_html}<br>{chip_dt_note}</div></div>', unsafe_allow_html=True)
 
-    # --- 投信獨立追蹤列（已公布即照常顯示，不重複計入籌碼健康總分） ---
+    # --- 投信獨立追蹤列（今日未公布時自動沿用前一日統計並標記待公布，防連買賣歸零） ---
     trust_info = analysis.get("trust_info")
     if trust_info:
         trust_tip = (
@@ -1402,6 +1388,18 @@ if target_stock:
             "為避免重複計權，本區採獨立追蹤（不計入籌碼健康總分），專供監控投信連買賣動能與真實持股水位"
             "（0.5%～5% 且 5 日／20 日同步買超時為認養加碼期，10% 以上須留意結帳賣壓）。"
         )
+        t_is_pending = bool(trust_info.get("is_pending", False))
+        t_day_word = "前日" if t_is_pending else day_word
+        t_pend_dt = str(trust_info.get("pending_date", ""))
+        t_eff_dt = str(trust_info.get("date", ""))
+        t_pend_short = t_pend_dt[5:].replace("-", "/") if len(t_pend_dt) >= 10 else t_pend_dt
+        t_eff_short = t_eff_dt[5:].replace("-", "/") if len(t_eff_dt) >= 10 else t_eff_dt
+        pending_pill = (
+            f'<span class="trust-tag" style="color:#fcd34d; background:rgba(245,158,11,0.16); border:1px solid rgba(245,158,11,0.45);">'
+            f'⏳ {t_pend_short} 投信待公布（沿用 {t_eff_short}）</span>'
+            if t_is_pending else ""
+        )
+
         phase = trust_info.get("phase") or {}
         tier_style_map = {
             "bull": ("#fca5a5", "rgba(239,83,80,0.14)", "rgba(239,83,80,0.45)"),
@@ -1425,16 +1423,16 @@ if target_stock:
 
         st.markdown(
             f'<div class="trust-bar">'
-            f'  <div class="trust-title">🏦 投信獨立追蹤<span class="tip-wrap tip-right">ⓘ<span class="tip-box">{trust_tip}</span></span>{tier_pill}{mom_pill}</div>'
+            f'  <div class="trust-title">🏦 投信獨立追蹤<span class="tip-wrap tip-right">ⓘ<span class="tip-box">{trust_tip}</span></span>{pending_pill}{tier_pill}{mom_pill}</div>'
             f'  <div class="trust-metrics-wrap">'
             f'    <div class="trust-primary"><span>{_span_streak(trust_info["streak"])}</span><span style="color:#475569;">｜</span><span><span class="trust-lbl">近 5 日</span>{_span_num(trust_info.get("d5", 0))}</span></div>'
-            f'    <div class="trust-secondary"><span><span class="trust-lbl">{day_word}</span>{_span_num(trust_info["d1"])}</span><span><span class="trust-lbl">區間</span>{_span_num(trust_info["period"])}</span><span><span class="trust-lbl">近 20 日</span>{_span_num(trust_info["d20"])}</span><span><span class="trust-lbl">今年</span>{_span_num(trust_info["ytd"])}</span><span><span class="trust-lbl">控盤</span>{_span_ctrl(trust_info["ctrl_pct"])}</span>{cost_seg}</div>'
+            f'    <div class="trust-secondary"><span><span class="trust-lbl">{t_day_word}</span>{_span_num(trust_info["d1"])}</span><span><span class="trust-lbl">區間</span>{_span_num(trust_info["period"])}</span><span><span class="trust-lbl">近 20 日</span>{_span_num(trust_info["d20"])}</span><span><span class="trust-lbl">今年</span>{_span_num(trust_info["ytd"])}</span><span><span class="trust-lbl">控盤</span>{_span_ctrl(trust_info["ctrl_pct"])}</span>{cost_seg}</div>'
             f'  </div>'
             f'</div>',
             unsafe_allow_html=True,
         )
 
-    # --- 四大輔助籌碼儀表板（已公布卡片照常顯示，未公布顯示 ⏳ 待更新） ---
+    # --- 四大輔助籌碼儀表板 ---
     st.markdown(
         _render_aux_dashboard(
             analysis.get("breadth_info"),
@@ -1459,7 +1457,7 @@ if target_stock:
         unsafe_allow_html=True,
     )
 
-    # --- 籌碼結構 5 大狀態判讀矩陣（未齊全時不亮出「目前符合」避免誤判） ---
+    # --- 籌碼結構 5 大狀態判讀矩陣 ---
     matched_id = scenario.get("id", 0) if is_chip_complete else 0
     with st.expander("📖 籌碼結構 5 大狀態判讀矩陣（100% 籌碼｜趨勢 60% ＋ 動能 40%）", expanded=False):
         m_rows = []
@@ -1483,7 +1481,7 @@ if target_stock:
             )
         st.markdown(f'<table class="matrix-table"><thead><tr><th>籌碼結構狀態</th><th>全體波段分點合力（趨勢核心）</th><th>集中度與主力廣度</th><th>輔助籌碼與分數檢核</th><th>籌碼解讀與觀察重點</th></tr></thead><tbody>{"".join(m_rows)}</tbody></table>', unsafe_allow_html=True)
 
-    # --- 前三大波段券商分點主力明細、聰明錢雷達與排行榜（當日分點已公布才顯示） ---
+    # --- 前三大波段券商分點主力明細、聰明錢雷達與排行榜 ---
     if has_broker_today:
         st.write("")
         if top3_names:
@@ -1533,7 +1531,6 @@ if target_stock:
         if analysis.get("remark_md"):
             st.markdown(analysis["remark_md"])
 
-        # --- 聰明錢雷達 ---
         recent_10d_rising = analysis.get("recent_10d_rising") or {}
         if winner_brokers or recent_10d_rising:
             w_rows = "".join([
@@ -1554,7 +1551,6 @@ if target_stock:
                 unsafe_allow_html=True,
             )
 
-        # --- 四欄並排排行榜 ---
         top_buyers_60d = analysis.get("top_buyers", {})
         top_sellers_60d = analysis.get("top_sellers", {})
         ytd_buyers = analysis.get("ytd_top_buyers", {})
@@ -1590,7 +1586,7 @@ if target_stock:
     st.divider()
 
     # =====================================================================
-    # 區塊二：股價（模式 B 籌碼波段持倉燈號）＋ 三合一可切換副圖
+    # 區塊二：股價（單色折線＋紅綠波段背景區）＋ 三合一可切換副圖
     # =====================================================================
     st.markdown(f"#### 📉 {stock_title} 股價、籌碼波段燈號與主力 VWAP 成本線走勢")
 
@@ -1630,7 +1626,6 @@ if target_stock:
     df_health = _compute_daily_health_cached(
         stock_id=target_stock,
         cache_key=cache_key,
-        pending_chip_date=pending_chip_date,
         _df_price_full=df_price_full,
         _df_chips_full=df_chips_full,
         _df_aux_full=df_aux_full,
@@ -1647,9 +1642,9 @@ if target_stock:
     )
 
     active_bull_in = int(st.session_state.get("bt_long_entry_std", bull_min))
-    active_bull_out = int(st.session_state.get("bt_long_exit_std", long_exit_default))
+    active_bull_out = min(int(st.session_state.get("bt_long_exit_std", long_exit_default)), active_bull_in)
     active_bear_in = int(st.session_state.get("bt_short_entry_std", bear_max))
-    active_bear_out = int(st.session_state.get("bt_short_exit_std", short_exit_default))
+    active_bear_out = max(int(st.session_state.get("bt_short_exit_std", short_exit_default)), active_bear_in)
 
     c_opt1, c_opt2, c_opt3 = st.columns([1.2, 2.3, 1.7])
     with c_opt1:
@@ -1659,7 +1654,7 @@ if target_stock:
             f"籌碼波段燈號 (多≥{active_bull_in}/<{active_bull_out} · 空≤{active_bear_in}/>{active_bear_out})",
             value=bool(has_health_series),
             disabled=not bool(has_health_series),
-            help=f"模式 B 波段持倉燈號，與下方回測規則 100% 同步：站上 ≥{active_bull_in} 分持續亮紅至跌破 <{active_bull_out} 分；跌破 ≤{active_bear_in} 分持續亮綠至站上 >{active_bear_out} 分。",
+            help=f"模式 B 波段持倉區塊，與下方回測規則 100% 同步：站上 ≥{active_bull_in} 分持續亮紅底至跌破 <{active_bull_out} 分；跌破 ≤{active_bear_in} 分持續亮綠底至站上 >{active_bear_out} 分。",
         )
     with c_opt3:
         cost_basis = st.radio("成本線計算基準", options=["近 60 日波段成本", "今年累計成本"], index=0, horizontal=True, label_visibility="collapsed")
@@ -1730,7 +1725,7 @@ if target_stock:
             specs=[[{"secondary_y": True}], [{"secondary_y": True}]],
         )
 
-        # --- Row 1：股價（模式 B 波段持倉三色燈號）、選配 10/20MA 與主力成本線 ---
+        # --- Row 1：單色收盤價折線、選配 10/20MA、主力成本線與波段紅綠背景區塊 ---
         if show_ma:
             fig.add_trace(go.Scatter(x=df_plot["date"], y=df_plot["ma10"], name="10MA (純參考)", legend="legend", line=dict(color="rgba(56, 189, 248, 0.78)", width=1.3), hovertemplate="%{y:,.2f} 元<extra>10MA</extra>"), row=1, col=1, secondary_y=False)
             fig.add_trace(go.Scatter(x=df_plot["date"], y=df_plot["ma20"], name="20MA (純參考)", legend="legend", line=dict(color="rgba(192, 132, 252, 0.85)", width=1.5), hovertemplate="%{y:,.2f} 元<extra>20MA</extra>"), row=1, col=1, secondary_y=False)
@@ -1739,8 +1734,7 @@ if target_stock:
             fig.add_trace(go.Scatter(x=df_plot["date"], y=cost_series, name=f"{target_label} 成本線", legend="legend", line=dict(color="#FF9100", width=2.2, dash="dash"), connectgaps=False, hovertemplate="%{y:,.2f} 元<extra>主力成本均價</extra>"), row=1, col=1, secondary_y=False)
 
         if show_health_regime and has_health_series:
-            _, _, _, regime_bands, regime_list = _split_price_by_health(
-                df_plot["close"],
+            regime_bands, regime_list = _compute_health_regimes(
                 df_plot["health_score"],
                 long_entry=active_bull_in,
                 long_exit=active_bull_out,
@@ -1754,7 +1748,6 @@ if target_stock:
                 else (f"{cl_v:,.2f} 元 ｜ ⏳ 籌碼結算中" if st_v == "結算中" else f"{cl_v:,.2f} 元")
                 for cl_v, sc_v, reg_v, st_v in zip(df_plot["close"], df_plot["health_score"], regime_list, df_plot["sub_type"].fillna(""))
             ]
-            # 固定單一顏色收盤價折線（不隨區塊變色）
             fig.add_trace(
                 go.Scatter(
                     x=df_plot["date"],
@@ -1767,7 +1760,6 @@ if target_stock:
                 ),
                 row=1, col=1, secondary_y=False,
             )
-            # 僅於下方圖例標示紅／綠背景區塊含義（不在圖面畫線）
             first_dt = df_plot["date"].iloc[0]
             fig.add_trace(
                 go.Scatter(
@@ -1850,12 +1842,12 @@ if target_stock:
             fig.update_yaxes(title_text="統計張數 (累計張)", row=2, col=1, secondary_y=True, showgrid=False, tickformat=",.0f")
 
         date_list = df_plot["date"].tolist()
-        if (not is_pending_view) and range_type not in ("全部", "今日") and start_filter != end_filter:
+        if range_type not in ("全部", "今日") and start_filter != end_filter:
             match_indices = [i for i, d in enumerate(date_list) if start_filter <= d <= end_filter]
             if len(match_indices) >= 2:
                 fig.add_vrect(x0=match_indices[0] - 0.5, x1=match_indices[-1] + 0.5, fillcolor="rgba(255, 255, 255, 0.06)", line_width=1, line_dash="dot", line_color="rgba(255, 255, 255, 0.28)")
 
-        if (not is_pending_view) and (valid_anchor_date != latest_trade_date) and (valid_anchor_date in date_list):
+        if (valid_anchor_date != latest_trade_date) and (valid_anchor_date in date_list):
             fig.add_vline(x=date_list.index(valid_anchor_date), line_width=1.4, line_dash="dash", line_color="rgba(251, 191, 36, 0.75)")
 
         n_pts = len(df_plot)
@@ -1936,6 +1928,9 @@ if target_stock:
             short_exit=int(bt_short_out),
             round_trip_cost_pct=float(round_trip_cost),
         )
+
+        for warn_msg in (sim_res.get("param_warnings") or []):
+            st.warning(f"⚠️ 門檻設定提醒：{warn_msg}")
 
         if st.session_state["show_bt_summary"]:
             st.markdown(_render_swing_summary_html(sim_res), unsafe_allow_html=True)
