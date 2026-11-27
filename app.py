@@ -262,8 +262,62 @@ def get_stock_display_label(stock_id: str) -> str:
     return stock_id
 
 
+@st.cache_data(show_spinner=False)
+def _get_prev_complete_score_cached(stock_id: str, cache_key: str) -> int | None:
+    """最新日尚在結算中時，往前回溯最近一個完整結算日並計算健康分數（依檔案 mtime 快取）"""
+    try:
+        df_price_raw, df_chips_raw, df_aux_raw, meta_saved = _load_stock_data_cached(stock_id, cache_key)
+        if df_price_raw is None or df_price_raw.empty or df_chips_raw is None or df_chips_raw.empty:
+            return None
+        df_p_full = df_price_raw.sort_values("date").reset_index(drop=True)
+        df_c_full = df_chips_raw.sort_values("date").reset_index(drop=True)
+        df_a_full = (
+            df_aux_raw.sort_values("date").reset_index(drop=True)
+            if (df_aux_raw is not None and not df_aux_raw.empty)
+            else None
+        )
+
+        dates = df_p_full["date"].astype(str).tolist()
+        if len(dates) < 2:
+            return None
+
+        tdcc_hist = meta_saved.get("tdcc_history", []) if isinstance(meta_saved, dict) else []
+        issued_lots = float(meta_saved.get("issued_lots", 0.0) or 0.0) if isinstance(meta_saved, dict) else 0.0
+
+        for cand_dt in reversed(dates[-6:-1]):
+            comp = check_chip_completeness(df_p_full, df_c_full, df_a_full, anchor_date=cand_dt)
+            if not comp.get("is_complete"):
+                continue
+            df_p_snap = df_p_full[df_p_full["date"].astype(str) <= cand_dt].reset_index(drop=True)
+            df_c_snap = df_c_full[df_c_full["date"].astype(str) <= cand_dt].reset_index(drop=True)
+            df_a_snap = (
+                df_a_full[df_a_full["date"].astype(str) <= cand_dt].reset_index(drop=True)
+                if df_a_full is not None
+                else None
+            )
+            res = analyze_main_force(
+                df_p_snap,
+                df_c_snap,
+                cand_dt,
+                df_chips_full=df_c_snap,
+                df_price_full=df_p_snap,
+                concentrations={},
+                df_aux_full=df_a_snap,
+                tdcc_history=tdcc_hist,
+                issued_lots=issued_lots,
+            )
+            sc = res.get("scenario") if isinstance(res, dict) else None
+            if isinstance(sc, dict) and (not sc.get("is_incomplete")):
+                score = sc.get("conviction_score")
+                if score is not None and not pd.isna(score):
+                    return int(round(float(score)))
+    except Exception:
+        pass
+    return None
+
+
 def get_stock_sidebar_score(stock_id: str) -> str:
-    """從 _meta.json 讀取最新籌碼健康分數（結算中或無分數回傳 TBD）"""
+    """最新日已結算直接顯示分數；結算中自動顯示前一個完整日『前日:XX』，無完整歷史才顯示 TBD"""
     meta_path = os.path.join(DB_DIR, f"{stock_id}_meta.json")
     if not os.path.exists(meta_path):
         return "TBD"
@@ -271,14 +325,18 @@ def get_stock_sidebar_score(stock_id: str) -> str:
         with open(meta_path, "r", encoding="utf-8") as f:
             meta_data = json.load(f)
         sc = meta_data.get("scenario") if isinstance(meta_data, dict) else None
-        if not isinstance(sc, dict) or sc.get("is_incomplete"):
-            return "TBD"
-        score = sc.get("conviction_score")
-        if score is None or pd.isna(score):
-            return "TBD"
-        return str(int(round(float(score))))
+        if isinstance(sc, dict) and (not sc.get("is_incomplete")):
+            score = sc.get("conviction_score")
+            if score is not None and not pd.isna(score):
+                return str(int(round(float(score))))
+
+        cache_key = _get_stock_cache_key(stock_id)
+        prev_score = _get_prev_complete_score_cached(stock_id, cache_key)
+        if prev_score is not None:
+            return f"前日:{prev_score}"
     except Exception:
-        return "TBD"
+        pass
+    return "TBD"
 
 
 def parse_manual_date(text: str, fallback: str) -> str:
