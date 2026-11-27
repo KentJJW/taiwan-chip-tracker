@@ -140,8 +140,7 @@ st.markdown("""
 .matrix-active-neutral td { background-color: rgba(245, 158, 11, 0.13); color: #ffffff; border-top: 1px solid rgba(245, 158, 11, 0.45); border-bottom: 1px solid rgba(245, 158, 11, 0.45); }
 .sidebar-help-box { background-color: #1a1f2b; border: 1px solid #2d3548; border-radius: 6px; padding: 7px 10px; font-size: 0.78rem; color: #94a3b8; line-height: 1.5; margin-bottom: 8px; }
 .snap-bar-label { font-size: 0.82rem; color: #94a3b8; padding-top: 8px; font-weight: 600; }
-[class*="st-key-sel"] button,
-section[data-testid="stSidebar"] div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(3)) > div[data-testid="stColumn"]:first-child button {
+[class*="st-key-sel_"] button {
     display: flex !important;
     justify-content: flex-start !important;
     align-items: center !important;
@@ -150,15 +149,13 @@ section[data-testid="stSidebar"] div[data-testid="stHorizontalBlock"]:has(> div[
     padding-right: 8px !important;
     font-variant-numeric: tabular-nums;
 }
-[class*="st-key-sel"] button > div,
-section[data-testid="stSidebar"] div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(3)) > div[data-testid="stColumn"]:first-child button > div {
+[class*="st-key-sel_"] button > div {
     width: 100% !important;
     display: flex !important;
     justify-content: flex-start !important;
     text-align: left !important;
 }
-[class*="st-key-sel"] button p,
-section[data-testid="stSidebar"] div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(3)) > div[data-testid="stColumn"]:first-child button p {
+[class*="st-key-sel_"] button p {
     width: 100% !important;
     text-align: left !important;
     white-space: nowrap !important;
@@ -166,10 +163,8 @@ section[data-testid="stSidebar"] div[data-testid="stHorizontalBlock"]:has(> div[
     text-overflow: ellipsis;
     margin: 0 !important;
 }
-[class*="st-key-sel"] button strong,
-[class*="st-key-sel"] button strong span,
-section[data-testid="stSidebar"] div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(3)) > div[data-testid="stColumn"]:first-child button strong,
-section[data-testid="stSidebar"] div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(3)) > div[data-testid="stColumn"]:first-child button strong span {
+[class*="st-key-sel_"] button strong,
+[class*="st-key-sel_"] button strong span {
     color: #fbbf24 !important;
     display: inline-block;
     min-width: 2.35rem;
@@ -265,6 +260,7 @@ def get_stock_display_label(stock_id: str) -> str:
         return f"{stock_id} {fetched_name}"
 
     return stock_id
+
 
 def get_stock_sidebar_score(stock_id: str) -> str:
     """從 _meta.json 讀取最新籌碼健康分數（結算中或無分數回傳 TBD）"""
@@ -657,9 +653,9 @@ def _render_swing_summary_html(sim_res: dict) -> str:
     order = sim_res["strategy_order"]
     bh = sim_res["bh"]
     params = sim_res.get("params") or {}
-    l_in = int(params.get("long_entry", 55))
+    l_in = int(params.get("long_entry", 60))
     l_out = int(params.get("long_exit", 40))
-    s_in = int(params.get("short_entry", 35))
+    s_in = int(params.get("short_entry", 30))
     s_out = int(params.get("short_exit", 50))
     main_s = strategies.get("both_pure") or strategies[order[0]]
 
@@ -824,9 +820,9 @@ def _render_rank_table(
 
 def _compute_health_regimes(
     scores: pd.Series,
-    long_entry: int = 55,
+    long_entry: int = 60,
     long_exit: int = 40,
-    short_entry: int = 35,
+    short_entry: int = 30,
     short_exit: int = 50,
 ):
     """模式 B 波段持倉區塊：完整連動四項進出門檻（含交叉防呆），與波段模擬回測 100% 對齊"""
@@ -917,8 +913,8 @@ with st.sidebar:
     if saved_list:
         st.markdown(
             '<div class="sidebar-help-box">'
-            '全部更新：近 3 日增量更新所有個股<br>'
-            '個股更新：全年度重抓校準'
+            '全部更新：近 1 個月滾動更新所有個股（自動收編新主力）<br>'
+            '除權息／整年重建：按 ✕ 刪除後重新新增代號'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -928,16 +924,16 @@ with st.sidebar:
             if st.button(
                 "🔄 全部更新",
                 key="btn_update_all",
-                help="對所有已存個股執行近 3 個交易日增量更新，結束後單次打包同步至 GitHub",
+                help="對所有已存個股執行近 1 個月（22 個交易日）滾動更新並自動收編新主力，結束後單次打包同步至 GitHub",
                 width="stretch",
                 disabled=st.session_state["sort_mode"],
             ):
-                prog = st.progress(0, text="準備批量增量更新...")
+                prog = st.progress(0, text="準備批量近 1 個月滾動更新...")
                 updated_ids = []
                 for idx, sid in enumerate(saved_list):
                     lbl = get_stock_display_label(sid)
-                    prog.progress(idx / len(saved_list) * 0.9, text=f"正在增量更新 {lbl} ({idx+1}/{len(saved_list)})...")
-                    if update_stock_database(sid, incremental_days=3, sync_github=False):
+                    prog.progress(idx / len(saved_list) * 0.9, text=f"正在滾動更新 {lbl} ({idx+1}/{len(saved_list)})...")
+                    if update_stock_database(sid, incremental_days=22, sync_github=False):
                         updated_ids.append(sid)
 
                 if updated_ids and os.environ.get("GITHUB_ACTIONS", "").lower() != "true":
@@ -979,7 +975,7 @@ with st.sidebar:
 
                 _load_stock_data_cached.clear()
                 _compute_daily_health_cached.clear()
-                prog.progress(1.0, text="全部增量更新完成！")
+                prog.progress(1.0, text="全部滾動更新完成！")
                 st.rerun()
 
         with col_sort_btn:
@@ -1018,7 +1014,7 @@ with st.sidebar:
                         st.rerun()
         else:
             for sid in saved_list:
-                col_s, col_upd, col_del = st.columns([3.5, 0.75, 0.75])
+                col_s, col_del = st.columns([4.25, 0.75])
                 display_name = get_stock_display_label(sid)
                 score_txt = get_stock_sidebar_score(sid)
                 with col_s:
@@ -1026,20 +1022,6 @@ with st.sidebar:
                     btn_label = f":orange[**{score_txt}**] ▶ {display_name}" if is_current else f":orange[**{score_txt}**] {display_name}"
                     if st.button(btn_label, key=f"sel_{sid}", width="stretch"):
                         st.session_state["active_stock"] = sid
-                        st.rerun()
-                with col_upd:
-                    if st.button(
-                        "🔄",
-                        key=f"upd_{sid}",
-                        help=f"全年度重抓校準 {display_name}（補齊真實 VWAP、投信持股比、近 60 日主力、歷史集中度、融資借券與集保）",
-                        width="stretch",
-                    ):
-                        with st.spinner(f"正在全年度重抓校準 {display_name}..."):
-                            ok = update_stock_database(sid, incremental_days=None, sync_github=True)
-                            if ok:
-                                st.session_state["active_stock"] = sid
-                                _load_stock_data_cached.clear()
-                                _compute_daily_health_cached.clear()
                         st.rerun()
                 with col_del:
                     if st.button("✕", key=f"del_{sid}", help=f"刪除 {display_name} 的所有歷史資料", width="stretch"):
@@ -1246,9 +1228,9 @@ if target_stock:
     # =====================================================================
     # 區塊一：核心決策總結看板（100% 籌碼｜趨勢 60% ＋ 動能 40%）
     # =====================================================================
-    bull_min = int(STRATEGY_PARAMS.get("bull_score_min", 55))
+    bull_min = int(STRATEGY_PARAMS.get("bull_score_min", 60))
     strong_bull_min = int(STRATEGY_PARAMS.get("strong_bull_score_min", 70))
-    bear_max = int(STRATEGY_PARAMS.get("bear_score_max", 35))
+    bear_max = int(STRATEGY_PARAMS.get("bear_score_max", 30))
     long_exit_default = int(STRATEGY_PARAMS.get("long_exit_score", 40))
     short_exit_default = int(STRATEGY_PARAMS.get("short_exit_score", 50))
 
