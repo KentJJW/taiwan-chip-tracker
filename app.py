@@ -140,48 +140,37 @@ st.markdown("""
 .matrix-active-neutral td { background-color: rgba(245, 158, 11, 0.13); color: #ffffff; border-top: 1px solid rgba(245, 158, 11, 0.45); border-bottom: 1px solid rgba(245, 158, 11, 0.45); }
 .sidebar-help-box { background-color: #1a1f2b; border: 1px solid #2d3548; border-radius: 6px; padding: 7px 10px; font-size: 0.78rem; color: #94a3b8; line-height: 1.5; margin-bottom: 8px; }
 .snap-bar-label { font-size: 0.82rem; color: #94a3b8; padding-top: 8px; font-weight: 600; }
-[class*="st-key-sel_"] button {
+[class*="st-key-btn_snap_"] button {
     display: flex !important;
     justify-content: flex-start !important;
     align-items: center !important;
     text-align: left !important;
-    padding-left: 10px !important;
-    padding-right: 8px !important;
+    padding-left: 12px !important;
+    padding-right: 10px !important;
     font-variant-numeric: tabular-nums;
 }
-[class*="st-key-sel_active_"] button {
-    background-color: rgba(56, 189, 248, 0.16) !important;
-    border-color: #38bdf8 !important;
-    border-left: 4px solid #38bdf8 !important;
-    padding-left: 7px !important;
-}
-[class*="st-key-sel_active_"] button:hover {
-    background-color: rgba(56, 189, 248, 0.22) !important;
-    border-color: #7dd3fc !important;
-}
-[class*="st-key-sel_"] button > div {
+[class*="st-key-btn_snap_"] button > div {
     width: 100% !important;
     display: flex !important;
     justify-content: flex-start !important;
     text-align: left !important;
 }
-[class*="st-key-sel_"] button p {
+[class*="st-key-btn_snap_"] button p {
     width: 100% !important;
     text-align: left !important;
     white-space: nowrap !important;
-    overflow: hidden;
-    text-overflow: ellipsis;
     margin: 0 !important;
 }
-[class*="st-key-sel_"] button strong {
+[class*="st-key-btn_snap_"] button strong {
     display: inline-block;
-    min-width: 3.8rem;
-    margin-right: 0.65rem;
+    min-width: 1.9rem;
+    margin-right: 0.5rem;
     text-align: left;
-}
-[class*="st-key-sel_"] button strong,
-[class*="st-key-sel_"] button strong span {
     color: #fbbf24 !important;
+}
+[class*="st-key-btn_snap_"] button[kind="primary"] strong,
+[class*="st-key-btn_snap_"] button[data-testid="stBaseButton-primary"] strong {
+    color: #fef08a !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -276,8 +265,8 @@ def get_stock_display_label(stock_id: str) -> str:
 
 
 @st.cache_data(show_spinner=False)
-def _get_prev_complete_score_cached(stock_id: str, cache_key: str) -> int | None:
-    """最新日尚在結算中時，往前回溯最近一個完整結算日並計算健康分數（依檔案 mtime 快取）"""
+def _get_snap_date_score_cached(stock_id: str, cache_key: str, anchor_date: str) -> int | None:
+    """計算指定基準日的籌碼健康分數（依檔案 mtime 快取，與看板 100% 同口徑）"""
     try:
         df_price_raw, df_chips_raw, df_aux_raw, meta_saved = _load_stock_data_cached(stock_id, cache_key)
         if df_price_raw is None or df_price_raw.empty or df_chips_raw is None or df_chips_raw.empty:
@@ -289,41 +278,35 @@ def _get_prev_complete_score_cached(stock_id: str, cache_key: str) -> int | None
             if (df_aux_raw is not None and not df_aux_raw.empty)
             else None
         )
-
-        dates = df_p_full["date"].astype(str).tolist()
-        if len(dates) < 2:
+        df_p_snap = df_p_full[df_p_full["date"].astype(str) <= anchor_date].reset_index(drop=True)
+        df_c_snap = df_c_full[df_c_full["date"].astype(str) <= anchor_date].reset_index(drop=True)
+        df_a_snap = (
+            df_a_full[df_a_full["date"].astype(str) <= anchor_date].reset_index(drop=True)
+            if df_a_full is not None
+            else None
+        )
+        if df_p_snap.empty:
             return None
 
         tdcc_hist = meta_saved.get("tdcc_history", []) if isinstance(meta_saved, dict) else []
         issued_lots = float(meta_saved.get("issued_lots", 0.0) or 0.0) if isinstance(meta_saved, dict) else 0.0
 
-        for cand_dt in reversed(dates[-6:-1]):
-            comp = check_chip_completeness(df_p_full, df_c_full, df_a_full, anchor_date=cand_dt)
-            if not comp.get("is_complete"):
-                continue
-            df_p_snap = df_p_full[df_p_full["date"].astype(str) <= cand_dt].reset_index(drop=True)
-            df_c_snap = df_c_full[df_c_full["date"].astype(str) <= cand_dt].reset_index(drop=True)
-            df_a_snap = (
-                df_a_full[df_a_full["date"].astype(str) <= cand_dt].reset_index(drop=True)
-                if df_a_full is not None
-                else None
-            )
-            res = analyze_main_force(
-                df_p_snap,
-                df_c_snap,
-                cand_dt,
-                df_chips_full=df_c_snap,
-                df_price_full=df_p_snap,
-                concentrations={},
-                df_aux_full=df_a_snap,
-                tdcc_history=tdcc_hist,
-                issued_lots=issued_lots,
-            )
-            sc = res.get("scenario") if isinstance(res, dict) else None
-            if isinstance(sc, dict) and (not sc.get("is_incomplete")):
-                score = sc.get("conviction_score")
-                if score is not None and not pd.isna(score):
-                    return int(round(float(score)))
+        res = analyze_main_force(
+            df_p_snap.tail(1),
+            df_c_snap.tail(1),
+            anchor_date,
+            df_chips_full=df_c_snap,
+            df_price_full=df_p_snap,
+            concentrations={},
+            df_aux_full=df_a_snap,
+            tdcc_history=tdcc_hist,
+            issued_lots=issued_lots,
+        )
+        sc = res.get("scenario") if isinstance(res, dict) else None
+        if isinstance(sc, dict) and (not sc.get("is_incomplete")):
+            score = sc.get("conviction_score")
+            if score is not None and not pd.isna(score):
+                return int(round(float(score)))
     except Exception:
         pass
     return None
@@ -1160,7 +1143,9 @@ if target_stock:
 
     for off_v, rel_l, dt_v in cand_defs:
         comp_opt = check_chip_completeness(df_price_full, df_chips_full, df_aux_full, anchor_date=dt_v)
-        snap_options.append((off_v, rel_l, dt_v, not comp_opt["is_complete"]))
+        is_incomp = not comp_opt["is_complete"]
+        sc_v = None if is_incomp else _get_snap_date_score_cached(target_stock, cache_key, dt_v)
+        snap_options.append((off_v, rel_l, dt_v, is_incomp, sc_v))
 
     snap_key = f"snap_offset_{target_stock}"
     valid_offsets = [opt[0] for opt in snap_options]
@@ -1285,12 +1270,13 @@ if target_stock:
         st.caption(f"雲端資料庫狀態：{meta_saved['github_sync']}")
 
     # --- 基準日快速切換列 ---
-    snap_cols = st.columns([1.15] + [1.35] * len(snap_options) + [3.0])
+    snap_cols = st.columns([1.15] + [1.65] * len(snap_options) + [2.1])
     with snap_cols[0]:
         st.markdown('<div class="snap-bar-label">📅 籌碼基準日：</div>', unsafe_allow_html=True)
-    for idx_opt, (off_val, rel_lbl, dt_val, is_incomp) in enumerate(snap_options):
+    for idx_opt, (off_val, rel_lbl, dt_val, is_incomp, sc_val) in enumerate(snap_options):
         short_d = dt_val[5:].replace("-", "/") if len(dt_val) >= 10 else dt_val
-        btn_txt = f"{rel_lbl} ({short_d} ⏳)" if is_incomp else f"{rel_lbl} ({short_d})"
+        score_prefix = f"**{sc_val}**" if (not is_incomp and sc_val is not None) else "**⏳**"
+        btn_txt = f"{score_prefix} {rel_lbl} ({short_d})"
         is_sel = (off_val == active_offset)
         with snap_cols[idx_opt + 1]:
             if st.button(btn_txt, key=f"btn_snap_{target_stock}_{off_val}", type="primary" if is_sel else "secondary", width="stretch"):
