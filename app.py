@@ -140,8 +140,41 @@ st.markdown("""
 .matrix-active-neutral td { background-color: rgba(245, 158, 11, 0.13); color: #ffffff; border-top: 1px solid rgba(245, 158, 11, 0.45); border-bottom: 1px solid rgba(245, 158, 11, 0.45); }
 .sidebar-help-box { background-color: #1a1f2b; border: 1px solid #2d3548; border-radius: 6px; padding: 7px 10px; font-size: 0.78rem; color: #94a3b8; line-height: 1.5; margin-bottom: 8px; }
 .snap-bar-label { font-size: 0.82rem; color: #94a3b8; padding-top: 8px; font-weight: 600; }
-[class*="st-key-sel_"] button { justify-content: flex-start !important; padding-left: 12px !important; padding-right: 8px !important; font-variant-numeric: tabular-nums; }
-[class*="st-key-sel_"] button p { white-space: nowrap !important; overflow: hidden; text-overflow: ellipsis; text-align: left !important; margin: 0 !important; }
+[class*="st-key-sel"] button,
+section[data-testid="stSidebar"] div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(3)) > div[data-testid="stColumn"]:first-child button {
+    display: flex !important;
+    justify-content: flex-start !important;
+    align-items: center !important;
+    text-align: left !important;
+    padding-left: 10px !important;
+    padding-right: 8px !important;
+    font-variant-numeric: tabular-nums;
+}
+[class*="st-key-sel"] button > div,
+section[data-testid="stSidebar"] div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(3)) > div[data-testid="stColumn"]:first-child button > div {
+    width: 100% !important;
+    display: flex !important;
+    justify-content: flex-start !important;
+    text-align: left !important;
+}
+[class*="st-key-sel"] button p,
+section[data-testid="stSidebar"] div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(3)) > div[data-testid="stColumn"]:first-child button p {
+    width: 100% !important;
+    text-align: left !important;
+    white-space: nowrap !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin: 0 !important;
+}
+[class*="st-key-sel"] button strong,
+[class*="st-key-sel"] button strong span,
+section[data-testid="stSidebar"] div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(3)) > div[data-testid="stColumn"]:first-child button strong,
+section[data-testid="stSidebar"] div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(3)) > div[data-testid="stColumn"]:first-child button strong span {
+    color: #fbbf24 !important;
+    display: inline-block;
+    min-width: 2.35rem;
+    text-align: left;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -990,7 +1023,7 @@ with st.sidebar:
                 score_txt = get_stock_sidebar_score(sid)
                 with col_s:
                     is_current = (sid == st.session_state.get("active_stock"))
-                    btn_label = f"{score_txt} ▶ {display_name}" if is_current else f"{score_txt} {display_name}"
+                    btn_label = f":orange[**{score_txt}**] ▶ {display_name}" if is_current else f":orange[**{score_txt}**] {display_name}"
                     if st.button(btn_label, key=f"sel_{sid}", width="stretch"):
                         st.session_state["active_stock"] = sid
                         st.rerun()
