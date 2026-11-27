@@ -336,7 +336,17 @@
   "broker_diff_info": null,
   "margin_info": null,
   "sbl_info": null,
-  "tdcc_info": null,
+  "tdcc_info": {
+    "date": "2026-11-20",
+    "age_days": 7,
+    "is_stale": false,
+    "whale_1000_pct": 40.4,
+    "whale_400_pct": 53.27,
+    "total_holders": 156557,
+    "whale_1000_chg_1w": 0.07,
+    "whale_400_chg_1w": 0.18,
+    "holders_chg_1w": 3050
+  },
   "winner_brokers": [
     {
       "name": "台新-五權西",
@@ -636,8 +646,21 @@
       "b": "8888"
     }
   },
-  "tdcc_history": [],
-  "last_updated": "2026-11-27 17:33",
+  "tdcc_history": [
+    {
+      "date": "2026-11-13",
+      "whale_1000_pct": 40.33,
+      "whale_400_pct": 53.09,
+      "total_holders": 153507
+    },
+    {
+      "date": "2026-11-20",
+      "whale_1000_pct": 40.4,
+      "whale_400_pct": 53.27,
+      "total_holders": 156557
+    }
+  ],
+  "last_updated": "2026-11-27 17:42",
   "debug_notes": [],
   "github_sync": "✅ 已單次打包同步（全部更新 9 檔）"
 }

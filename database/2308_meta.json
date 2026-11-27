@@ -348,7 +348,17 @@
   "broker_diff_info": null,
   "margin_info": null,
   "sbl_info": null,
-  "tdcc_info": null,
+  "tdcc_info": {
+    "date": "2026-11-20",
+    "age_days": 7,
+    "is_stale": false,
+    "whale_1000_pct": 72.63,
+    "whale_400_pct": 79.38,
+    "total_holders": 729969,
+    "whale_1000_chg_1w": -0.01,
+    "whale_400_chg_1w": 0.0,
+    "holders_chg_1w": 9592
+  },
   "winner_brokers": [
     {
       "name": "摩根大通",
@@ -643,8 +653,21 @@
       "b": "9227"
     }
   },
-  "tdcc_history": [],
-  "last_updated": "2026-11-27 17:33",
+  "tdcc_history": [
+    {
+      "date": "2026-11-13",
+      "whale_1000_pct": 72.64,
+      "whale_400_pct": 79.38,
+      "total_holders": 720377
+    },
+    {
+      "date": "2026-11-20",
+      "whale_1000_pct": 72.63,
+      "whale_400_pct": 79.38,
+      "total_holders": 729969
+    }
+  ],
+  "last_updated": "2026-11-27 17:41",
   "debug_notes": [],
   "github_sync": "✅ 已單次打包同步（全部更新 9 檔）"
 }

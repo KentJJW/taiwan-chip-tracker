@@ -25,24 +25,29 @@
     "id": 5,
     "type": "bear",
     "sub_type": "波段全面發散",
-    "title": "🟢 純籌碼狀態：5. 波段全面發散（中線趨勢重挫 -12｜大戶撤退）",
-    "desc": "全體波段分點 20 日合計 -7,733 張（控盤 -3.4%／庫存站上20日均線）；全市場集中度 5/10/20 日分別為 -1.8% / -2.9% / -4.4%，主力廣度 61%，中線趨勢（-12）與短線動能（-1）明顯偏空發散。",
+    "title": "🟢 純籌碼狀態：5. 波段全面發散（中線趨勢重挫 -15｜大戶撤退）",
+    "desc": "全體波段分點 20 日合計 -7,733 張（控盤 -3.4%／庫存站上20日均線）；全市場集中度 5/10/20 日分別為 -1.8% / -2.9% / -4.4%，主力廣度 61%，中線趨勢（-15）與短線動能（-1）明顯偏空發散。",
     "action": "波段主力持續撤離且籌碼流向散戶，整體籌碼結構偏空。",
     "badges": [
       {
         "label": "📉 多週期連續發散",
         "level": "bear",
         "detail": "全市場 5/10/20 日集中度同步為負（-1.8% / -2.9% / -4.4%）。"
+      },
+      {
+        "label": "⚠️ 集保大戶流出 (-0.48%)",
+        "level": "bear",
+        "detail": "千張大戶比率下滑且總股東人數增加。"
       }
     ],
     "conviction_score": null,
     "score_breakdown": {
       "base": 50,
-      "trend_total": -12,
+      "trend_total": -15,
       "trend_wave": -6,
       "trend_conc": -6,
-      "trend_tdcc": 0,
-      "trend_inst": 0,
+      "trend_tdcc": -3,
+      "trend_inst": -3,
       "momentum_total": -1,
       "mom_conc_breadth": -1,
       "mom_credit_sbl": 0,
@@ -51,7 +56,7 @@
       "conc_diff": -1,
       "wave_trust": -6,
       "credit_sbl": 0,
-      "tdcc": 0
+      "tdcc": -3
     },
     "margin_quadrant": 0,
     "sbl_mode": "neutral",
@@ -361,9 +366,9 @@
     "whale_1000_pct": 65.59,
     "whale_400_pct": 71.2,
     "total_holders": 179231,
-    "whale_1000_chg_1w": null,
-    "whale_400_chg_1w": null,
-    "holders_chg_1w": null
+    "whale_1000_chg_1w": -0.48,
+    "whale_400_chg_1w": -0.63,
+    "holders_chg_1w": 494
   },
   "winner_brokers": [
     {
@@ -683,13 +688,19 @@
   },
   "tdcc_history": [
     {
+      "date": "2026-11-13",
+      "whale_1000_pct": 66.07,
+      "whale_400_pct": 71.83,
+      "total_holders": 178737
+    },
+    {
       "date": "2026-11-20",
       "whale_1000_pct": 65.59,
       "whale_400_pct": 71.2,
       "total_holders": 179231
     }
   ],
-  "last_updated": "2026-11-27 17:32",
+  "last_updated": "2026-11-27 17:40",
   "debug_notes": [],
   "github_sync": "✅ 已單次打包同步（全部更新 9 檔）"
 }

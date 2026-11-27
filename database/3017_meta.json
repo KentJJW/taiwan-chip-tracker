@@ -368,7 +368,17 @@
   "broker_diff_info": null,
   "margin_info": null,
   "sbl_info": null,
-  "tdcc_info": null,
+  "tdcc_info": {
+    "date": "2026-11-20",
+    "age_days": 7,
+    "is_stale": false,
+    "whale_1000_pct": 53.56,
+    "whale_400_pct": 67.21,
+    "total_holders": 116214,
+    "whale_1000_chg_1w": -0.19,
+    "whale_400_chg_1w": 0.1,
+    "holders_chg_1w": 2495
+  },
   "winner_brokers": [
     {
       "name": "台新-營業部",
@@ -672,8 +682,21 @@
       "b": "9801"
     }
   },
-  "tdcc_history": [],
-  "last_updated": "2026-11-27 17:32",
+  "tdcc_history": [
+    {
+      "date": "2026-11-13",
+      "whale_1000_pct": 53.75,
+      "whale_400_pct": 67.11,
+      "total_holders": 113719
+    },
+    {
+      "date": "2026-11-20",
+      "whale_1000_pct": 53.56,
+      "whale_400_pct": 67.21,
+      "total_holders": 116214
+    }
+  ],
+  "last_updated": "2026-11-27 17:41",
   "debug_notes": [],
   "github_sync": "✅ 已單次打包同步（全部更新 9 檔）"
 }

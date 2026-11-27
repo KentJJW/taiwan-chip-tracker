@@ -22,12 +22,12 @@
   "status_sub": "近 60 日波段三大主力：富邦證券, 統一, 兆豐證券",
   "divergence_alert": null,
   "scenario": {
-    "id": 5,
-    "type": "bear",
-    "sub_type": "波段全面發散",
-    "title": "🟢 純籌碼狀態：5. 波段全面發散（中線趨勢重挫 -12｜大戶撤退）",
-    "desc": "全體波段分點 20 日合計 -1,481 張（控盤 -1.0%／庫存跌破20日均線）；全市場集中度 5/10/20 日分別為 -2.3% / -3.6% / -2.0%，主力廣度 62%，中線趨勢（-12）與短線動能（-1）明顯偏空發散。",
-    "action": "波段主力持續撤離且籌碼流向散戶，整體籌碼結構偏空。",
+    "id": 3,
+    "type": "neutral",
+    "sub_type": "籌碼中性",
+    "title": "⚪ 純籌碼狀態：3. 籌碼中性／換手觀望（31～59 分）",
+    "desc": "全體波段分點 20 日合計 -1,481 張（控盤 -1.0%／庫存跌破20日均線）；全市場集中度 5/10/20 日分別為 -2.3% / -3.6% / -2.0%，主力廣度 62%，多空力道大致平衡（趨勢 -11 ／ 動能 -1）。",
+    "action": "大資金尚未展現單邊波段傾向，宜等待全體波段分點庫存方向表態。",
     "badges": [
       {
         "label": "📉 多週期連續發散",
@@ -38,11 +38,11 @@
     "conviction_score": null,
     "score_breakdown": {
       "base": 50,
-      "trend_total": -12,
+      "trend_total": -11,
       "trend_wave": -6,
       "trend_conc": -6,
-      "trend_tdcc": 0,
-      "trend_inst": 0,
+      "trend_tdcc": 1,
+      "trend_inst": 1,
       "momentum_total": -1,
       "mom_conc_breadth": -1,
       "mom_credit_sbl": 0,
@@ -51,7 +51,7 @@
       "conc_diff": -1,
       "wave_trust": -6,
       "credit_sbl": 0,
-      "tdcc": 0
+      "tdcc": 1
     },
     "margin_quadrant": 0,
     "sbl_mode": "neutral",
@@ -341,7 +341,17 @@
   "broker_diff_info": null,
   "margin_info": null,
   "sbl_info": null,
-  "tdcc_info": null,
+  "tdcc_info": {
+    "date": "2026-11-20",
+    "age_days": 7,
+    "is_stale": false,
+    "whale_1000_pct": 47.75,
+    "whale_400_pct": 61.28,
+    "total_holders": 35837,
+    "whale_1000_chg_1w": 2.01,
+    "whale_400_chg_1w": -1.04,
+    "holders_chg_1w": 1729
+  },
   "winner_brokers": [
     {
       "name": "統一-新竹",
@@ -663,8 +673,21 @@
       "b": "9227"
     }
   },
-  "tdcc_history": [],
-  "last_updated": "2026-11-27 17:32",
+  "tdcc_history": [
+    {
+      "date": "2026-11-13",
+      "whale_1000_pct": 45.74,
+      "whale_400_pct": 62.32,
+      "total_holders": 34108
+    },
+    {
+      "date": "2026-11-20",
+      "whale_1000_pct": 47.75,
+      "whale_400_pct": 61.28,
+      "total_holders": 35837
+    }
+  ],
+  "last_updated": "2026-11-27 17:41",
   "debug_notes": [],
   "github_sync": "✅ 已單次打包同步（全部更新 9 檔）"
 }

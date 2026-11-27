@@ -25,24 +25,29 @@
     "id": 5,
     "type": "bear",
     "sub_type": "波段全面發散",
-    "title": "🟢 純籌碼狀態：5. 波段全面發散（中線趨勢重挫 -16｜大戶撤退）",
-    "desc": "全體波段分點 20 日合計 -5,463 張（控盤 -2.1%／庫存跌破20日均線）；全市場集中度 5/10/20 日分別為 -6.9% / -9.9% / -2.3%，主力廣度 64%，中線趨勢（-16）與短線動能（-2）明顯偏空發散。",
+    "title": "🟢 純籌碼狀態：5. 波段全面發散（≤30 分｜大戶撤退）",
+    "desc": "全體波段分點 20 日合計 -5,463 張（控盤 -2.1%／庫存跌破20日均線）；全市場集中度 5/10/20 日分別為 -6.9% / -9.9% / -2.3%，主力廣度 64%，中線趨勢（-20）與短線動能（-2）明顯偏空發散。",
     "action": "波段主力持續撤離且籌碼流向散戶，整體籌碼結構偏空。",
     "badges": [
       {
         "label": "📉 多週期連續發散",
         "level": "bear",
         "detail": "全市場 5/10/20 日集中度同步為負（-6.9% / -9.9% / -2.3%）。"
+      },
+      {
+        "label": "⚠️ 集保大戶大減 (-4.22%)",
+        "level": "bear",
+        "detail": "千張大戶比率單週顯著下滑且股東人數增加，歸戶籌碼明顯發散。"
       }
     ],
     "conviction_score": null,
     "score_breakdown": {
       "base": 50,
-      "trend_total": -16,
+      "trend_total": -20,
       "trend_wave": -8,
       "trend_conc": -8,
-      "trend_tdcc": 0,
-      "trend_inst": 0,
+      "trend_tdcc": -4,
+      "trend_inst": -4,
       "momentum_total": -2,
       "mom_conc_breadth": -2,
       "mom_credit_sbl": 0,
@@ -51,7 +56,7 @@
       "conc_diff": -2,
       "wave_trust": -8,
       "credit_sbl": 0,
-      "tdcc": 0
+      "tdcc": -4
     },
     "margin_quadrant": 0,
     "sbl_mode": "neutral",
@@ -368,7 +373,17 @@
   "broker_diff_info": null,
   "margin_info": null,
   "sbl_info": null,
-  "tdcc_info": null,
+  "tdcc_info": {
+    "date": "2026-11-20",
+    "age_days": 7,
+    "is_stale": false,
+    "whale_1000_pct": 61.79,
+    "whale_400_pct": 65.49,
+    "total_holders": 60640,
+    "whale_1000_chg_1w": -4.22,
+    "whale_400_chg_1w": -4.71,
+    "holders_chg_1w": 9665
+  },
   "winner_brokers": [
     {
       "name": "福邦證券",
@@ -688,8 +703,21 @@
       "b": "0037003000300063"
     }
   },
-  "tdcc_history": [],
-  "last_updated": "2026-11-27 17:32",
+  "tdcc_history": [
+    {
+      "date": "2026-11-13",
+      "whale_1000_pct": 66.01,
+      "whale_400_pct": 70.2,
+      "total_holders": 50975
+    },
+    {
+      "date": "2026-11-20",
+      "whale_1000_pct": 61.79,
+      "whale_400_pct": 65.49,
+      "total_holders": 60640
+    }
+  ],
+  "last_updated": "2026-11-27 17:41",
   "debug_notes": [],
   "github_sync": "✅ 已單次打包同步（全部更新 9 檔）"
 }
