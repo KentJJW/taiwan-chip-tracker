@@ -32,6 +32,11 @@
         "label": "🌊 波段合力急撤 (20日 -4.2%)",
         "level": "bear",
         "detail": "全體波段分點近 20 日合計 -17,989 張（控盤 -4.2%），累計庫存跌破 20 日均線向下。"
+      },
+      {
+        "label": "⚡ 隔日沖介入 (5.9%)",
+        "level": "warn",
+        "detail": "當日隔日沖熱點（富邦證券）買超佔成交量 5.9%，提防隔日開高倒貨賣壓。"
       }
     ],
     "conviction_score": null,
@@ -45,7 +50,7 @@
       "momentum_total": 1,
       "mom_conc_breadth": 1,
       "mom_credit_sbl": 0,
-      "day_trade": 0,
+      "day_trade": -3,
       "conc_breadth": 1,
       "conc_diff": 1,
       "wave_trust": -16,
@@ -162,6 +167,9 @@
     ],
     "花旗環球": [
       "🌐 外資"
+    ],
+    "富邦證券": [
+      "⚡ 隔日沖"
     ]
   },
   "wave_agg_info": {
@@ -502,10 +510,10 @@
   },
   "today_buyers": {
     "臺銀": 3194,
+    "富邦證券": 882,
     "摩根大通": 772,
     "港商野村": 102,
-    "永豐金證券": 101,
-    "元大證券": 53
+    "永豐金證券": 101
   },
   "today_sellers": {
     "美商高盛": -1623,
@@ -518,7 +526,7 @@
   "stock_name": "台達電",
   "ticker_suffix": ".TW",
   "issued_lots": 2597543.3,
-  "broker_count": 33,
+  "broker_count": 34,
   "tracked_brokers": {
     "凱基": {
       "bhid": "9200",
@@ -651,6 +659,10 @@
     "凱基-城中": {
       "bhid": "9200",
       "b": "9227"
+    },
+    "富邦證券": {
+      "bhid": "9600",
+      "b": "9600"
     }
   },
   "tdcc_history": [
@@ -667,7 +679,7 @@
       "total_holders": 729969
     }
   ],
-  "last_updated": "2026-11-27 17:41",
+  "last_updated": "2026-11-27 20:14",
   "debug_notes": [],
   "github_sync": "✅ 已單次打包同步（全部更新 9 檔）"
 }

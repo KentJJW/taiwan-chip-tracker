@@ -25,20 +25,20 @@
     "type": "neutral",
     "sub_type": "籌碼中性",
     "title": "⚪ 純籌碼狀態：3. 籌碼中性／換手觀望（31～59 分）",
-    "desc": "全體波段分點 20 日合計 -1,072 張（控盤 -1.4%／庫存跌破20日均線）；全市場集中度 5/10/20 日分別為 +1.5% / -0.5% / +0.1%，主力廣度 66%，多空力道大致平衡（趨勢 -6 ／ 動能 +5）。",
+    "desc": "全體波段分點 20 日合計 -556 張（控盤 -0.7%／庫存站上20日均線）；全市場集中度 5/10/20 日分別為 +1.5% / -0.5% / +0.1%，主力廣度 67%，多空力道大致平衡（趨勢 +0 ／ 動能 +5）。",
     "action": "大資金尚未展現單邊波段傾向，宜等待全體波段分點庫存方向表態。",
     "badges": [
       {
-        "label": "🧭 主力共識 (66%)",
+        "label": "🧭 主力共識 (67%)",
         "level": "bull",
-        "detail": "近 5 日波段分點 19 買 / 10 賣，多數大戶方向一致偏多。"
+        "detail": "近 5 日波段分點 20 買 / 10 賣，多數大戶方向一致偏多。"
       }
     ],
     "conviction_score": null,
     "score_breakdown": {
       "base": 50,
-      "trend_total": -6,
-      "trend_wave": -6,
+      "trend_total": 0,
+      "trend_wave": 0,
       "trend_conc": 0,
       "trend_tdcc": 0,
       "trend_inst": 0,
@@ -48,7 +48,7 @@
       "day_trade": 0,
       "conc_breadth": 5,
       "conc_diff": 5,
-      "wave_trust": -6,
+      "wave_trust": 0,
       "credit_sbl": 0,
       "tdcc": 0
     },
@@ -174,6 +174,9 @@
     ],
     "永豐金-匯立": [
       "🏆 贏家"
+    ],
+    "國泰證券": [
+      "🏆 贏家"
     ]
   },
   "wave_agg_info": {
@@ -209,21 +212,22 @@
       "永豐金-匯立",
       "凱基-城中",
       "元大-松江",
-      "中國信託-新竹"
+      "中國信託-新竹",
+      "國泰證券"
     ],
-    "broker_count": 32,
-    "net_1d": -332,
-    "net_5d": 134,
-    "net_10d": -524,
-    "net_20d": -1072,
-    "net_60d": -1838,
-    "ctrl_5d_pct": 0.58,
-    "ctrl_20d_pct": -1.35,
-    "ctrl_60d_pct": -0.91,
-    "ctrl_20d_z": -0.46,
-    "cum_now": 12888,
-    "cum_ma20": 13040,
-    "cum_above_ma20": false
+    "broker_count": 33,
+    "net_1d": -260,
+    "net_5d": 273,
+    "net_10d": -301,
+    "net_20d": -556,
+    "net_60d": -1250,
+    "ctrl_5d_pct": 1.17,
+    "ctrl_20d_pct": -0.7,
+    "ctrl_60d_pct": -0.62,
+    "ctrl_20d_z": -0.32,
+    "cum_now": 12809,
+    "cum_ma20": 12690,
+    "cum_above_ma20": true
   },
   "wave_broker_names": [
     "美商高盛",
@@ -257,7 +261,8 @@
     "永豐金-匯立",
     "凱基-城中",
     "元大-松江",
-    "中國信託-新竹"
+    "中國信託-新竹",
+    "國泰證券"
   ],
   "top3_names": [
     "永豐金證券",
@@ -348,21 +353,21 @@
     }
   },
   "breadth_info": {
-    "breadth_5d": 65.5,
-    "buy_5d": 19,
+    "breadth_5d": 66.7,
+    "buy_5d": 20,
     "sell_5d": 10,
-    "active_5d": 29,
-    "breadth_1d": 44.0,
-    "buy_1d": 11,
+    "active_5d": 30,
+    "breadth_1d": 46.2,
+    "buy_1d": 12,
     "sell_1d": 14,
-    "active_1d": 25,
+    "active_1d": 26,
     "foreign_breadth_5d": 45.5,
     "foreign_buy_5d": 5,
     "foreign_sell_5d": 6,
     "foreign_active_5d": 11,
     "high_streak": 0,
     "low_streak": 0,
-    "total_wave_brokers": 32,
+    "total_wave_brokers": 33,
     "few_holding_up": false
   },
   "broker_diff_info": null,
@@ -396,6 +401,26 @@
       "win_rate": 100.0,
       "avg_fwd_ret": 28.27,
       "buy_signals": 4,
+      "tags": [
+        "🏆 贏家"
+      ]
+    },
+    {
+      "name": "國泰證券",
+      "net_1d": 72,
+      "net_5d": 139,
+      "net_10d": 223,
+      "net_20d": 516,
+      "net_60d": 588,
+      "net_ytd": -79,
+      "churn_ratio": 2.98,
+      "flip_rate": 0.52,
+      "is_foreign": false,
+      "is_day_trader": false,
+      "is_winner": true,
+      "win_rate": 76.9,
+      "avg_fwd_ret": 12.7,
+      "buy_signals": 13,
       "tags": [
         "🏆 贏家"
       ]
@@ -460,26 +485,6 @@
       "tags": [
         "🏆 贏家"
       ]
-    },
-    {
-      "name": "群益金鼎",
-      "net_1d": -3,
-      "net_5d": 332,
-      "net_10d": 334,
-      "net_20d": 1099,
-      "net_60d": 1360,
-      "net_ytd": 2236,
-      "churn_ratio": 2.17,
-      "flip_rate": 0.38,
-      "is_foreign": false,
-      "is_day_trader": false,
-      "is_winner": true,
-      "win_rate": 69.2,
-      "avg_fwd_ret": 6.74,
-      "buy_signals": 13,
-      "tags": [
-        "🏆 贏家"
-      ]
     }
   ],
   "recent_10d_rising": {
@@ -487,7 +492,7 @@
     "群益金鼎": 334,
     "新加坡商瑞銀": 255,
     "中國信託": 224,
-    "凱基": 221
+    "國泰證券": 223
   },
   "top_buyers": {
     "永豐金證券": 1697,
@@ -520,9 +525,9 @@
   "today_buyers": {
     "凱基": 336,
     "元大證券": 226,
+    "國泰證券": 72,
     "凱基-台北": 66,
-    "華南永昌": 63,
-    "永豐金證券": 46
+    "華南永昌": 63
   },
   "today_sellers": {
     "美商高盛": -332,
@@ -535,7 +540,7 @@
   "stock_name": "奇鋐",
   "ticker_suffix": ".TW",
   "issued_lots": 394478.5,
-  "broker_count": 36,
+  "broker_count": 37,
   "tracked_brokers": {
     "港商麥格理": {
       "bhid": "1360",
@@ -680,6 +685,10 @@
     "元大-松江": {
       "bhid": "9800",
       "b": "9801"
+    },
+    "國泰證券": {
+      "bhid": "8880",
+      "b": "8880"
     }
   },
   "tdcc_history": [
@@ -696,7 +705,7 @@
       "total_holders": 116214
     }
   ],
-  "last_updated": "2026-11-27 17:41",
+  "last_updated": "2026-11-27 20:13",
   "debug_notes": [],
   "github_sync": "✅ 已單次打包同步（全部更新 9 檔）"
 }

@@ -25,7 +25,7 @@
     "type": "bear",
     "sub_type": "波段全面發散",
     "title": "🟢 純籌碼狀態：5. 波段全面發散（≤30 分｜大戶撤退）",
-    "desc": "全體波段分點 20 日合計 -13,306 張（控盤 -2.7%／庫存跌破20日均線）；全市場集中度 5/10/20 日分別為 -0.4% / -0.9% / -2.1%，主力廣度 34%，中線趨勢（-19）與短線動能（-7）明顯偏空發散。",
+    "desc": "全體波段分點 20 日合計 -11,852 張（控盤 -2.4%／庫存跌破20日均線）；全市場集中度 5/10/20 日分別為 -0.4% / -0.9% / -2.1%，主力廣度 37%，中線趨勢（-19）與短線動能（-1）明顯偏空發散。",
     "action": "波段主力持續撤離且籌碼流向散戶，整體籌碼結構偏空。",
     "badges": [
       {
@@ -37,16 +37,6 @@
         "label": "⚠️ 集保大戶大減 (-0.80%)",
         "level": "bear",
         "detail": "千張大戶比率單週顯著下滑且股東人數增加，歸戶籌碼明顯發散。"
-      },
-      {
-        "label": "📉 主力集體撤退 (34%)",
-        "level": "bear",
-        "detail": "近 5 日波段分點僅 10 買 / 19 賣，搭配負集中度確認大戶全面撤離。"
-      },
-      {
-        "label": "🌐 外資齊賣 (2買/8賣)",
-        "level": "bear",
-        "detail": "近 5 日外資分點多方共識僅 20%，呈現外資集體同步倒貨。"
       }
     ],
     "conviction_score": null,
@@ -57,12 +47,12 @@
       "trend_conc": -5,
       "trend_tdcc": -4,
       "trend_inst": -4,
-      "momentum_total": -7,
-      "mom_conc_breadth": -7,
+      "momentum_total": -1,
+      "mom_conc_breadth": -1,
       "mom_credit_sbl": 0,
       "day_trade": 0,
-      "conc_breadth": -7,
-      "conc_diff": -7,
+      "conc_breadth": -1,
+      "conc_diff": -1,
       "wave_trust": -10,
       "credit_sbl": 0,
       "tdcc": -4
@@ -205,6 +195,9 @@
     ],
     "凱基-城中": [
       "🏆 贏家"
+    ],
+    "康和": [
+      "⚡ 隔日沖"
     ]
   },
   "wave_agg_info": {
@@ -237,20 +230,21 @@
       "元大-西屯",
       "富邦-岡山",
       "凱基-城中",
-      "台新-五權西"
+      "台新-五權西",
+      "(牛牛牛)亞證券"
     ],
-    "broker_count": 29,
-    "net_1d": -2966,
-    "net_5d": -1580,
-    "net_10d": -2359,
-    "net_20d": -13306,
-    "net_60d": -10321,
-    "ctrl_5d_pct": -1.7,
-    "ctrl_20d_pct": -2.69,
-    "ctrl_60d_pct": -0.58,
-    "ctrl_20d_z": -0.51,
-    "cum_now": -99873,
-    "cum_ma20": -96495,
+    "broker_count": 30,
+    "net_1d": -2965,
+    "net_5d": -1579,
+    "net_10d": -2358,
+    "net_20d": -11852,
+    "net_60d": -8986,
+    "ctrl_5d_pct": -1.69,
+    "ctrl_20d_pct": -2.4,
+    "ctrl_60d_pct": -0.5,
+    "ctrl_20d_z": -0.45,
+    "cum_now": -99567,
+    "cum_ma20": -96511,
     "cum_above_ma20": false
   },
   "wave_broker_names": [
@@ -282,7 +276,8 @@
     "元大-西屯",
     "富邦-岡山",
     "凱基-城中",
-    "台新-五權西"
+    "台新-五權西",
+    "(牛牛牛)亞證券"
   ],
   "top3_names": [
     "富邦證券",
@@ -373,21 +368,21 @@
     }
   },
   "breadth_info": {
-    "breadth_5d": 34.5,
-    "buy_5d": 10,
+    "breadth_5d": 36.7,
+    "buy_5d": 11,
     "sell_5d": 19,
-    "active_5d": 29,
-    "breadth_1d": 44.4,
-    "buy_1d": 12,
+    "active_5d": 30,
+    "breadth_1d": 46.4,
+    "buy_1d": 13,
     "sell_1d": 15,
-    "active_1d": 27,
+    "active_1d": 28,
     "foreign_breadth_5d": 20.0,
     "foreign_buy_5d": 2,
     "foreign_sell_5d": 8,
     "foreign_active_5d": 10,
     "high_streak": 0,
     "low_streak": 0,
-    "total_wave_brokers": 29,
+    "total_wave_brokers": 30,
     "few_holding_up": false
   },
   "broker_diff_info": null,
@@ -544,11 +539,11 @@
     "美商高盛": -16106
   },
   "today_buyers": {
+    "康和": 1879,
     "美林": 486,
     "國泰-敦南": 46,
     "富邦證券": 20,
-    "新光": 16,
-    "凱基-站前": 13
+    "新光": 16
   },
   "today_sellers": {
     "台灣摩根士丹利": -1898,
@@ -561,7 +556,7 @@
   "stock_name": "臻鼎-KY",
   "ticker_suffix": ".TW",
   "issued_lots": 1132547.6,
-  "broker_count": 35,
+  "broker_count": 37,
   "tracked_brokers": {
     "永豐金證券": {
       "bhid": "9A00",
@@ -702,6 +697,14 @@
     "台新-五權西": {
       "bhid": "9B00",
       "b": "0039004200320035"
+    },
+    "康和": {
+      "bhid": "8450",
+      "b": "8450"
+    },
+    "(牛牛牛)亞證券": {
+      "bhid": "6010",
+      "b": "6010"
     }
   },
   "tdcc_history": [
@@ -718,7 +721,7 @@
       "total_holders": 224101
     }
   ],
-  "last_updated": "2026-11-27 17:41",
+  "last_updated": "2026-11-27 20:14",
   "debug_notes": [],
   "github_sync": "✅ 已單次打包同步（全部更新 9 檔）"
 }

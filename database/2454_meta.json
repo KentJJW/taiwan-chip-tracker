@@ -25,13 +25,13 @@
     "type": "bear",
     "sub_type": "波段全面發散",
     "title": "🟢 純籌碼狀態：5. 波段全面發散（≤30 分｜大戶撤退）",
-    "desc": "全體波段分點 20 日合計 -12,101 張（控盤 -4.0%／庫存跌破20日均線）；全市場集中度 5/10/20 日分別為 -3.2% / -2.8% / -4.8%，主力廣度 65%，中線趨勢（-23）與短線動能（-2）明顯偏空發散。",
+    "desc": "全體波段分點 20 日合計 -10,834 張（控盤 -3.6%／庫存跌破20日均線）；全市場集中度 5/10/20 日分別為 -3.2% / -2.8% / -4.8%，主力廣度 67%，中線趨勢（-19）與短線動能（-2）明顯偏空發散。",
     "action": "波段主力持續撤離且籌碼流向散戶，整體籌碼結構偏空。",
     "badges": [
       {
-        "label": "🌊 波段合力急撤 (20日 -4.0%)",
+        "label": "🌊 波段合力急撤 (20日 -3.6%)",
         "level": "bear",
-        "detail": "全體波段分點近 20 日合計 -12,101 張（控盤 -4.0%），累計庫存跌破 20 日均線向下。"
+        "detail": "全體波段分點近 20 日合計 -10,834 張（控盤 -3.6%），累計庫存跌破 20 日均線向下。"
       },
       {
         "label": "📉 多週期連續發散",
@@ -42,8 +42,8 @@
     "conviction_score": null,
     "score_breakdown": {
       "base": 50,
-      "trend_total": -23,
-      "trend_wave": -16,
+      "trend_total": -19,
+      "trend_wave": -12,
       "trend_conc": -6,
       "trend_tdcc": -1,
       "trend_inst": -1,
@@ -53,7 +53,7 @@
       "day_trade": 0,
       "conc_breadth": -2,
       "conc_diff": -2,
-      "wave_trust": -16,
+      "wave_trust": -12,
       "credit_sbl": 0,
       "tdcc": -1
     },
@@ -166,6 +166,9 @@
     ],
     "摩根大通": [
       "🌐 外資"
+    ],
+    "群益金鼎": [
+      "🏆 贏家"
     ]
   },
   "wave_agg_info": {
@@ -196,20 +199,21 @@
       "美好",
       "摩根大通",
       "土銀",
-      "華南永昌"
+      "華南永昌",
+      "群益金鼎"
     ],
-    "broker_count": 27,
-    "net_1d": 1228,
-    "net_5d": -1173,
-    "net_10d": -3528,
-    "net_20d": -12101,
-    "net_60d": -38673,
-    "ctrl_5d_pct": -1.71,
-    "ctrl_20d_pct": -4.02,
-    "ctrl_60d_pct": -5.86,
-    "ctrl_20d_z": 0.13,
-    "cum_now": -40452,
-    "cum_ma20": -38746,
+    "broker_count": 28,
+    "net_1d": 1222,
+    "net_5d": -999,
+    "net_10d": -3519,
+    "net_20d": -10834,
+    "net_60d": -37181,
+    "ctrl_5d_pct": -1.46,
+    "ctrl_20d_pct": -3.6,
+    "ctrl_60d_pct": -5.64,
+    "ctrl_20d_z": 0.16,
+    "cum_now": -40558,
+    "cum_ma20": -39150,
     "cum_above_ma20": false
   },
   "wave_broker_names": [
@@ -239,7 +243,8 @@
     "美好",
     "摩根大通",
     "土銀",
-    "華南永昌"
+    "華南永昌",
+    "群益金鼎"
   ],
   "top3_names": [
     "臺銀",
@@ -306,17 +311,17 @@
     "date": "2026-11-27",
     "is_pending": false,
     "pending_date": "",
-    "ytd": 7251,
-    "period": 7251,
-    "d1": 47,
-    "d5": 1837,
-    "d10": 3116,
-    "d20": 10441,
+    "ytd": 7238,
+    "period": 7238,
+    "d1": 34,
+    "d5": 1824,
+    "d10": 3103,
+    "d20": 10428,
     "streak": 3,
     "ctrl_pct": 0.3,
-    "cost": 3983.22,
-    "inv": 17070,
-    "pnl_pct": -7.61,
+    "cost": 3983.46,
+    "inv": 17057,
+    "pnl_pct": -7.62,
     "holding_pct": 7.14,
     "phase": {
       "tier_label": "中高水位 (7.14%)",
@@ -326,21 +331,21 @@
     }
   },
   "breadth_info": {
-    "breadth_5d": 65.4,
-    "buy_5d": 17,
+    "breadth_5d": 66.7,
+    "buy_5d": 18,
     "sell_5d": 9,
-    "active_5d": 26,
-    "breadth_1d": 33.3,
+    "active_5d": 27,
+    "breadth_1d": 32.1,
     "buy_1d": 9,
-    "sell_1d": 18,
-    "active_1d": 27,
+    "sell_1d": 19,
+    "active_1d": 28,
     "foreign_breadth_5d": 27.3,
     "foreign_buy_5d": 3,
     "foreign_sell_5d": 8,
     "foreign_active_5d": 11,
     "high_streak": 0,
     "low_streak": 1,
-    "total_wave_brokers": 27,
+    "total_wave_brokers": 28,
     "few_holding_up": false
   },
   "broker_diff_info": null,
@@ -515,7 +520,7 @@
   "stock_name": "聯發科",
   "ticker_suffix": ".TW",
   "issued_lots": 1597129.8,
-  "broker_count": 32,
+  "broker_count": 33,
   "tracked_brokers": {
     "元大證券": {
       "bhid": "9800",
@@ -644,6 +649,10 @@
     "華南永昌": {
       "bhid": "9300",
       "b": "9300"
+    },
+    "群益金鼎": {
+      "bhid": "9100",
+      "b": "9100"
     }
   },
   "tdcc_history": [
@@ -660,7 +669,7 @@
       "total_holders": 817443
     }
   ],
-  "last_updated": "2026-11-27 17:40",
+  "last_updated": "2026-11-27 20:13",
   "debug_notes": [],
   "github_sync": "✅ 已單次打包同步（全部更新 9 檔）"
 }

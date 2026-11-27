@@ -26,7 +26,7 @@
     "type": "neutral",
     "sub_type": "籌碼中性",
     "title": "⚪ 純籌碼狀態：3. 籌碼中性／換手觀望（31～59 分）",
-    "desc": "全體波段分點 20 日合計 -1,481 張（控盤 -1.0%／庫存跌破20日均線）；全市場集中度 5/10/20 日分別為 -2.3% / -3.6% / -2.0%，主力廣度 62%，多空力道大致平衡（趨勢 -11 ／ 動能 -1）。",
+    "desc": "全體波段分點 20 日合計 -2,032 張（控盤 -1.4%／庫存跌破20日均線）；全市場集中度 5/10/20 日分別為 -2.3% / -3.6% / -2.0%，主力廣度 61%，多空力道大致平衡（趨勢 -11 ／ 動能 -1）。",
     "action": "大資金尚未展現單邊波段傾向，宜等待全體波段分點庫存方向表態。",
     "badges": [
       {
@@ -147,6 +147,9 @@
     ],
     "凱基-台中": [
       "🏆 贏家"
+    ],
+    "國票證券": [
+      "🏆 贏家"
     ]
   },
   "wave_agg_info": {
@@ -185,20 +188,21 @@
       "元大-豐原",
       "大昌-新店",
       "凱基-台中",
-      "凱基-城中"
+      "凱基-城中",
+      "國票證券"
     ],
-    "broker_count": 35,
-    "net_1d": 618,
-    "net_5d": 408,
-    "net_10d": -96,
-    "net_20d": -1481,
-    "net_60d": -1955,
-    "ctrl_5d_pct": 1.27,
-    "ctrl_20d_pct": -1.04,
-    "ctrl_60d_pct": -0.47,
-    "ctrl_20d_z": -0.68,
-    "cum_now": 12786,
-    "cum_ma20": 13021,
+    "broker_count": 36,
+    "net_1d": 607,
+    "net_5d": 39,
+    "net_10d": -612,
+    "net_20d": -2032,
+    "net_60d": -2542,
+    "ctrl_5d_pct": 0.12,
+    "ctrl_20d_pct": -1.43,
+    "ctrl_60d_pct": -0.62,
+    "ctrl_20d_z": -0.79,
+    "cum_now": 12673,
+    "cum_ma20": 13303,
     "cum_above_ma20": false
   },
   "wave_broker_names": [
@@ -236,7 +240,8 @@
     "元大-豐原",
     "大昌-新店",
     "凱基-台中",
-    "凱基-城中"
+    "凱基-城中",
+    "國票證券"
   ],
   "top3_names": [
     "富邦證券",
@@ -321,21 +326,21 @@
     }
   },
   "breadth_info": {
-    "breadth_5d": 62.5,
+    "breadth_5d": 60.6,
     "buy_5d": 20,
-    "sell_5d": 12,
-    "active_5d": 32,
-    "breadth_1d": 59.4,
+    "sell_5d": 13,
+    "active_5d": 33,
+    "breadth_1d": 57.6,
     "buy_1d": 19,
-    "sell_1d": 13,
-    "active_1d": 32,
+    "sell_1d": 14,
+    "active_1d": 33,
     "foreign_breadth_5d": 77.8,
     "foreign_buy_5d": 7,
     "foreign_sell_5d": 2,
     "foreign_active_5d": 9,
     "high_streak": 0,
     "low_streak": 0,
-    "total_wave_brokers": 35,
+    "total_wave_brokers": 36,
     "few_holding_up": false
   },
   "broker_diff_info": null,
@@ -510,7 +515,7 @@
   "stock_name": "玉晶光",
   "ticker_suffix": ".TW",
   "issued_lots": 118277.5,
-  "broker_count": 40,
+  "broker_count": 41,
   "tracked_brokers": {
     "美林": {
       "bhid": "1440",
@@ -671,6 +676,10 @@
     "凱基-城中": {
       "bhid": "9200",
       "b": "9227"
+    },
+    "國票證券": {
+      "bhid": "7790",
+      "b": "7790"
     }
   },
   "tdcc_history": [
@@ -687,7 +696,7 @@
       "total_holders": 35837
     }
   ],
-  "last_updated": "2026-11-27 17:41",
+  "last_updated": "2026-11-27 20:13",
   "debug_notes": [],
   "github_sync": "✅ 已單次打包同步（全部更新 9 檔）"
 }
