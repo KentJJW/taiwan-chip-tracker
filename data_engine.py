@@ -358,7 +358,6 @@ def _fetch_twse_tpex_price(stock_id: str, start_date: str, end_date: str, prefer
         rows = []
         for y, m in months:
             month_items = []
-            # 1. 新版櫃買中心官方 API (tradingStock)
             new_url = f"https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock?date={y:04d}/{m:02d}/01&code={stock_id}&id=&response=json"
             try:
                 resp = session.get(new_url, timeout=8, verify=False)
@@ -372,7 +371,6 @@ def _fetch_twse_tpex_price(stock_id: str, start_date: str, end_date: str, prefer
             except Exception:
                 pass
 
-            # 2. 舊版備援 API (st43_result.php)
             if not month_items:
                 roc_ym = f"{y - 1911:03d}/{m:02d}"
                 old_url = f"https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php?l=zh-tw&d={roc_ym}&stkno={stock_id}"
@@ -1240,7 +1238,6 @@ def _populate_aux_concentrations(
         if col not in df_out.columns:
             df_out[col] = np.nan
 
-    # 清除近 3 日內尚未公布分點明細之集中度（防盤中殘留假數值）
     if valid_broker_dates is not None and len(df_out) > 0:
         for idx in range(max(0, len(df_out) - 3), len(df_out)):
             if str(df_out.loc[idx, "date"]) not in valid_broker_dates:
@@ -1330,7 +1327,6 @@ def check_chip_completeness(
     actual_dt = str(df_p_sub["date"].iloc[-1])
     today_vol = float(pd.to_numeric(df_p_sub["volume"].iloc[-1], errors="coerce") or 0.0) if "volume" in df_p_sub.columns else 1.0
 
-    # 1. 主力分點明細檢核（排除投信）
     has_broker = False
     trust_net_today = 0.0
     if df_chips_full is not None and not df_chips_full.empty:
@@ -1345,7 +1341,6 @@ def check_chip_completeness(
         if "投信" in df_chips_full.columns and not row_c.empty:
             trust_net_today = float(pd.to_numeric(row_c["投信"].iloc[-1], errors="coerce") or 0.0)
 
-    # 2. 集中度、融資融券、借券賣出與投信檢核
     need_conc5 = len(df_p_sub) >= 5
     has_conc5 = not need_conc5
     has_margin = True
@@ -1385,7 +1380,6 @@ def check_chip_completeness(
         if abs(trust_net_today) > 0:
             has_trust = True
         elif has_broker or (actual_dt != latest_all_dt):
-            # 向下相容舊資料檔：歷史日或當日分點已完整公布時視為投信已結算
             has_trust = True
 
     missing_items = []
@@ -1441,7 +1435,6 @@ def analyze_main_force(
     anchor_dt_chk = str(full_price["date"].iloc[-1]) if not full_price.empty else ""
     completeness = check_chip_completeness(full_price, full_df, df_aux_full, anchor_date=anchor_dt_chk)
 
-    # --- 1. 整理集中度並計算 60 日滾動 Z-Score ---
     conc_out = {}
     raw_conc = concentrations if isinstance(concentrations, dict) else {}
     aux_conc_map = {"d5": "conc_5d", "d10": "conc_10d", "d20": "conc_20d"}
@@ -1527,7 +1520,6 @@ def analyze_main_force(
     lb_days = STRATEGY_PARAMS["wave_lookback_days"]
     z_win = STRATEGY_PARAMS["zscore_window"]
 
-    # --- 2. 投信獨立追蹤（今日尚未公布時自動退回前一有效日計算，防補 0 歸零連買賣天數） ---
     trust_info = None
     if "投信" in full_df.columns:
         trust_is_pending = (not completeness["has_trust"]) and (len(full_df) >= 2)
@@ -1595,7 +1587,6 @@ def analyze_main_force(
         }
         trust_info["phase"] = evaluate_trust_phase(trust_info)
 
-    # --- 3. 整理信用交易與集保輔助籌碼 ---
     margin_info = None
     sbl_info = None
     tdcc_info = None
@@ -1678,7 +1669,6 @@ def analyze_main_force(
                 "holders_chg_1w": int(latest_t["total_holders"]) - int(prev_t["total_holders"]) if prev_t else None,
             }
 
-    # --- 4. 分點行為畫像、全體波段分點合力、主力廣度比與 60 日波段主力篩選 ---
     profiles = profile_brokers(full_price, full_df, lookback_days=lb_days)
     broker_tags = {k: v["tags"] for k, v in profiles.items() if v.get("tags")}
     top3_names, filtered_dt = select_wave_main_forces(profiles, top_n=3, exclude_day_traders=True)
@@ -1798,7 +1788,6 @@ def analyze_main_force(
             "today_sellers": today_sellers,
         }
 
-    # --- 5. 計算最大主力與三大波段主力數據 ---
     primary_player = top3_names[0]
     primary_60d_net = profiles[primary_player]["net_60d"]
     primary_ytd_net = profiles[primary_player]["net_ytd"]
@@ -1852,7 +1841,6 @@ def analyze_main_force(
         close_5d_ago = float(full_price.iloc[-6]["close"]) if len(full_price) >= 6 else float(full_price.iloc[0]["close"])
         price_5d_pct = ((close_now - close_5d_ago) / close_5d_ago * 100.0) if close_5d_ago > 0 else 0.0
 
-    # --- 6. 呼叫 strategy.py 判定視覺背離警報與 100% 純籌碼健康評分 ---
     c5_pct = conc_out.get("d5", {}).get("pct")
     divergence_alert = (
         evaluate_divergence_alert(
@@ -1905,7 +1893,6 @@ def analyze_main_force(
         scenario["is_incomplete"] = False
         scenario["missing_items"] = []
 
-    # --- 7. 前三大波段主力明細列 ---
     top3_rows = []
     for name in top3_names:
         prof = profiles[name]
@@ -2108,7 +2095,6 @@ def compute_daily_health_scores(
             records.append({"date": dt_str, "health_score": np.nan, "scenario_id": 0, "sub_type": sub_lbl})
             continue
 
-        # --- 1. 動態隔日沖偵測（100% 對齊 profile_brokers，僅用 <= i 之近 60 日資料） ---
         w_start = max(0, i - lb + 1)
         win_mat = pure_mat[w_start : i + 1]
         net_60_vec = np.rint(win_mat.sum(axis=0))
@@ -2134,7 +2120,6 @@ def compute_daily_health_scores(
         if not np.any(wave_mask):
             wave_mask = np.ones(n_brokers, dtype=bool)
 
-        # --- 2. 全體波段分點合力當日狀態（純 NumPy 計算 20 日滾動控盤與 Z-Score） ---
         L = i + 1
         agg_daily_sub = pure_mat[:L, wave_mask].sum(axis=1)
         agg_cum_sub = np.cumsum(agg_daily_sub)
@@ -2171,7 +2156,6 @@ def compute_daily_health_scores(
             "cum_above_ma20": above_ma20_i,
         }
 
-        # --- 3. 當日滾動 60 日三大波段主力 ---
         wave_indices = np.where(wave_mask)[0]
         sum_60_wave = net_60_vec[wave_indices]
         pos_rel = np.where(sum_60_wave > 0)[0]
@@ -2199,7 +2183,6 @@ def compute_daily_health_scores(
 
         c5_z = _tail_zscore_dropna(c5_arr, i)
 
-        # --- 4. 主力分點廣度比（含外資共識與高廣度連日天數） ---
         row5_wave = pure_5d_mat[i, wave_mask]
         b5_i = int((row5_wave > 0).sum())
         s5_i = int((row5_wave < 0).sum())
@@ -2239,7 +2222,6 @@ def compute_daily_health_scores(
             "high_streak": high_streak_i,
         }
 
-        # --- 5. 當日隔日沖與本土波段買盤 ---
         dt_info_i = None
         if np.any(dt_mask) and vol_arr[i] > 0:
             dt_indices = np.where(dt_mask)[0]
@@ -2262,7 +2244,6 @@ def compute_daily_health_scores(
             if len(pos_dom) > 0:
                 dom_buy_5d = int(round(np.sort(pos_dom)[::-1][:3].sum()))
 
-        # --- 6. 投信當日狀態（保留相容欄位，方案 A 不計入總分） ---
         t_hold_i = None
         if not np.isnan(trust_pct_arr[i]):
             t_hold_i = round(float(trust_pct_arr[i]), 2)
@@ -2277,7 +2258,6 @@ def compute_daily_health_scores(
             "holding_pct": t_hold_i,
         }
 
-        # --- 7. 融資、借券（純 NumPy dropna 5 日變動）與集保大戶（附天數差） ---
         mg_i = None
         if not np.isnan(m_arr[i]):
             m_valid = m_arr[:L]
@@ -2559,7 +2539,12 @@ def delete_stock_database(stock_id: str) -> tuple[bool, str]:
 
 
 def update_stock_database(stock_id: str, incremental_days: int = None, sync_github: bool = True) -> bool:
-    """更新指定個股資料並存檔至 database/"""
+    """
+    更新指定個股資料並存檔至 database/：
+    - incremental_days=None（新增個股）：從 2026-01-02 至今全年度建檔
+    - incremental_days=22（全部更新）：近 1 個月滾動更新（既有老分點更新近 1 個月不洗洞；
+      自動掃描近 20 日前 10 大新波段主力並單獨補齊全年明細）
+    """
     stock_id = stock_id.strip()
     now_tw = _get_tw_now()
     end_date = now_tw.strftime("%Y-%m-%d")
@@ -2590,14 +2575,18 @@ def update_stock_database(stock_id: str, incremental_days: int = None, sync_gith
         and os.path.exists(chips_path)
     )
 
+    existing_chip_cols: set[str] = set()
     if is_incremental:
         df_price_old = pd.read_csv(price_path)
         df_chips_old = pd.read_csv(chips_path)
         if df_price_old.empty or df_chips_old.empty:
             is_incremental = False
+        else:
+            existing_chip_cols = {c for c in df_chips_old.columns if c not in ("date", "投信")}
 
     if is_incremental:
-        lookback_start = (now_tw - timedelta(days=12)).strftime("%Y-%m-%d")
+        lookback_cal_days = max(12, int(incremental_days * 1.8) + 10)
+        lookback_start = (now_tw - timedelta(days=lookback_cal_days)).strftime("%Y-%m-%d")
         df_price_recent, matched_suffix = fetch_price_history(stock_id, lookback_start, end_date, preferred_suffix)
         if df_price_recent.empty:
             return False
@@ -2640,8 +2629,12 @@ def update_stock_database(stock_id: str, incremental_days: int = None, sync_gith
     if issued_lots <= 0:
         issued_lots = fetch_issued_lots(stock_id, active_suffix)
 
-    # 3. 取得關鍵券商分點名單（增量模式鎖定既有追蹤池，防止分點雪球膨脹改寫歷史分數）
+    # 3. 取得關鍵券商分點名單
+    #    - 增量模式：保留既有追蹤池 ＋ 自動掃描近 20 日前 10 大（5買5賣）偵測新波段主力
+    #    - 全量建檔：抓取今年累計前 30 大 ＋ 近 20 日前 10 大
     merged_broker_map = {}
+    new_wave_broker_names: set[str] = set()
+
     if is_incremental and isinstance(saved_tracked_brokers, dict):
         for b_name, b_info in saved_tracked_brokers.items():
             if isinstance(b_info, dict) and (b_info.get("bhid") or b_info.get("b")):
@@ -2657,33 +2650,52 @@ def update_stock_database(stock_id: str, incremental_days: int = None, sync_gith
             debug_notes.append(f"分點清單異常: {broker_err}")
         for b in brokers:
             merged_broker_map[b["name"]] = b
-        if (not is_incremental) and len(df_price_recent) >= 3:
-            recent_3d_start = df_price_recent.tail(3)["date"].min()
-            recent_brokers, _, _ = fetch_top_brokers(session, stock_id, recent_3d_start, end_date, active_mirror, limit=20)
-            for rb in recent_brokers:
-                merged_broker_map[rb["name"]] = rb
+            if is_incremental and b["name"] not in existing_chip_cols:
+                new_wave_broker_names.add(b["name"])
+
+    if len(df_price_recent) >= 5:
+        recent_20d_start = df_price_recent.tail(min(20, len(df_price_recent)))["date"].min()
+        recent_20d_brokers, active_mirror, _ = fetch_top_brokers(
+            session, stock_id, recent_20d_start, end_date, active_mirror, limit=10
+        )
+        for rb in recent_20d_brokers:
+            b_name = rb["name"]
+            if b_name not in merged_broker_map:
+                merged_broker_map[b_name] = rb
+            if is_incremental and b_name not in existing_chip_cols:
+                new_wave_broker_names.add(b_name)
 
     target_brokers = list(merged_broker_map.values())
 
-    # 4. 併發抓取分點每日買賣超明細（未回傳的分點不填入欄位，讓增量合併保留舊值）
+    # 4. 併發抓取分點每日買賣超明細
+    #    - 老分點：只抓 fetch_start (近 1 個月)
+    #    - 增量模式中新冒出的波段主力：單獨從 START_DATE_FIXED 補齊全年明細（同為 1 次請求）
     fetched_broker_cols = []
+    new_full_broker_dfs: dict[str, pd.DataFrame] = {}
+
     if target_brokers:
         with ThreadPoolExecutor(max_workers=6) as executor:
-            future_map = {
-                executor.submit(fetch_broker_daily_history, stock_id, b, fetch_start, end_date, active_mirror): b
-                for b in target_brokers
-            }
+            future_map = {}
+            for b in target_brokers:
+                b_start = START_DATE_FIXED if (is_incremental and b["name"] in new_wave_broker_names) else fetch_start
+                future_map[executor.submit(fetch_broker_daily_history, stock_id, b, b_start, end_date, active_mirror)] = b
+
             for future in as_completed(future_map):
                 b = future_map[future]
+                b_name = b["name"]
                 try:
                     df_b = future.result()
-                    if not df_b.empty and b["name"] not in df_chips_recent.columns:
+                    if df_b.empty:
+                        continue
+                    if is_incremental and b_name in new_wave_broker_names:
+                        new_full_broker_dfs[b_name] = df_b
+                    elif b_name not in df_chips_recent.columns:
                         df_chips_recent = df_chips_recent.merge(df_b, on="date", how="left")
-                        fetched_broker_cols.append(b["name"])
+                        fetched_broker_cols.append(b_name)
                 except Exception:
                     continue
 
-    fetched_count = len(fetched_broker_cols)
+    fetched_count = len(fetched_broker_cols) + len(new_full_broker_dfs)
     if fetched_broker_cols:
         df_chips_recent[fetched_broker_cols] = df_chips_recent[fetched_broker_cols].fillna(0.0)
     if not is_incremental:
@@ -2743,6 +2755,13 @@ def update_stock_database(stock_id: str, incremental_days: int = None, sync_gith
         df_merged_c = df_old_c.reindex(index=all_dates_c, columns=all_cols_c)
         for col_c in df_new_c.columns:
             df_merged_c.loc[df_new_c.index, col_c] = df_new_c[col_c].combine_first(df_merged_c.loc[df_new_c.index, col_c])
+
+        # 將本次新發現的波段主力「全年度明細」直接併入完整日期索引
+        for b_name, df_b in new_full_broker_dfs.items():
+            s_b = df_b.drop_duplicates(subset=["date"], keep="last").copy()
+            s_b["date"] = s_b["date"].astype(str)
+            df_merged_c[b_name] = s_b.set_index("date")[b_name].reindex(df_merged_c.index).fillna(0.0)
+
         df_merged_c.index.name = "date"
         df_chips = df_merged_c.fillna(0.0).reset_index().sort_values("date").reset_index(drop=True)
         total_brokers = len([c for c in df_chips.columns if c not in ("date", "投信")])
@@ -2798,7 +2817,7 @@ def update_stock_database(stock_id: str, incremental_days: int = None, sync_gith
         vol_s_chk = pd.to_numeric(tmp_chk["volume"], errors="coerce").fillna(0.0)
         valid_broker_dates = set(tmp_chk.loc[(row_abs > 0) | (vol_s_chk <= 0), "date"].astype(str).tolist())
 
-    # 7. 補齊 _aux.csv 中的官方每日集中度（增量模式掃描近 7 日以自動修復偶發缺漏）
+    # 7. 補齊 _aux.csv 中的官方每日集中度（增量模式掃描近 1 個月以自動修復偶發缺漏）
     conc_scan_days = max(7, int(incremental_days) + 4) if is_incremental else None
     df_aux = _populate_aux_concentrations(
         stock_id=stock_id,
@@ -2859,7 +2878,7 @@ def update_stock_database(stock_id: str, incremental_days: int = None, sync_gith
     is_gha = os.environ.get("GITHUB_ACTIONS", "").lower() == "true"
     if is_gha:
         meta["github_sync"] = (
-            f"✅ GitHub Actions 自動增量同步（近 {incremental_days} 日）"
+            f"✅ GitHub Actions 自動滾動同步（近 {incremental_days} 日）"
             if is_incremental
             else "✅ GitHub Actions 自動同步"
         )
@@ -2897,9 +2916,9 @@ if __name__ == "__main__":
         for fname in os.listdir(DB_DIR)
         if fname.endswith("_price.csv")
     })
-    print(f"[Daily Update] 開始增量更新（近 3 個交易日）共 {len(existing_stocks)} 檔個股：{existing_stocks}", flush=True)
+    print(f"[Daily Update] 開始近 1 個月滾動更新（22 個交易日）共 {len(existing_stocks)} 檔個股：{existing_stocks}", flush=True)
     for sid in existing_stocks:
         t0 = time.time()
-        ok = update_stock_database(sid, incremental_days=3)
+        ok = update_stock_database(sid, incremental_days=22)
         status = "成功" if ok else "失敗"
         print(f"[Daily Update] {sid} 更新{status}（耗時 {time.time() - t0:.1f} 秒）", flush=True)
